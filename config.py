@@ -53,13 +53,16 @@ def load():
         exit(1)
 
     # Check if file has any config present in the bind section
-    if not config["FILES"]:
+    if config["BINDINGS"]:
         print("Found configuration in the bind section.")
-
-    
+        global bindings
+        bindings = config["BINDINGS"]
 
 def getRecFolder():
     return recFolder
 
 def getPlayFolder():
     return playFolder
+
+def getBinding(name):
+    return bindings[name]

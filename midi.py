@@ -7,16 +7,21 @@ def get_ports():
     inports = rtmidi.MidiIn().get_ports()
 
     global outport
+    global outportIdx 
+    outportIdx = -1
     outport = None
     global inport 
+    global inportIdx
+    inportIdx= -1
     inport = None
 
     key = "MIDIControl"
 
     #Search through array and find the output port
-    for port in outports:
+    for i, port in enumerate(outports):
         if port.find(key) > -1:
             outport = port
+            outportIdx = i
 
     if outport != None:
         print("Found MIDIControl output port: " + str(outport))
@@ -25,9 +30,10 @@ def get_ports():
         exit(1)
 
     #Search through array and find the input port
-    for port in inports:
+    for i, port in enumerate(inports):
         if port.find(key) > -1:
             inport = port
+            inportIdx = i
 
     if inport != None:
         print("Found MIDIControl input port: " + str(inport))
@@ -42,3 +48,16 @@ def get_inport():
 
 def get_outport():
     return outport
+
+def notes_off():
+    port = rtmidi.MidiOut()
+    port.open_port(outportIdx)
+    for i in range(0, 15, 1):
+        msg = [0b10110000 | i, 123, 0]
+        port.send_message(msg)
+
+def recording_on():
+    port = rtmidi.MidiOut()
+    port.open_port(outportIdx)
+    msg = [0b10110000 | i, 123, 0]
+    port.send_message(msg)
