@@ -49,6 +49,9 @@ def get_inport():
 def get_outport():
     return outport
 
+def get_outidx():
+    return outportIdx
+
 def notes_off():
     port = rtmidi.MidiOut()
     port.open_port(outportIdx)
