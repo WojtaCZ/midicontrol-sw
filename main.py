@@ -67,7 +67,8 @@ if not handler.connect():
 
 print()
 print("MIDIControl — interaktivní ovládání")
-print("Příkazy: play <píseň>, stop, record, list, on, off, status, quit")
+print("Příkazy: play <píseň>, stop, record, list, on, off, status,")
+print("         repeat, repeatmode, quit")
 print()
 
 try:
@@ -108,8 +109,27 @@ try:
             print("Vypínám proud...")
             handler.organOff()
 
+        elif command == "repeat":
+            if handler.is_playing():
+                handler.repeat_verse()
+                print("Skok na začátek aktuální sloky")
+            else:
+                print("Nic se nepřehrává")
+
+        elif command == "repeatmode":
+            if handler.is_playing():
+                enabled = handler.toggle_repeat()
+                print(f"Opakování sloky: {'zapnuto' if enabled else 'vypnuto'}")
+            else:
+                print("Nic se nepřehrává")
+
         elif command == "status":
             print(f"base_alive={handler.is_base_alive()}")
+            print(f"playing={handler.is_playing()}")
+            info = handler.get_current_display_info()
+            if info:
+                letter = info.letter if info.letter else '-'
+                print(f"  song={info.song}, verse={info.verse}, letter={letter}, led={info.led}")
             print("Dotaz na status...")
             handler.send_with_ack(
                 protocol.Addr.BASE,
@@ -121,7 +141,8 @@ try:
 
         else:
             print(f"Neznámý příkaz: {cmd}")
-            print("Příkazy: play <píseň>, stop, record, list, on, off, status, quit")
+            print("Příkazy: play <píseň>, stop, record, list, on, off, status,")
+            print("         repeat, repeatmode, quit")
 
 except KeyboardInterrupt:
     print("\nUkončuji...")
