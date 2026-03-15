@@ -7,10 +7,10 @@ def get_ports():
     inports = rtmidi.MidiIn().get_ports()
 
     global outport
-    global outportIdx 
+    global outportIdx
     outportIdx = -1
     outport = None
-    global inport 
+    global inport
     global inportIdx
     inportIdx= -1
     inport = None
@@ -55,9 +55,3 @@ def notes_off():
     for i in range(0, 15, 1):
         msg = [0b10110000 | i, 123, 0]
         port.send_message(msg)
-
-def recording_on():
-    port = rtmidi.MidiOut()
-    port.open_port(outportIdx)
-    msg = [0b10110000 | i, 123, 0]
-    port.send_message(msg)
