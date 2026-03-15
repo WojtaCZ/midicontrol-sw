@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MIDIControl PC companion app — a Python CLI tool that communicates with a MIDIControl hardware device (organ/MIDI controller) over a serial port. It plays and records MIDI files, controls power to the organ, and maintains a keepalive connection with the Base unit.
 
-The project language is Czech (comments, UI strings, variable names in some places).
+The project language is English (comments, UI strings, documentation).
 
 ## Running
 

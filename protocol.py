@@ -1,6 +1,6 @@
 """
-Komunikační protokol MIDIControl — Python implementace.
-Zrcadlí C++ knihovnu lib/protocol/.
+MIDIControl communication protocol — Python implementation.
+Mirrors the C++ library lib/protocol/.
 """
 
 from enum import IntEnum
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
-# --- Konstanty ---
+# --- Constants ---
 
 FRAME_START = 0x01  # SOH
 FRAME_END   = 0x04  # EOT
@@ -17,10 +17,10 @@ ESC         = 0x1B
 MAX_PAYLOAD  = 128
 HEADER_SIZE  = 4
 MAX_RETRIES  = 3
-RETRY_TIMEOUT = 0.5  # sekundy
+RETRY_TIMEOUT = 0.5  # seconds
 
 
-# --- Escape tabulka ---
+# --- Escape table ---
 
 ESCAPE_MAP = {
     0x01: 0x21,  # FRAME_START
@@ -33,7 +33,7 @@ ESCAPE_MAP = {
 UNESCAPE_MAP = {v: k for k, v in ESCAPE_MAP.items()}
 
 
-# --- Výčtové typy ---
+# --- Enums ---
 
 class Addr(IntEnum):
     PC        = 0x01
@@ -68,7 +68,7 @@ class NakReason(IntEnum):
     BUSY            = 0x04
 
 
-# --- Datové struktury ---
+# --- Data structures ---
 
 @dataclass
 class Packet:
@@ -134,10 +134,10 @@ def _unstuff_bytes(data: bytes) -> Optional[bytes]:
     return bytes(result)
 
 
-# --- Kódování a dekódování ---
+# --- Encoding and decoding ---
 
 def encode_packet(pkt: Packet) -> bytes:
-    """Zakóduje paket do drátového formátu."""
+    """Encode a packet into the wire format."""
     length = HEADER_SIZE + len(pkt.payload)
     raw = bytes([
         length,
@@ -154,7 +154,7 @@ def encode_packet(pkt: Packet) -> bytes:
 
 
 def decode_packet(data: bytes) -> Optional[Packet]:
-    """Dekóduje rámec (včetně FRAME_START/FRAME_END) na Packet."""
+    """Decode a frame (including FRAME_START/FRAME_END) into a Packet."""
     if len(data) < 2 or data[0] != FRAME_START or data[-1] != FRAME_END:
         return None
 
@@ -163,7 +163,7 @@ def decode_packet(data: bytes) -> Optional[Packet]:
     if unstuffed is None:
         return None
 
-    # Minimální délka: Length(1) + Header(4) + CRC(1) = 6
+    # Minimum length: Length(1) + Header(4) + CRC(1) = 6
     if len(unstuffed) < 6:
         return None
 
@@ -179,7 +179,7 @@ def decode_packet(data: bytes) -> Optional[Packet]:
     if len(unstuffed) != expected_total:
         return None
 
-    # CRC kontrola
+    # CRC check
     expected_crc = crc8(unstuffed[:-1])
     if expected_crc != unstuffed[-1]:
         return None
@@ -193,17 +193,17 @@ def decode_packet(data: bytes) -> Optional[Packet]:
     )
 
 
-# --- Stavový automat pro příjem ---
+# --- Byte-by-byte receive state machine ---
 
 class PacketParser:
-    """Parser pro příjem paketů bajt po bajtu (ISR-safe logika)."""
+    """Parser for receiving packets byte by byte (ISR-safe logic)."""
 
     def __init__(self):
         self._receiving = False
         self._buffer = bytearray()
 
     def feed(self, byte: int) -> Optional[Packet]:
-        """Přijme jeden bajt. Vrací Packet při kompletním přijetí rámce."""
+        """Feed one byte. Returns a Packet when a complete frame is received."""
         if not self._receiving:
             if byte == FRAME_START:
                 self._receiving = True
@@ -238,7 +238,7 @@ class PacketParser:
             )
 
         if byte == FRAME_START:
-            # Nový rámec — zahodíme rozpracovaný
+            # New frame — discard the incomplete one
             self._buffer = bytearray()
             return None
 

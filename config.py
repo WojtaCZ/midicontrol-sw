@@ -19,14 +19,14 @@ def load():
 
     # Check if file has any config present in the correct section
     if not config["FILES"]:
-        print("Config file doesnt contain any config!")
+        print("Config file doesn't contain any config!")
         exit(1)
 
     # Try to load the play folder config
     try:
         global playFolder
-        playFolder= config["FILES"]["PlayFolder"]
-    except:
+        playFolder = config["FILES"]["PlayFolder"]
+    except KeyError:
         print("PlayFolder is not specified in config file!")
         exit(1)
 
@@ -34,20 +34,20 @@ def load():
     try:
         global recFolder
         recFolder = config["FILES"]["RecordFolder"]
-    except:
-        print("PlayFolder is not specified in config file!")
+    except KeyError:
+        print("RecordFolder is not specified in config file!")
         exit(1)
-        
-    #Check if the specified play folder is actually present on the system    
+
+    #Check if the specified play folder is actually present on the system
     if os.path.isdir(playFolder):
-        print("Succesfully found the play folder.")
+        print("Successfully found the play folder.")
     else:
         print("Unable to find the play folder!")
         exit(1)
 
-    #Check if the specified record folder is actually present on the system   
+    #Check if the specified record folder is actually present on the system
     if os.path.isdir(recFolder):
-        print("Succesfully found the recordings folder.")
+        print("Successfully found the recordings folder.")
     else:
         print("Unable to find the recordings folder!")
         exit(1)

@@ -18,27 +18,27 @@ recorder = None
 
 
 class CommHandler:
-    """Správce binární komunikace přes protokol MIDIControl."""
+    """Binary communication manager for the MIDIControl protocol."""
 
     def __init__(self):
         self.serial = None
         self.parser = protocol.PacketParser()
         self.packet_id = 0
-        self.pending_acks = {}  # packet_id → (timestamp, retries, msg_type, dest, payload)
+        self.pending_acks = {}  # packet_id -> (timestamp, retries, msg_type, dest, payload)
         self._lock = threading.Lock()
         self._reader_thread = None
         self._keepalive_thread = None
         self._running = False
         self._callbacks = []  # list of (msg_type, callback) or (None, callback) for all
-        self._last_base_keepalive = 0.0  # čas posledního KEEPALIVE_ACK z Base
+        self._last_base_keepalive = 0.0  # time of last KEEPALIVE_ACK from Base
 
     def connect(self):
-        """Najde a otevře sériový port MIDIControl."""
+        """Find and open the MIDIControl serial port."""
         port = get_port()
         if port is None:
             return False
         self.serial = serial.Serial('/dev/' + str(port.name), baudrate=115200, timeout=0.1)
-        print(f"Otevřen sériový port: {port.name}")
+        print(f"Opened serial port: {port.name}")
         self._running = True
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
@@ -48,7 +48,7 @@ class CommHandler:
         return True
 
     def disconnect(self):
-        """Zavře sériový port."""
+        """Close the serial port."""
         self._running = False
         if self._reader_thread:
             self._reader_thread.join(timeout=2)
@@ -58,7 +58,7 @@ class CommHandler:
             self.serial.close()
 
     def on_packet(self, callback, msg_type=None):
-        """Registrace callbacku pro příjem paketů. msg_type=None pro všechny."""
+        """Register a callback for incoming packets. msg_type=None for all."""
         self._callbacks.append((msg_type, callback))
 
     def next_packet_id(self):
@@ -67,7 +67,7 @@ class CommHandler:
         return pid
 
     def send(self, dest, msg_type, payload=b''):
-        """Odešle paket bez čekání na ACK."""
+        """Send a packet without waiting for ACK."""
         pkt = protocol.Packet(
             source=protocol.Addr.PC,
             dest=dest,
@@ -82,14 +82,14 @@ class CommHandler:
         return pkt.packet_id
 
     def send_with_ack(self, dest, msg_type, payload=b''):
-        """Odešle paket a zaregistruje čekání na ACK."""
+        """Send a packet and register it for ACK tracking."""
         pid = self.send(dest, msg_type, payload)
         with self._lock:
             self.pending_acks[pid] = (time.time(), 0, msg_type, dest, payload)
         return pid
 
     def _reader_loop(self):
-        """Pozadí: čte bajty ze sériového portu a zpracovává pakety."""
+        """Background: reads bytes from serial port and processes packets."""
         while self._running:
             try:
                 if self.serial and self.serial.is_open and self.serial.in_waiting > 0:
@@ -103,19 +103,19 @@ class CommHandler:
 
                 self.check_timeouts()
             except serial.SerialException:
-                print("Chyba sériového portu!")
+                print("Serial port error!")
                 self._running = False
                 break
 
     def _dispatch_packet(self, pkt):
-        """Směrování přijatého paketu na handlery a callbacky."""
+        """Route received packet to internal handlers and callbacks."""
         self._handle_internal(pkt)
         for msg_type_filter, callback in self._callbacks:
             if msg_type_filter is None or msg_type_filter == pkt.msg_type:
                 callback(pkt)
 
     def _handle_internal(self, pkt):
-        """Interní zpracování ACK/NAK/KEEPALIVE_ACK."""
+        """Internal handling of ACK/NAK/KEEPALIVE_ACK."""
         msg = pkt.msg_type
         if msg == protocol.MsgType.ACK:
             if len(pkt.payload) >= 1:
@@ -131,20 +131,20 @@ class CommHandler:
             self._last_base_keepalive = time.time()
 
     def _keepalive_loop(self):
-        """Periodicky odesílá KEEPALIVE na Base každé 2 sekundy."""
+        """Periodically sends KEEPALIVE to Base every 2 seconds."""
         while self._running:
             self.send(protocol.Addr.BASE, protocol.MsgType.KEEPALIVE)
-            for _ in range(20):  # 20 × 100ms = 2s, ale kontrolujeme _running
+            for _ in range(20):  # 20 x 100ms = 2s, but we check _running
                 if not self._running:
                     break
                 time.sleep(0.1)
 
     def is_base_alive(self):
-        """Vrací True, pokud Base odpověděl KEEPALIVE_ACK v posledních 5 sekundách."""
+        """Returns True if Base responded with KEEPALIVE_ACK in the last 5 seconds."""
         return (time.time() - self._last_base_keepalive) < 5.0
 
     def check_timeouts(self):
-        """Kontrola timeoutů a opakování nepotvrzených paketů."""
+        """Check timeouts and retry unacknowledged packets."""
         now = time.time()
         to_remove = []
 
@@ -166,9 +166,9 @@ class CommHandler:
                         if self.serial and self.serial.is_open:
                             self.serial.write(raw)
                         self.pending_acks[pid] = (now, retries + 1, msg_type, dest, payload)
-                    print(f"Retry #{retries + 1} pro PacketID={pid:#04x}")
+                    print(f"Retry #{retries + 1} for PacketID={pid:#04x}")
                 else:
-                    print(f"Timeout pro PacketID={pid:#04x} po {protocol.MAX_RETRIES} pokusech")
+                    print(f"Timeout for PacketID={pid:#04x} after {protocol.MAX_RETRIES} attempts")
                     to_remove.append(pid)
 
         if to_remove:
@@ -176,7 +176,7 @@ class CommHandler:
                 for pid in to_remove:
                     self.pending_acks.pop(pid, None)
 
-    # --- Pohodlné funkce ---
+    # --- Convenience functions ---
 
     def play_song(self, song_name):
         global _player
@@ -213,7 +213,7 @@ class CommHandler:
         )
 
     def _on_playback_finished(self):
-        """Callback volaný z MidiPlayer po dokončení přehrávání."""
+        """Callback called from MidiPlayer when playback finishes."""
         global _player
         _player = None
         self.organOff()
@@ -223,8 +223,8 @@ class CommHandler:
         )
 
     def send_now_playing_info(self, info: DisplayInfo):
-        """Odešle NOW_PLAYING_INFO na Base (bez ACK — časté aktualizace)."""
-        # Kódování song do 2 bajtů BCD
+        """Send NOW_PLAYING_INFO to Base (no ACK — frequent updates)."""
+        # Encode song into 2 BCD bytes
         song = info.song
         d3 = (song // 1000) % 10
         d2 = (song // 100) % 10
@@ -255,25 +255,25 @@ class CommHandler:
         )
 
     def repeat_verse(self):
-        """Skočí na začátek aktuální sloky."""
+        """Jump to the start of the current verse."""
         if _player and _player.playing:
             _player.repeat_verse()
 
     def toggle_repeat(self):
-        """Přepne režim automatického opakování sloky."""
+        """Toggle automatic verse repeat mode."""
         if _player and _player.playing:
             enabled = _player.toggle_repeat()
             return enabled
         return False
 
     def get_current_display_info(self):
-        """Vrací aktuální DisplayInfo z přehrávače, nebo None."""
+        """Returns current DisplayInfo from the player, or None."""
         if _player and _player.playing:
             return _player.current_info
         return None
 
     def is_playing(self):
-        """Vrací True pokud probíhá přehrávání."""
+        """Returns True if playback is in progress."""
         return _player is not None and _player.playing
 
     def record_song(self):

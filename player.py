@@ -1,9 +1,9 @@
 """
-MidiPlayer — vlastní MIDI přehrávač s podporou SysEx zpráv MIDIControl.
+MidiPlayer — custom MIDI player with MIDIControl SysEx message support.
 
-Přehrává MIDI soubory přes python-rtmidi, zachytává MIDIControl SysEx
-zprávy (header 0x4D 0x43) a předává display info přes callback.
-Podpora opakování slok (verse repeat).
+Plays MIDI files via python-rtmidi, captures MIDIControl SysEx
+messages (header 0x4D 0x43) and forwards display info via callback.
+Supports verse repeat.
 """
 
 import threading
@@ -15,16 +15,16 @@ import mido
 import rtmidi
 
 
-# --- SysEx konstanty ---
+# --- SysEx constants ---
 
 SYSEX_HEADER = [0x4D, 0x43]  # 'M', 'C'
 
-# Cílové adresy v SysEx (target byte)
+# Target addresses in SysEx (target byte)
 SYSEX_TARGET_PC = 0x01
 SYSEX_TARGET_DISPLAY = 0x02
 SYSEX_TARGET_ALL = 0x00
 
-# LED barvy
+# LED colors
 LED_RED = 1
 LED_GREEN = 2
 LED_BLUE = 3
@@ -34,23 +34,23 @@ LED_OFF = 0x0F
 
 @dataclass
 class DisplayInfo:
-    """Informace o aktuálním stavu displeje z SysEx zprávy."""
+    """Current display state from a SysEx message."""
     song: int = 0       # 0-1999
     verse: int = 0      # 0-99
-    letter: str = ''    # 'A'-'D' nebo '' (vypnuto)
+    letter: str = ''    # 'A'-'D' or '' (off)
     led: int = LED_OFF  # 1=red, 2=green, 3=blue, 4=yellow, 0x0F=off
 
 
 @dataclass
 class VerseAnchor:
-    """Kotva sloky v MIDI souboru."""
-    verse: int           # Číslo sloky
-    abs_time: float      # Absolutní čas v sekundách
-    event_index: int     # Index události v merged seznamu
+    """Verse anchor point in a MIDI file."""
+    verse: int           # Verse number
+    abs_time: float      # Absolute time in seconds
+    event_index: int     # Event index in the merged list
 
 
 class MidiPlayer:
-    """Přehrávač MIDI souborů s podporou MIDIControl SysEx zpráv."""
+    """MIDI file player with MIDIControl SysEx message support."""
 
     def __init__(self, outport_index: int):
         self._outport_index = outport_index
@@ -65,14 +65,14 @@ class MidiPlayer:
 
         # Verse repeat
         self._verse_anchors: List[VerseAnchor] = []
-        self._current_verse_idx = 0  # Index do _verse_anchors
+        self._current_verse_idx = 0  # Index into _verse_anchors
         self._repeat_mode = False
         self._jump_target_idx: Optional[int] = None
 
-        # Aktuální display info
+        # Current display info
         self.current_info: Optional[DisplayInfo] = None
 
-        # Merged události pro přehrávání
+        # Merged events for playback
         self._events: list = []
 
     @property
@@ -84,7 +84,7 @@ class MidiPlayer:
         return self._repeat_mode
 
     def play(self, filepath: str):
-        """Spustí přehrávání MIDI souboru v daemon vlákně."""
+        """Start playing a MIDI file in a daemon thread."""
         if self._playing:
             self.stop()
 
@@ -102,7 +102,7 @@ class MidiPlayer:
         self._thread.start()
 
     def stop(self):
-        """Zastaví přehrávání."""
+        """Stop playback."""
         if not self._playing:
             return
         self._stop_event.set()
@@ -111,28 +111,28 @@ class MidiPlayer:
         self._playing = False
 
     def repeat_verse(self):
-        """Skočí na začátek aktuální sloky."""
+        """Jump to the start of the current verse."""
         if not self._playing or not self._verse_anchors:
             return
         self._jump_target_idx = self._verse_anchors[self._current_verse_idx].event_index
         self._jump_event.set()
 
     def toggle_repeat(self):
-        """Přepne režim automatického opakování sloky."""
+        """Toggle automatic verse repeat mode."""
         self._repeat_mode = not self._repeat_mode
         return self._repeat_mode
 
-    # --- Interní metody ---
+    # --- Internal methods ---
 
     @staticmethod
     def _merge_tracks(mid: mido.MidiFile) -> list:
-        """Sloučí všechny stopy do seznamu (abs_time, msg) seřazeného podle času."""
+        """Merge all tracks into a list of (abs_time, msg) sorted by time."""
         events = []
         for msg in mid:
-            # mido iteruje merged s delta časy; potřebujeme absolutní
+            # mido iterates merged with delta times; we need absolute
             pass
 
-        # Použijeme mido merge, ale počítáme absolutní časy sami
+        # Use mido merge, but compute absolute times ourselves
         abs_time = 0.0
         for msg in mid:
             abs_time += msg.time
@@ -141,58 +141,47 @@ class MidiPlayer:
 
     @staticmethod
     def _parse_sysex(data: list) -> Optional[DisplayInfo]:
-        """Parsuje MIDIControl SysEx payload.
+        """Parse MIDIControl SysEx payload (full display, target=0x00).
 
-        Formát: [0x4D, 0x43, target, song_h, song_l, verse, letter_led]
-        - song_h/song_l: po 2 nibblech, každý nibble = cifra (0-9) nebo F=mezera
-        - verse: 2 nibbly
-        - letter_led: horní nibble = písmeno (A=0xA..D=0xD, F=off),
-                      dolní nibble = LED (1-4, F=off)
+        Format: [0x4D, 0x43, 0x01, 0x00, S3, S2, S1, S0, V1, V0, LETTER, LED]
+        - S3..S0: individual song digits (0-9, 0xF=blank), 1 byte each
+        - V1, V0: verse digits (0-9, 0xF=blank), 1 byte each
+        - LETTER: 0xA-0xD = A-D, 0xF = off
+        - LED: 1-4 = color, 0xF = off
         """
-        # Kontrola headeru
-        if len(data) < 7:
+        # Check header and minimum length
+        if len(data) < 12:
             return None
         if data[0] != 0x4D or data[1] != 0x43:
             return None
 
-        target = data[2]
-        song_h = data[3]
-        song_l = data[4]
-        verse_byte = data[5]
-        letter_led = data[6]
-
-        # Dekódování song (4 cifry z BCD nibblů)
-        d3 = (song_h >> 4) & 0x0F  # tisíce
-        d2 = song_h & 0x0F         # stovky
-        d1 = (song_l >> 4) & 0x0F  # desítky
-        d0 = song_l & 0x0F         # jednotky
-
+        # Decode song (4 individual digits)
         song = 0
-        for d in [d3, d2, d1, d0]:
+        for d in data[4:8]:
             if d <= 9:
                 song = song * 10 + d
-            # F = mezera, přeskakujeme (song zůstává jako je)
+            # 0xF = blank, skip
 
-        # Dekódování verse (2 BCD nibbly)
-        v1 = (verse_byte >> 4) & 0x0F
-        v0 = verse_byte & 0x0F
+        # Decode verse (2 individual digits)
         verse = 0
+        v1 = data[8]
+        v0 = data[9]
         if v1 <= 9:
             verse += v1 * 10
         if v0 <= 9:
             verse += v0
 
-        # Dekódování letter
-        letter_nibble = (letter_led >> 4) & 0x0F
-        if 0x0A <= letter_nibble <= 0x0D:
-            letter = chr(ord('A') + (letter_nibble - 0x0A))
+        # Decode letter
+        letter_byte = data[10]
+        if 0x0A <= letter_byte <= 0x0D:
+            letter = chr(ord('A') + (letter_byte - 0x0A))
         else:
             letter = ''
 
-        # Dekódování LED
-        led_nibble = letter_led & 0x0F
-        if led_nibble in (1, 2, 3, 4):
-            led = led_nibble
+        # Decode LED
+        led_byte = data[11]
+        if led_byte in (1, 2, 3, 4):
+            led = led_byte
         else:
             led = LED_OFF
 
@@ -200,7 +189,7 @@ class MidiPlayer:
 
     @staticmethod
     def _scan_verse_anchors(events: list) -> List[VerseAnchor]:
-        """Najde kotvy slok (SysEx zprávy s verse info) v merged událostech."""
+        """Find verse anchors (SysEx messages with verse info) in merged events."""
         anchors = []
         seen_verses = set()
 
@@ -210,7 +199,7 @@ class MidiPlayer:
             info = MidiPlayer._parse_sysex(list(msg.data))
             if info is None:
                 continue
-            # Každá nová sloka = kotva
+            # Each new verse = anchor
             if info.verse not in seen_verses:
                 seen_verses.add(info.verse)
                 anchors.append(VerseAnchor(
@@ -222,12 +211,12 @@ class MidiPlayer:
         return anchors
 
     def _notes_off(self, port: rtmidi.MidiOut):
-        """Vypne všechny noty na všech kanálech."""
+        """Turn off all notes on all channels."""
         for ch in range(16):
             port.send_message([0xB0 | ch, 123, 0])
 
     def _playback_loop(self):
-        """Hlavní smyčka přehrávání — běží v daemon vlákně."""
+        """Main playback loop — runs in a daemon thread."""
         port = rtmidi.MidiOut()
         port.open_port(self._outport_index)
 
@@ -241,16 +230,16 @@ class MidiPlayer:
                 self.on_finished()
 
     def _play_from(self, start_index: int, start_time: float, port: rtmidi.MidiOut):
-        """Přehraje události od daného indexu/času."""
+        """Play events from the given index/time."""
         playback_start = time.monotonic()
-        time_offset = start_time  # Absolutní čas v MIDI, kde začínáme
+        time_offset = start_time  # Absolute MIDI time where we start
 
         idx = start_index
         while idx < len(self._events):
             if self._stop_event.is_set():
                 return
 
-            # Kontrola jump
+            # Check for jump
             if self._jump_event.is_set():
                 self._jump_event.clear()
                 target_idx = self._jump_target_idx
@@ -258,20 +247,20 @@ class MidiPlayer:
                     self._notes_off(port)
                     target_time = self._events[target_idx][0]
                     self._jump_target_idx = None
-                    # Rekurzivní volání pro nový startovní bod
+                    # Recursive call for the new starting point
                     self._play_from(target_idx, target_time, port)
                     return
 
             abs_time, msg = self._events[idx]
 
-            # Čekání na správný čas
+            # Wait for the correct time
             target_wall = playback_start + (abs_time - time_offset)
             while True:
                 now = time.monotonic()
                 remaining = target_wall - now
                 if remaining <= 0:
                     break
-                # Spíme po malých krocích pro responsivní stop/jump
+                # Sleep in small increments for responsive stop/jump
                 sleep_time = min(remaining, 0.01)
                 time.sleep(sleep_time)
 
@@ -287,12 +276,12 @@ class MidiPlayer:
                         self._play_from(target_idx, target_time, port)
                         return
 
-            # Zpracování události
+            # Process event
             if msg.type == 'sysex':
                 info = self._parse_sysex(list(msg.data))
                 if info is not None:
                     self.current_info = info
-                    # Aktualizace verse indexu
+                    # Update verse index
                     for i, anchor in enumerate(self._verse_anchors):
                         if anchor.event_index == idx:
                             self._current_verse_idx = i
@@ -300,21 +289,21 @@ class MidiPlayer:
                     # Callback
                     if self.on_display_info:
                         self.on_display_info(info)
-                # SysEx se NEposílá na MIDI výstup
+                # SysEx is NOT sent to MIDI output
             elif not msg.is_meta:
-                # Odeslání MIDI zprávy na výstup
+                # Send MIDI message to output
                 port.send_message(msg.bytes())
 
             idx += 1
 
-            # Auto-repeat na konci sloky
+            # Auto-repeat at verse end
             if self._repeat_mode and self._verse_anchors:
-                # Pokud jsme na poslední události před další slokou
+                # If we're at the last event before the next verse
                 next_verse_idx = self._current_verse_idx + 1
                 if next_verse_idx < len(self._verse_anchors):
                     next_anchor = self._verse_anchors[next_verse_idx]
                     if idx >= next_anchor.event_index:
-                        # Skok zpět na začátek aktuální sloky
+                        # Jump back to the start of the current verse
                         self._notes_off(port)
                         cur_anchor = self._verse_anchors[self._current_verse_idx]
                         self._play_from(cur_anchor.event_index, cur_anchor.abs_time, port)
