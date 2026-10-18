@@ -37,6 +37,15 @@ void encodeDigits(int value, size_t n, std::vector<uint8_t>& out) {
     out.insert(out.end(), digits.begin(), digits.end());
 }
 
+// Copy per-digit bytes as authored, mapping anything that is not a digit to a
+// blank so the result is always a valid BCD nibble.
+template <size_t N>
+std::array<uint8_t, N> rawDigits(const uint8_t* d) {
+    std::array<uint8_t, N> out{};
+    for (size_t i = 0; i < N; ++i) out[i] = d[i] <= 9 ? d[i] : BLANK_DIGIT;
+    return out;
+}
+
 char decodeLetter(uint8_t b) {
     if (b >= 0x0A && b <= 0x0D) return static_cast<char>('A' + (b - 0x0A));
     return LETTER_OFF;
@@ -75,6 +84,8 @@ std::optional<DisplayInfo> parse(const uint8_t* body, size_t len) {
             if (n < 8) return std::nullopt;  // 4 song + 2 verse + letter + led
             info.song = decodeDigits(d, 4);
             info.verse = decodeDigits(d + 4, 2);
+            info.songDigits = rawDigits<4>(d);
+            info.verseDigits = rawDigits<2>(d + 4);
             info.letter = decodeLetter(d[6]);
             info.led = decodeLed(d[7]);
             info.hasSong = info.hasVerse = info.hasLetter = info.hasLed = true;
@@ -82,11 +93,13 @@ std::optional<DisplayInfo> parse(const uint8_t* body, size_t len) {
         case Target::Song:
             if (n < 4) return std::nullopt;
             info.song = decodeDigits(d, 4);
+            info.songDigits = rawDigits<4>(d);
             info.hasSong = true;
             break;
         case Target::Verse:
             if (n < 2) return std::nullopt;
             info.verse = decodeDigits(d, 2);
+            info.verseDigits = rawDigits<2>(d);
             info.hasVerse = true;
             break;
         case Target::Letter:

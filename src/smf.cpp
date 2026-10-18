@@ -56,6 +56,45 @@ int channelDataLen(uint8_t status) {
     }
 }
 
+// Read a SysEx body (the reader is positioned just after the F0/F7 status)
+// and return it WITHOUT the surrounding F0/F7. Two framings are accepted:
+//
+//   standard SMF:  F0 <VLQ length> data... F7   (length counts the F7)
+//   project files: F0 data... F7                (no length; scan to F7)
+//
+// The standard form is taken when the VLQ length fits in the track, every
+// byte before the last is 7-bit data and the last one is F7. Otherwise the
+// raw form is assumed. The two cannot be confused for MIDIControl messages:
+// read as a length, the raw form's first data byte (0x4D) would span past the
+// raw form's own F7, which the 7-bit check rejects.
+std::vector<uint8_t> readSysEx(Reader& tr) {
+    Reader probe = tr;
+    bool standard = false;
+    uint32_t len = 0;
+    try {
+        len = probe.vlq();
+        if (len >= 1 && len <= probe.remaining() && probe.p[len - 1] == 0xF7) {
+            standard = std::all_of(probe.p, probe.p + len - 1,
+                                   [](uint8_t b) { return b < 0x80; });
+        }
+    } catch (const ParseError&) {
+        standard = false;
+    }
+    if (standard) {
+        std::vector<uint8_t> body(probe.p, probe.p + len - 1);
+        tr.p = probe.p + len;
+        return body;
+    }
+
+    std::vector<uint8_t> body;
+    while (!tr.atEnd()) {
+        uint8_t b = *tr.p++;
+        if (b == 0xF7) break;
+        body.push_back(b);
+    }
+    return body;
+}
+
 }  // namespace
 
 MidiFile parse(const std::vector<uint8_t>& data) {
@@ -113,16 +152,10 @@ MidiFile parse(const std::vector<uint8_t>& data) {
                 mf.events.push_back(std::move(ev));
                 runningStatus = 0;  // meta cancels running status
             } else if (status == 0xF0 || status == 0xF7) {
-                // SysEx: scan to the terminating F7 (these files omit the SMF
-                // length prefix and embed a raw F0 .. F7 run).
                 Event ev;
                 ev.tick = absTick;
                 ev.kind = EventKind::SysEx;
-                while (tr.p < trackEnd) {
-                    uint8_t b = *tr.p++;
-                    if (b == 0xF7) break;
-                    ev.bytes.push_back(b);
-                }
+                ev.bytes = readSysEx(tr);
                 mf.events.push_back(std::move(ev));
                 runningStatus = 0;  // sysex cancels running status
             } else {

@@ -1,6 +1,7 @@
 #ifndef MIDICONTROL_SERIAL_PORT_HPP
 #define MIDICONTROL_SERIAL_PORT_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -21,6 +22,11 @@ public:
     void close();
     bool isOpen() const { return _fd >= 0; }
 
+    // False once a read/write failed with a hard error or the device node is
+    // gone (USB unplugged / device rebooted). The port then needs reopening.
+    bool healthy() const;
+    const std::string& path() const { return _path; }
+
     // Write all bytes. Returns false on error.
     bool write(const uint8_t* data, size_t len);
     bool write(const std::vector<uint8_t>& data) { return write(data.data(), data.size()); }
@@ -31,6 +37,8 @@ public:
 
 private:
     int _fd = -1;
+    std::atomic<bool> _failed{false};  // set by read (reader thread) and write (any thread)
+    std::string _path;
 };
 
 // Find the MIDIControl serial device by USB VID:PID (default abcd:1234) using

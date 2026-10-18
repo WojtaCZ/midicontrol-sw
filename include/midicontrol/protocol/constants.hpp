@@ -44,6 +44,19 @@ inline constexpr uint16_t MAX_FRAME_SIZE   = 2 + (1 + HEADER_SIZE + MAX_PAYLOAD_
 inline constexpr uint8_t  MAX_RETRIES     = 3;
 inline constexpr uint16_t RETRY_TIMEOUT_MS = 500;
 
+// Keepalive: PC -> Base and Base -> Remote; the peer is considered lost after
+// KEEPALIVE_LOSS_MS without a KEEPALIVE_ACK.
+inline constexpr uint16_t KEEPALIVE_PERIOD_MS = 2000;
+inline constexpr uint16_t KEEPALIVE_LOSS_MS   = 6000;
+
+// Song code in PLAY_SONG / SIGNAL_PLAYING: ASCII [0-9A-Z], e.g. "406A".
+inline constexpr uint8_t MAX_SONG_CODE_LEN = 8;
+
+// NOW_PLAYING_INFO field values.
+inline constexpr uint8_t NPI_NO_CHANGE   = 0xFF;  // field unchanged
+inline constexpr uint8_t NPI_BLANK       = 0xFE;  // blank the field (song number / verse)
+inline constexpr uint8_t NPI_DIGIT_BLANK = 0x0F;  // BCD nibble: blank digit
+
 }  // namespace mc::protocol
 
 #endif  // MIDICONTROL_PROTOCOL_CONSTANTS_HPP

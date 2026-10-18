@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "midicontrol/comm.hpp"
+#include "midicontrol/firmware_image.hpp"
 
 namespace mc {
 
@@ -29,9 +30,6 @@ private:
 
     CommHandler& _comm;
 };
-
-// IEEE-802.3 CRC-32 (matches zlib and the firmware-side boot::crc32).
-uint32_t crc32(const uint8_t* data, std::size_t len);
 
 }  // namespace mc
 

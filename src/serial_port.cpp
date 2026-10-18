@@ -44,6 +44,8 @@ bool SerialPort::open(const std::string& path, int baud) {
     close();
     _fd = ::open(path.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (_fd < 0) return false;
+    _failed = false;
+    _path = path;
 
     termios tty {};
     if (tcgetattr(_fd, &tty) != 0) {
@@ -82,6 +84,11 @@ void SerialPort::close() {
     }
 }
 
+bool SerialPort::healthy() const {
+    if (_fd < 0 || _failed) return false;
+    return ::access(_path.c_str(), F_OK) == 0;
+}
+
 bool SerialPort::write(const uint8_t* data, size_t len) {
     if (_fd < 0) return false;
     size_t written = 0;
@@ -89,6 +96,7 @@ bool SerialPort::write(const uint8_t* data, size_t len) {
         ssize_t n = ::write(_fd, data + written, len - written);
         if (n < 0) {
             if (errno == EINTR) continue;
+            if (errno != EAGAIN) _failed = true;
             return false;
         }
         written += static_cast<size_t>(n);
@@ -101,6 +109,7 @@ std::vector<uint8_t> SerialPort::read(size_t maxLen) {
     if (_fd < 0) return buf;
     buf.resize(maxLen);
     ssize_t n = ::read(_fd, buf.data(), maxLen);
+    if (n < 0 && errno != EINTR && errno != EAGAIN) _failed = true;
     if (n <= 0) {
         buf.clear();
     } else {

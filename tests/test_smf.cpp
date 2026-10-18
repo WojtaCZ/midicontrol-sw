@@ -101,3 +101,56 @@ TEST(smf_rejects_garbage) {
     }
     CHECK(threw);
 }
+
+namespace {
+// Minimal format-0 SMF around one track body.
+std::vector<uint8_t> smfWithTrack(const std::vector<uint8_t>& track) {
+    std::vector<uint8_t> f{'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1, 0x01, 0xE0,
+                           'M', 'T', 'r', 'k', 0, 0, 0, static_cast<uint8_t>(track.size())};
+    f.insert(f.end(), track.begin(), track.end());
+    return f;
+}
+
+const std::vector<uint8_t> kAnchorBody{0x4D, 0x43, 0x01, 0x00, 0x0F, 0x04, 0x00,
+                                       0x01, 0x0F, 0x01, 0x0F, 0x0F};
+
+void checkAnchorThenNote(const smf::MidiFile& mf) {
+    CHECK_EQ(mf.events.size(), 3u);
+    CHECK(mf.events[0].kind == smf::EventKind::SysEx);
+    CHECK(mf.events[0].bytes == kAnchorBody);
+    auto info = sysex::parse(mf.events[0].bytes);
+    CHECK(info.has_value());
+    CHECK_EQ(info->song, 401);
+    CHECK(mf.events[1].isNoteOn());  // the following event is parsed correctly
+    CHECK(mf.events[2].kind == smf::EventKind::Meta);
+}
+}  // namespace
+
+TEST(smf_sysex_raw_form_without_length) {
+    // As in the project files: F0 <data> F7, no length.
+    std::vector<uint8_t> track{0x00, 0xF0};
+    track.insert(track.end(), kAnchorBody.begin(), kAnchorBody.end());
+    track.insert(track.end(), {0xF7, 0x00, 0x90, 0x3C, 0x40, 0x00, 0xFF, 0x2F, 0x00});
+    checkAnchorThenNote(smf::parse(smfWithTrack(track)));
+}
+
+TEST(smf_sysex_standard_form_with_length) {
+    // As re-saved by a standard editor: F0 <VLQ len incl. F7> <data> F7.
+    std::vector<uint8_t> track{0x00, 0xF0, static_cast<uint8_t>(kAnchorBody.size() + 1)};
+    track.insert(track.end(), kAnchorBody.begin(), kAnchorBody.end());
+    track.insert(track.end(), {0xF7, 0x00, 0x90, 0x3C, 0x40, 0x00, 0xFF, 0x2F, 0x00});
+    checkAnchorThenNote(smf::parse(smfWithTrack(track)));
+}
+
+TEST(smf_sysex_empty_raw_and_standard) {
+    // 523.mid style "F0 F7" and standard "F0 01 F7".
+    for (auto sysex : {std::vector<uint8_t>{0xF0, 0xF7}, std::vector<uint8_t>{0xF0, 0x01, 0xF7}}) {
+        std::vector<uint8_t> track{0x00};
+        track.insert(track.end(), sysex.begin(), sysex.end());
+        track.insert(track.end(), {0x00, 0x90, 0x3C, 0x40, 0x00, 0xFF, 0x2F, 0x00});
+        auto mf = smf::parse(smfWithTrack(track));
+        CHECK_EQ(mf.events.size(), 3u);
+        CHECK(mf.events[0].bytes.empty());
+        CHECK(mf.events[1].isNoteOn());
+    }
+}

@@ -1,0 +1,25 @@
+# systemd user unit for the MIDIControl PC player.
+#
+# Install:  cmake --install build            (default prefix /usr/local)
+# Config:   ~/.config/midicontrol/config.conf
+#           (start from @CMAKE_INSTALL_FULL_DATADIR@/midicontrol/config.conf.example)
+# Enable:   systemctl --user daemon-reload
+#           systemctl --user enable --now midicontrol.service
+# Start at boot without a login session: loginctl enable-linger $USER
+# Logs:     journalctl --user -u midicontrol -f
+#
+# The user needs access to the serial device and ALSA sequencer
+# (usually the "uucp"/"dialout" and "audio" groups).
+
+[Unit]
+Description=MIDIControl organ player
+After=sound.target
+
+[Service]
+Type=simple
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/midicontrol --headless
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -23,6 +24,27 @@ std::string upper(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
     return s;
+}
+
+int parseInt(const std::string& key, const std::string& value, int minValue) {
+    size_t used = 0;
+    int v = 0;
+    try {
+        v = std::stoi(value, &used);
+    } catch (const std::exception&) {
+        used = 0;
+    }
+    if (used == 0 || used != value.size() || v < minValue) {
+        throw std::runtime_error("config: invalid value for " + key + ": '" + value + "'");
+    }
+    return v;
+}
+
+bool parseBool(const std::string& key, const std::string& value) {
+    std::string v = upper(value);
+    if (v == "1" || v == "TRUE" || v == "YES" || v == "ON") return true;
+    if (v == "0" || v == "FALSE" || v == "NO" || v == "OFF") return false;
+    throw std::runtime_error("config: invalid boolean for " + key + ": '" + value + "'");
 }
 
 bool isDir(const std::string& path) {
@@ -75,6 +97,22 @@ Config parseConfig(const std::string& iniText) {
     auto bindIt = sections.find("BINDINGS");
     if (bindIt != sections.end()) cfg.bindings = bindIt->second;
 
+    auto playbackIt = sections.find("PLAYBACK");
+    if (playbackIt != sections.end()) {
+        const auto& pb = playbackIt->second;
+        auto getInt = [&](const char* key, int& out, int minValue) {
+            auto it = pb.find(key);
+            if (it != pb.end()) out = parseInt(std::string(key), it->second, minValue);
+        };
+        auto getBool = [&](const char* key, bool& out) {
+            auto it = pb.find(key);
+            if (it != pb.end()) out = parseBool(std::string(key), it->second);
+        };
+        getInt("WarmupMs", cfg.warmupMs, 0);
+        getBool("KeepPowerOn", cfg.keepPowerOn);
+        getInt("VerseGapMs", cfg.verseGapMs, 0);
+    }
+
     return cfg;
 }
 
@@ -85,6 +123,13 @@ Config loadConfig(const std::string& path) {
     ss << in.rdbuf();
     Config cfg = parseConfig(ss.str());
 
+    std::string configDir = ".";
+    auto slash = path.find_last_of('/');
+    if (slash != std::string::npos) configDir = slash == 0 ? "/" : path.substr(0, slash);
+    const char* home = std::getenv("HOME");
+    cfg.playFolder = resolveFolder(cfg.playFolder, configDir, home ? home : "");
+    cfg.recFolder = resolveFolder(cfg.recFolder, configDir, home ? home : "");
+
     if (!isDir(cfg.playFolder)) {
         throw std::runtime_error("config: play folder not found: " + cfg.playFolder);
     }
@@ -92,6 +137,33 @@ Config loadConfig(const std::string& path) {
         throw std::runtime_error("config: record folder not found: " + cfg.recFolder);
     }
     return cfg;
+}
+
+std::string resolveFolder(const std::string& value, const std::string& configDir,
+                          const std::string& home) {
+    if (value == "~") return home;
+    if (value.rfind("~/", 0) == 0) return home + value.substr(1);
+    if (!value.empty() && value[0] == '/') return value;
+    if (value.empty()) return value;
+    return configDir + "/" + value;
+}
+
+std::string resolveConfigPath(const std::string& cliPath, const EnvLookup& getenv,
+                              const FileExists& exists) {
+    if (!cliPath.empty()) return cliPath;
+    const char* env = getenv("MIDICONTROL_CONFIG");
+    if (env && *env) return env;
+
+    std::string xdg;
+    const char* xdgHome = getenv("XDG_CONFIG_HOME");
+    const char* home = getenv("HOME");
+    if (xdgHome && *xdgHome) {
+        xdg = std::string(xdgHome) + "/midicontrol/config.conf";
+    } else if (home && *home) {
+        xdg = std::string(home) + "/.config/midicontrol/config.conf";
+    }
+    if (!xdg.empty() && exists(xdg)) return xdg;
+    return "config.conf";
 }
 
 std::optional<std::string> Config::binding(const std::string& key) const {

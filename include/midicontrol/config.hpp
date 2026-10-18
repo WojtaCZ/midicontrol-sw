@@ -1,20 +1,29 @@
 #ifndef MIDICONTROL_CONFIG_HPP
 #define MIDICONTROL_CONFIG_HPP
 
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
 
-// Loads config.conf (INI format), mirroring the Python config.py:
-//   [FILES]    PlayFolder=..., RecordFolder=...
-//   [BINDINGS] Bind0=song.mid, ...
+// Loads config.conf (INI format):
+//   [FILES]    PlayFolder=..., RecordFolder=...   (~/ and paths relative to
+//              the config file are resolved by loadConfig)
+//   [PLAYBACK] WarmupMs, KeepPowerOn, VerseGapMs (all optional, see Config)
+// The song structure (prelude, verses) comes from the anchors in each MIDI file.
+//   [BINDINGS] Bind0=song.mid, ...   (parsed, not used yet)
 namespace mc {
 
 struct Config {
     std::string playFolder;
     std::string recFolder;
     std::map<std::string, std::string> bindings;  // e.g. "Bind0" -> "song name"
+
+    // [PLAYBACK]
+    int warmupMs = 3000;               // organ warm-up after power-on, before the first note
+    bool keepPowerOn = false;          // leave organ power on between songs
+    int verseGapMs = 0;                // silence before a section repeated with add-verse
 
     // Look up a button binding by key (e.g. "Bind0"). nullopt if absent.
     std::optional<std::string> binding(const std::string& key) const;
@@ -29,8 +38,25 @@ std::map<std::string, std::map<std::string, std::string>> parseIni(const std::st
 Config parseConfig(const std::string& iniText);
 
 // Load and validate config from a file path, checking that the folders exist.
+// Folder values starting with "~/" are expanded with $HOME and relative ones
+// are taken relative to the config file's directory.
 // Throws std::runtime_error on any problem.
 Config loadConfig(const std::string& path);
+
+// Resolve a folder value from the config (see loadConfig).
+std::string resolveFolder(const std::string& value, const std::string& configDir,
+                          const std::string& home);
+
+// Pick the config file, first match wins:
+//   1. `cliPath` (--config) if non-empty
+//   2. $MIDICONTROL_CONFIG if set
+//   3. $XDG_CONFIG_HOME/midicontrol/config.conf (default ~/.config/...) if it exists
+//   4. ./config.conf
+// `getenv` and `exists` are injected for testing.
+using EnvLookup = std::function<const char*(const char*)>;
+using FileExists = std::function<bool(const std::string&)>;
+std::string resolveConfigPath(const std::string& cliPath, const EnvLookup& getenv,
+                              const FileExists& exists);
 
 }  // namespace mc
 

@@ -11,9 +11,8 @@
 //
 // NOTE on SysEx framing: the song files produced for this project embed SysEx
 // as a raw F0 ... F7 run *without* the standard SMF variable-length size
-// prefix. This reader therefore reads SysEx by scanning to the terminating F7
-// rather than trusting a length byte. Regular (length-prefixed) SysEx that also
-// ends in F7 is handled by the same scan.
+// prefix. Files re-saved by a standard editor use the normal F0 <len> ... F7
+// form. The reader accepts both (see readSysEx in smf.cpp).
 namespace mc::smf {
 
 enum class EventKind : uint8_t {

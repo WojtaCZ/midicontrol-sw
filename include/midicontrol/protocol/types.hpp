@@ -17,6 +17,7 @@ enum class MsgType : uint8_t {
     STOP_SONG        = 0x11,
     RECORD_SONG      = 0x12,
     NOW_PLAYING_INFO = 0x13,
+    REPLAY_ANCHOR    = 0x14,  // remote -> PC: "add verse" - play the current verse once more after it ends; no payload
 
     GET_SONG_LIST    = 0x20,
     SONG_LIST_RESP   = 0x21,
@@ -24,6 +25,7 @@ enum class MsgType : uint8_t {
     SIGNAL_PLAYING   = 0x30,
     SIGNAL_RECORDING = 0x31,
     SIGNAL_STOPPED   = 0x32,
+    SIGNAL_ANCHOR    = 0x33,  // PC -> remote: playback entered a section; payload = null-terminated ASCII label ("Sloka 2")
 
     SET_CURRENT      = 0x40,
 
@@ -56,6 +58,9 @@ enum class NakReason : uint8_t {
     INVALID_PAYLOAD = 0x02,
     CRC_ERROR       = 0x03,
     BUSY            = 0x04,
+    NOT_PLAYING     = 0x05,  // command needs active playback (REPLAY_ANCHOR)
+    UNREACHABLE     = 0x06,  // base: destination node not connected, packet not forwarded
+    NOT_FOUND       = 0x07,  // PC: song code not in library
 };
 
 // A decoded/decodable packet. Unlike the fixed-size firmware struct (which

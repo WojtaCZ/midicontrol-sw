@@ -1,6 +1,7 @@
 #ifndef MIDICONTROL_SYSEX_HPP
 #define MIDICONTROL_SYSEX_HPP
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -62,6 +63,13 @@ struct DisplayInfo {
     bool hasVerse = false;
     bool hasLetter = false;
     bool hasLed = false;
+
+    // The digits exactly as authored (one per byte, 0-9 or BLANK_DIGIT), so a
+    // number placed off its usual right-aligned position (e.g. "513 " or verse
+    // "1 ") can be forwarded to the indicator unchanged. Valid when hasSong /
+    // hasVerse. Not part of operator== (which compares decoded values).
+    std::array<uint8_t, 4> songDigits{BLANK_DIGIT, BLANK_DIGIT, BLANK_DIGIT, BLANK_DIGIT};
+    std::array<uint8_t, 2> verseDigits{BLANK_DIGIT, BLANK_DIGIT};
 
     bool operator==(const DisplayInfo& o) const {
         return song == o.song && verse == o.verse && letter == o.letter && led == o.led &&

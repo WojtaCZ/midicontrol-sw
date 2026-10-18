@@ -13,7 +13,8 @@ add_compile_options(-Wall -Wextra)
 
 # ---------------------------------------------------------------------------
 # Core library: pure logic with NO hardware dependencies. Unit-testable
-# anywhere. (protocol, SysEx codec, SMF reader, verse scan, config loader)
+# anywhere. (protocol, SysEx codec, SMF reader, verse scan, config loader,
+# indicator encoding, song library, playback sequencing, packet dispatch)
 # ---------------------------------------------------------------------------
 add_library(midicontrol_core
     src/protocol/crc8.cpp
@@ -23,6 +24,11 @@ add_library(midicontrol_core
     src/smf.cpp
     src/verse.cpp
     src/config.cpp
+    src/display.cpp
+    src/songs.cpp
+    src/playback.cpp
+    src/dispatch.cpp
+    src/firmware_image.cpp
 )
 target_include_directories(midicontrol_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -38,6 +44,11 @@ add_executable(midicontrol_tests
     tests/test_sysex.cpp
     tests/test_smf.cpp
     tests/test_config.cpp
+    tests/test_display.cpp
+    tests/test_songs.cpp
+    tests/test_playback.cpp
+    tests/test_dispatch.cpp
+    tests/test_firmware_image.cpp
 )
 target_link_libraries(midicontrol_tests PRIVATE midicontrol_core)
 target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
@@ -75,6 +86,17 @@ if(RTMIDI_FOUND)
     if(RTMIDI_LIBRARY_DIRS)
         target_link_directories(midicontrol PRIVATE ${RTMIDI_LIBRARY_DIRS})
     endif()
+
+    # ---- Install: binary, example config, systemd user unit ----
+    include(GNUInstallDirs)
+    install(TARGETS midicontrol RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES config.conf
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/midicontrol
+            RENAME config.conf.example)
+    configure_file(packaging/midicontrol.service.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/midicontrol.service @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/midicontrol.service
+            DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user)
 else()
     message(WARNING "RtMidi not found - skipping the 'midicontrol' app target "
                     "(core library and tests will still build).")
