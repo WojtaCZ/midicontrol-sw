@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
@@ -39,6 +40,18 @@ public:
     uint8_t send(uint8_t dest, mc::protocol::MsgType type, const std::vector<uint8_t>& payload = {});
     uint8_t sendWithAck(uint8_t dest, mc::protocol::MsgType type,
                         const std::vector<uint8_t>& payload = {});
+
+    // Synchronous reliable send: transmits the packet and blocks until a matching
+    // ACK arrives (true) or a NAK / the retry budget is exhausted (false). Used by
+    // the firmware-update flow, which needs per-chunk confirmation. Does not use
+    // the background _pending retry machinery.
+    bool sendReliable(uint8_t dest, mc::protocol::MsgType type,
+                      const std::vector<uint8_t>& payload, int timeoutMs = 600,
+                      int maxRetries = 5);
+
+    // Reconnect to a (re-enumerated) serial device — used after the base reboots
+    // into / out of its USB bootloader.
+    bool reconnect(const std::string& devicePath);
 
     // High-level commands (mirror comm.py).
     void playSong(const std::string& songName);
@@ -88,6 +101,13 @@ private:
 
     std::mutex _mutex;  // guards _serial writes, _pending
     std::map<uint8_t, Pending> _pending;
+
+    // Synchronous ACK wait used by sendReliable().
+    std::mutex _ackMutex;
+    std::condition_variable _ackCv;
+    uint8_t _awaitPid = 0;
+    bool _awaitActive = false;
+    int _awaitResult = 0;  // 0 = none, 1 = ACK, 2 = NAK
 
     std::thread _readerThread;
     std::thread _keepaliveThread;

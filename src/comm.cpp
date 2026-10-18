@@ -60,6 +60,43 @@ uint8_t CommHandler::sendWithAck(uint8_t dest, MsgType type, const std::vector<u
     return pid;
 }
 
+bool CommHandler::sendReliable(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload,
+                               int timeoutMs, int maxRetries) {
+    for (int attempt = 0; attempt <= maxRetries; ++attempt) {
+        uint8_t pid = nextPacketId();
+        Packet pkt(ADDR_PC, dest, pid, type, payload);
+        auto raw = encode(pkt);
+
+        {
+            std::lock_guard<std::mutex> lk(_ackMutex);
+            _awaitPid = pid;
+            _awaitResult = 0;
+            _awaitActive = true;
+        }
+        {
+            std::lock_guard<std::mutex> lk(_mutex);
+            if (_serial.isOpen()) _serial.write(raw);
+        }
+
+        std::unique_lock<std::mutex> lk(_ackMutex);
+        bool signalled = _ackCv.wait_for(lk, std::chrono::milliseconds(timeoutMs),
+                                         [&] { return _awaitResult != 0; });
+        int result = _awaitResult;
+        _awaitActive = false;
+        lk.unlock();
+
+        if (signalled && result == 1) return true;   // ACK
+        if (signalled && result == 2) return false;  // NAK — caller aborts
+        // timeout: retry
+    }
+    return false;
+}
+
+bool CommHandler::reconnect(const std::string& devicePath) {
+    disconnect();
+    return connect(devicePath);
+}
+
 void CommHandler::readerLoop() {
     while (_running.load()) {
         auto data = _serial.read(256);
@@ -84,14 +121,28 @@ void CommHandler::handleInternal(const Packet& pkt) {
     switch (pkt.msgType) {
         case MsgType::ACK:
             if (!pkt.payload.empty()) {
-                std::lock_guard<std::mutex> lk(_mutex);
-                _pending.erase(pkt.payload[0]);
+                {
+                    std::lock_guard<std::mutex> lk(_mutex);
+                    _pending.erase(pkt.payload[0]);
+                }
+                std::lock_guard<std::mutex> lk(_ackMutex);
+                if (_awaitActive && pkt.payload[0] == _awaitPid) {
+                    _awaitResult = 1;
+                    _ackCv.notify_all();
+                }
             }
             break;
         case MsgType::NAK:
             if (pkt.payload.size() >= 2) {
-                std::lock_guard<std::mutex> lk(_mutex);
-                _pending.erase(pkt.payload[0]);
+                {
+                    std::lock_guard<std::mutex> lk(_mutex);
+                    _pending.erase(pkt.payload[0]);
+                }
+                std::lock_guard<std::mutex> lk(_ackMutex);
+                if (_awaitActive && pkt.payload[0] == _awaitPid) {
+                    _awaitResult = 2;
+                    _ackCv.notify_all();
+                }
             }
             break;
         case MsgType::KEEPALIVE_ACK:

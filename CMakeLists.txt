@@ -64,6 +64,7 @@ if(RTMIDI_FOUND)
     add_executable(midicontrol
         src/main.cpp
         src/comm.cpp
+        src/firmware_update.cpp
         src/player.cpp
         src/midi_ports.cpp
         src/serial_port.cpp

@@ -7,6 +7,7 @@
 
 #include "midicontrol/comm.hpp"
 #include "midicontrol/config.hpp"
+#include "midicontrol/firmware_update.hpp"
 #include "midicontrol/midi_ports.hpp"
 #include "midicontrol/protocol/constants.hpp"
 #include "midicontrol/protocol/types.hpp"
@@ -174,7 +175,7 @@ int main() {
 
     std::cout << "\nMIDIControl - interactive control\n";
     std::cout << "Commands: play <song>, stop, record, list, on, off, status,\n";
-    std::cout << "          repeat, repeatmode, quit\n\n";
+    std::cout << "          repeat, repeatmode, update <base|remote> <file.bin>, quit\n\n";
 
     std::string line;
     while (true) {
@@ -235,12 +236,35 @@ int main() {
             if (handler.hasDisplayInfo()) printDisplayInfo(handler.currentDisplayInfo());
             std::cout << "Requesting status...\n";
             handler.sendWithAck(mc::protocol::ADDR_BASE, MsgType::GET_STATUS);
+        } else if (cmd == "update") {
+            std::istringstream uss(rest);
+            std::string target, path;
+            uss >> target;
+            std::getline(uss, path);
+            if (!path.empty() && path[0] == ' ') path.erase(0, 1);
+            std::transform(target.begin(), target.end(), target.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if ((target != "base" && target != "remote") || path.empty()) {
+                std::cout << "Usage: update <base|remote> <firmware.bin>\n";
+            } else {
+                auto progress = [](std::size_t done, std::size_t total) {
+                    int pct = total ? static_cast<int>(done * 100 / total) : 100;
+                    int bars = pct / 5;
+                    std::cout << "\r  [" << std::string(bars, '#') << std::string(20 - bars, ' ')
+                              << "] " << pct << "%  (" << done << "/" << total << ")" << std::flush;
+                };
+                FirmwareUpdater updater(handler);
+                bool ok = (target == "base") ? updater.updateBase(path, progress)
+                                             : updater.updateRemote(path, progress);
+                std::cout << "\n" << (ok ? "Firmware update complete." : "Firmware update FAILED.")
+                          << "\n";
+            }
         } else if (cmd == "quit" || cmd == "exit") {
             break;
         } else {
             std::cout << "Unknown command: " << line << "\n";
             std::cout << "Commands: play <song>, stop, record, list, on, off, status,\n";
-            std::cout << "          repeat, repeatmode, quit\n";
+            std::cout << "          repeat, repeatmode, update <base|remote> <file.bin>, quit\n";
         }
     }
 
