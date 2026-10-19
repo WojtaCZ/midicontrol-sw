@@ -2,9 +2,11 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 
+#include <cctype>
 #include <cerrno>
 #include <cstring>
 #include <fstream>
@@ -44,6 +46,11 @@ bool SerialPort::open(const std::string& path, int baud) {
     close();
     _fd = ::open(path.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (_fd < 0) return false;
+    // Exclusive: a second process can never open (and steal) the base link.
+    if (ioctl(_fd, TIOCEXCL) != 0) {
+        close();
+        return false;
+    }
     _failed = false;
     _path = path;
 
@@ -118,9 +125,27 @@ std::vector<uint8_t> SerialPort::read(size_t maxLen) {
     return buf;
 }
 
+namespace {
+
+constexpr const char* kSysTty = "/sys/class/tty";
+
+// idVendor/idProduct of the USB device behind tty `name` ("ttyACM0"), found
+// by walking up the device symlink chain. False if it isn't a USB device.
+bool usbIds(const std::string& name, std::string& vid, std::string& pid) {
+    std::string base = std::string(kSysTty) + "/" + name + "/device";
+    for (int depth = 0; depth < 6; ++depth) {
+        vid = readSysfsLine(base + "/idVendor");
+        pid = readSysfsLine(base + "/idProduct");
+        if (!vid.empty() && !pid.empty()) return true;
+        base += "/..";
+    }
+    return false;
+}
+
+}  // namespace
+
 std::optional<std::string> findMidiControlPort(const std::string& vid, const std::string& pid) {
     // Scan tty devices and resolve each to its USB device's idVendor/idProduct.
-    const char* kSysTty = "/sys/class/tty";
     DIR* dir = opendir(kSysTty);
     if (!dir) return std::nullopt;
 
@@ -129,24 +154,23 @@ std::optional<std::string> findMidiControlPort(const std::string& vid, const std
     while ((ent = readdir(dir)) != nullptr) {
         std::string name = ent->d_name;
         if (name.rfind("ttyACM", 0) != 0 && name.rfind("ttyUSB", 0) != 0) continue;
-
-        // Walk up the device symlink chain looking for idVendor/idProduct.
-        std::string base = std::string(kSysTty) + "/" + name + "/device";
-        for (int depth = 0; depth < 6; ++depth) {
-            std::string vidStr = readSysfsLine(base + "/idVendor");
-            std::string pidStr = readSysfsLine(base + "/idProduct");
-            if (!vidStr.empty() && !pidStr.empty()) {
-                if (vidStr == vid && pidStr == pid) {
-                    result = "/dev/" + name;
-                }
-                break;
-            }
-            base += "/..";
+        std::string v, p;
+        if (usbIds(name, v, p) && v == vid && p == pid) {
+            result = "/dev/" + name;
+            break;
         }
-        if (result) break;
     }
     closedir(dir);
     return result;
+}
+
+std::string usbIdOf(const std::string& devicePath) {
+    auto slash = devicePath.find_last_of('/');
+    std::string vid, pid;
+    if (!usbIds(devicePath.substr(slash == std::string::npos ? 0 : slash + 1), vid, pid)) return {};
+    std::string id = vid + ":" + pid;
+    for (char& ch : id) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    return id;
 }
 
 }  // namespace mc

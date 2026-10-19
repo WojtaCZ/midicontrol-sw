@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "midicontrol/protocol/parser.hpp"
 #include "midicontrol/protocol/types.hpp"
 #include "midicontrol/serial_port.hpp"
+#include "midicontrol/status.hpp"
 
 namespace mc {
 
@@ -31,9 +33,13 @@ namespace mc {
 // Threads:
 //  - reader:    serial RX, parsing, ACK/NAK replies (Dispatcher), retries,
 //               reconnect when the port disappears. Never sleeps on commands.
-//  - keepalive: KEEPALIVE to the base every 2 s, base-loss detection.
+//  - keepalive: KEEPALIVE to the base every 2 s, base-loss detection,
+//               GET_STATUS poll every 5 s, MIDI port check every 10 s.
 //  - control:   the only thread that creates, starts, stops and destroys the
 //               Player (command queue). Organ warm-up waits happen here.
+//
+// Every thread reports into the StatusRegistry (counters per peer, link and
+// playback state, packet events) and stamps a heartbeat for the watchdog.
 class CommHandler : private CommandSink {
 public:
     // Finds the base's MIDI ports at play/record time (they re-enumerate
@@ -42,7 +48,8 @@ public:
     // Finds the base's serial device (auto-reconnect).
     using SerialFinder = std::function<std::optional<std::string>()>;
 
-    CommHandler(const Config& config, MidiPortFinder midiFinder);
+    CommHandler(const Config& config, MidiPortFinder midiFinder,
+                mc::status::StatusRegistry& status);
     ~CommHandler();
 
     // Start the worker threads. With a device path the port is opened right
@@ -98,6 +105,20 @@ public:
     bool isConnected() const;
     bool isBaseAlive() const;
 
+    // STATUS_RESP flags as the base reports them.
+    struct BaseStatus {
+        bool ble = false;
+        bool relay = false;
+        bool display = false;
+        bool pc = false;
+    };
+    // Interactive `status`: send GET_STATUS and wait for the answer.
+    std::optional<BaseStatus> requestStatus(int timeoutMs = 1500);
+
+    // Liveness for the systemd watchdog: every worker thread stamped its
+    // heartbeat within `maxAge` (reader/keepalive only while they run).
+    bool threadsAlive(std::chrono::milliseconds maxAge) const;
+
 private:
     using Clock = std::chrono::steady_clock;
 
@@ -129,11 +150,21 @@ private:
     void keepaliveLoop();
     void controlLoop();
     void dispatchPacket(const mc::protocol::Packet& pkt);
-    void handleAck(uint8_t pid, bool nak);
+    void handleAck(uint8_t pid, bool nak, uint8_t reason = 0);
     void checkTimeouts();
     void handleSerialLoss();
     bool tryReopen();
     uint8_t nextPacketId();
+
+    // Status instrumentation.
+    void noteTx(const mc::protocol::Packet& pkt, bool retransmit);
+    void noteRx(const mc::protocol::Packet& pkt);
+    bool isRoutine(const mc::protocol::Packet& pkt, bool tx);
+    void noteConnected(const std::string& path, bool reconnect);
+    void pollStatus();
+    void refreshMidiPort();
+    void playbackEnded(const std::string& how, const char* counter);
+    static int64_t steadyMs();
 
     void post(Command cmd);
     // Wait up to `ms`; true if it elapsed, false if a new command arrived.
@@ -146,6 +177,7 @@ private:
     void stopRecorder();
 
     Config _config;
+    mc::status::StatusRegistry& _status;
     MidiPortFinder _midiFinder;
     SerialFinder _serialFinder;
     std::string _devicePath;
@@ -174,6 +206,35 @@ private:
     std::atomic<bool> _baseLostReported{false};
 
     PacketCallback _callback;
+    uint64_t _badFrames = 0;  // reader thread: parser count already reported
+
+    // Routine traffic (background GET_STATUS poll and its ACKs) gets no events.
+    std::mutex _routineMutex;
+    std::set<uint8_t> _pollPids;      // our poll GET_STATUS packet ids
+    std::set<uint8_t> _pollRespPids;  // the base's STATUS_RESP ids we ACK
+    bool _pollOutstanding = false;    // keepalive thread + reader (under _routineMutex)
+    uint8_t _pollPid = 0;
+    int64_t _pollSentMs = 0;
+
+    // Interactive status request (requestStatus).
+    std::mutex _statusMutex;
+    std::condition_variable _statusCv;
+    int _statusWaiters = 0;
+    uint64_t _statusSeq = 0;
+    BaseStatus _lastStatus;
+
+    // Heartbeats (steady ms) for threadsAlive().
+    std::atomic<int64_t> _hbReader{0};
+    std::atomic<int64_t> _hbKeepalive{0};
+    std::atomic<int64_t> _hbControl{0};
+    std::atomic<bool> _everConnected{false};
+    std::atomic<int64_t> _reconnects{0};
+
+    // Song being played: sections visited (playback thread appends, control
+    // thread reads after the player has been joined).
+    std::mutex _songMutex;
+    std::string _songCode;
+    std::vector<std::string> _songSections;
 
     // Control thread + queue.
     std::thread _controlThread;

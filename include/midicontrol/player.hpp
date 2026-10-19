@@ -44,6 +44,8 @@ public:
     bool addVerse();
     // Current section label ("Sloka 2 +1"), empty when idle. Thread-safe.
     std::string label() const;
+    // Number of sections of the loaded song (0 before play()).
+    size_t sectionCount() const { return _engine ? _engine->sections().size() : 0; }
 
 private:
     void playbackLoop();

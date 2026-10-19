@@ -2,9 +2,9 @@
 
 #include <chrono>
 #include <fstream>
-#include <iostream>
 #include <thread>
 
+#include "midicontrol/log.hpp"
 #include "midicontrol/protocol/constants.hpp"
 #include "midicontrol/serial_port.hpp"
 
@@ -57,26 +57,44 @@ bool isFailure(std::optional<uint8_t> s) {
     return st == FwStatus::CRC_FAIL || st == FwStatus::WRITE_ERROR || st == FwStatus::BAD_SIZE;
 }
 
+std::string versionText(uint32_t v) {
+    return std::to_string(v >> 16) + "." + std::to_string((v >> 8) & 0xFF) + "." +
+           std::to_string(v & 0xFF);
+}
+
+std::string withStatus(std::optional<uint8_t> s) {
+    return s ? std::string(" (") + statusText(*s) + ")" : std::string();
+}
+
+}  // namespace
+
+void FirmwareUpdater::info(const std::string& text) {
+    mc::log::info(mc::status::Node::Software, text);
+    if (_say) _say(text);
+}
+
+void FirmwareUpdater::error(const std::string& text) {
+    mc::log::error(mc::status::Node::Software, text);
+    if (_say) _say(text);
+}
+
 // Read and validate an update file for `board`; empty on error (reported).
-std::vector<uint8_t> loadImage(const std::string& path, uint8_t board) {
+std::vector<uint8_t> FirmwareUpdater::loadImage(const std::string& path, uint8_t board) {
     auto image = readFile(path);
     if (image.empty()) {
-        std::cerr << "firmware update: cannot read " << path << "\n";
+        error("firmware update: cannot read " + path);
         return {};
     }
     fwimage::Info info;
     auto c = fwimage::check(image, board, &info);
     if (c != fwimage::Check::Ok) {
-        std::cerr << "firmware update: refusing " << path << ": " << fwimage::describe(c) << "\n";
+        error("firmware update: refusing " + path + ": " + fwimage::describe(c));
         return {};
     }
-    std::cout << "Image " << path << ": " << info.imageSize << " bytes, version "
-              << (info.version >> 16) << "." << ((info.version >> 8) & 0xFF) << "."
-              << (info.version & 0xFF) << "\n";
+    this->info("Image " + path + ": " + std::to_string(info.imageSize) + " bytes, version " +
+               versionText(info.version));
     return image;
 }
-
-}  // namespace
 
 bool FirmwareUpdater::streamImage(uint8_t target, const std::vector<uint8_t>& image, Progress cb) {
     const uint32_t size = static_cast<uint32_t>(image.size());
@@ -94,14 +112,13 @@ bool FirmwareUpdater::streamImage(uint8_t target, const std::vector<uint8_t>& im
     if (!_comm.sendReliable(target, MsgType::FW_UPDATE_START, start, startTimeout,
                             /*maxRetries=*/3)) {
         auto st = _comm.waitFwStatus(500);
-        std::cerr << "firmware update: device did not accept FW_UPDATE_START"
-                  << (st ? std::string(" (") + statusText(*st) + ")" : std::string()) << "\n";
+        error("firmware update: device did not accept FW_UPDATE_START" + withStatus(st));
         return false;
     }
     // READY follows the ACK; tolerate its absence, fail on an error status.
     auto st = _comm.waitFwStatus(1000);
     if (isFailure(st)) {
-        std::cerr << "firmware update: device reported " << statusText(*st) << " after START\n";
+        error(std::string("firmware update: device reported ") + statusText(*st) + " after START");
         return false;
     }
 
@@ -115,14 +132,14 @@ bool FirmwareUpdater::streamImage(uint8_t target, const std::vector<uint8_t>& im
         if (!_comm.sendReliable(target, MsgType::FW_UPDATE_DATA, payload, /*timeoutMs=*/1500,
                                 /*maxRetries=*/8)) {
             auto s = _comm.waitFwStatus(300);
-            std::cerr << "\nfirmware update: chunk at offset " << off << " failed"
-                      << (s ? std::string(" (") + statusText(*s) + ")" : std::string()) << "\n";
+            error("firmware update: chunk at offset " + std::to_string(off) + " failed" +
+                  withStatus(s));
             return false;
         }
         auto s = _comm.takeFwStatus();
         if (isFailure(s)) {
-            std::cerr << "\nfirmware update: device reported " << statusText(*s) << " at offset "
-                      << off << "\n";
+            error(std::string("firmware update: device reported ") + statusText(*s) +
+                  " at offset " + std::to_string(off));
             return false;
         }
         if (cb) cb(off + n, size);
@@ -135,15 +152,12 @@ bool FirmwareUpdater::streamImage(uint8_t target, const std::vector<uint8_t>& im
                                     /*maxRetries=*/3);
     auto endStatus = _comm.waitFwStatus(acked ? 3000 : 500);
     if (!acked || isFailure(endStatus)) {
-        std::cerr << "\nfirmware update: device rejected the image at FW_UPDATE_END"
-                  << (endStatus ? std::string(" (") + statusText(*endStatus) + ")"
-                                : std::string())
-                  << "\n";
+        error("firmware update: device rejected the image at FW_UPDATE_END" +
+              withStatus(endStatus));
         return false;
     }
     if (!endStatus) {
-        std::cerr << "\nfirmware update: END was ACKed but no CRC_OK status arrived; "
-                     "assuming success\n";
+        info("firmware update: END was ACKed but no CRC_OK status arrived; assuming success");
     }
     return true;
 }
@@ -151,11 +165,10 @@ bool FirmwareUpdater::streamImage(uint8_t target, const std::vector<uint8_t>& im
 bool FirmwareUpdater::updateRemote(const std::string& binPath, Progress cb) {
     auto image = loadImage(binPath, protocol::ADDR_REMOTE);
     if (image.empty()) return false;
-    std::cout << "Updating remote over BLE (" << image.size() << " bytes)...\n";
+    info("Updating remote over BLE (" + std::to_string(image.size()) + " bytes)...");
     bool ok = streamImage(protocol::ADDR_REMOTE, image, cb);
     if (ok) {
-        std::cout << "\nRemote accepted the image; it will reboot and the bootloader "
-                     "will apply it.\n";
+        info("Remote accepted the image; it will reboot and the bootloader will apply it.");
     }
     return ok;
 }
@@ -163,10 +176,10 @@ bool FirmwareUpdater::updateRemote(const std::string& binPath, Progress cb) {
 bool FirmwareUpdater::updateBase(const std::string& binPath, Progress cb) {
     auto image = loadImage(binPath, protocol::ADDR_BASE);
     if (image.empty()) return false;
-    std::cout << "Updating base over USB (" << image.size() << " bytes)...\n";
+    info("Updating base over USB (" + std::to_string(image.size()) + " bytes)...");
 
     // Ask the running application to reboot into the USB bootloader.
-    std::cout << "Requesting reboot into bootloader...\n";
+    info("Requesting reboot into bootloader...");
     _comm.sendReliable(protocol::ADDR_BASE, MsgType::ENTER_BOOTLOADER, {}, /*timeoutMs=*/1000,
                        /*maxRetries=*/3);
 
@@ -183,11 +196,11 @@ bool FirmwareUpdater::updateBase(const std::string& binPath, Progress cb) {
 
     std::string blPort = waitForPort(kBootloaderPid, 500);
     if (blPort.empty()) {
-        std::cerr << "firmware update: bootloader did not appear on USB\n";
+        error("firmware update: bootloader did not appear on USB");
         return false;
     }
     if (!_comm.reconnect(blPort)) {
-        std::cerr << "firmware update: cannot open bootloader port " << blPort << "\n";
+        error("firmware update: cannot open bootloader port " + blPort);
         return false;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -195,15 +208,15 @@ bool FirmwareUpdater::updateBase(const std::string& binPath, Progress cb) {
     bool ok = streamImage(protocol::ADDR_BASE, image, cb);
     if (!ok) return false;
 
-    std::cout << "\nImage programmed; base is rebooting into the new firmware...\n";
+    info("Image programmed; base is rebooting into the new firmware...");
 
     // Reconnect to the application once it re-enumerates.
     std::string appPort = waitForPort(kAppPid, 1500);
     if (!appPort.empty()) {
         _comm.reconnect(appPort);
-        std::cout << "Reconnected to the base on " << appPort << ".\n";
+        info("Reconnected to the base on " + appPort + ".");
     } else {
-        std::cerr << "Warning: base did not reappear; reconnect manually.\n";
+        error("firmware update: base did not reappear; reconnect manually.");
     }
     return true;
 }

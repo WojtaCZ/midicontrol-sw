@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -12,10 +13,12 @@
 #include "midicontrol/comm.hpp"
 #include "midicontrol/config.hpp"
 #include "midicontrol/firmware_update.hpp"
+#include "midicontrol/log.hpp"
 #include "midicontrol/midi_ports.hpp"
 #include "midicontrol/protocol/constants.hpp"
 #include "midicontrol/protocol/types.hpp"
 #include "midicontrol/serial_port.hpp"
+#include "midicontrol/status.hpp"
 
 using namespace mc;
 using mc::protocol::MsgType;
@@ -214,7 +217,13 @@ int main(int argc, char** argv) {
     sigaddset(&termSignals, SIGTERM);
     if (headless) pthread_sigmask(SIG_BLOCK, &termSignals, nullptr);
 
-    CommHandler handler(config, [] { return findMidiControlPorts(); });
+    mc::status::StatusRegistry status([] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    });
+    mc::log::setRegistry(&status);
+    CommHandler handler(config, [] { return findMidiControlPorts(); }, status);
     handler.onPacket(logPacket);
     handler.start([] { return findMidiControlPort(); }, findMidiControlPort().value_or(""));
 

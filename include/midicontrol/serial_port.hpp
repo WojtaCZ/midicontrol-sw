@@ -17,7 +17,8 @@ public:
     SerialPort(const SerialPort&) = delete;
     SerialPort& operator=(const SerialPort&) = delete;
 
-    // Open a device path (e.g. "/dev/ttyACM0") at the given baud rate (raw 8N1).
+    // Open a device path (e.g. "/dev/ttyACM0") at the given baud rate (raw 8N1),
+    // in exclusive mode (TIOCEXCL).
     bool open(const std::string& path, int baud = 115200);
     void close();
     bool isOpen() const { return _fd >= 0; }
@@ -45,6 +46,9 @@ private:
 // sysfs. Returns the /dev path (e.g. "/dev/ttyACM0") or nullopt if not present.
 std::optional<std::string> findMidiControlPort(const std::string& vid = "abcd",
                                                const std::string& pid = "1234");
+
+// "ABCD:1234" for a USB serial device path ("/dev/ttyACM0"), empty if unknown.
+std::string usbIdOf(const std::string& devicePath);
 
 }  // namespace mc
 
