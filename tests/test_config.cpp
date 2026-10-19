@@ -111,3 +111,39 @@ TEST(resolve_folder_paths) {
     CHECK(resolveFolder("/abs/play", "/etc/mc", "/home/u") == "/abs/play");
     CHECK(resolveFolder("songs", "/etc/mc", "/home/u") == "/etc/mc/songs");
 }
+
+namespace {
+const char* kMinimal = "[FILES]\nPlayFolder = /tmp/play\nRecordFolder = /tmp/rec\n";
+
+bool throwsOn(const std::string& ini) {
+    try {
+        parseConfig(ini);
+    } catch (const std::exception&) {
+        return true;
+    }
+    return false;
+}
+}  // namespace
+
+TEST(config_web_defaults) {
+    Config cfg = parseConfig(kMinimal);
+    CHECK(cfg.webEnabled);
+    CHECK_EQ(cfg.webPort, 50118);
+    CHECK_EQ(cfg.webBind, "0.0.0.0");
+}
+
+TEST(config_web_values) {
+    Config cfg = parseConfig(std::string(kMinimal) +
+                             "[WEB]\nEnabled = false\nPort = 8080\nBind = 127.0.0.1\n");
+    CHECK_FALSE(cfg.webEnabled);
+    CHECK_EQ(cfg.webPort, 8080);
+    CHECK_EQ(cfg.webBind, "127.0.0.1");
+}
+
+TEST(config_web_bad_values) {
+    CHECK(throwsOn(std::string(kMinimal) + "[WEB]\nPort = 0\n"));
+    CHECK(throwsOn(std::string(kMinimal) + "[WEB]\nPort = 70000\n"));
+    CHECK(throwsOn(std::string(kMinimal) + "[WEB]\nPort = http\n"));
+    CHECK(throwsOn(std::string(kMinimal) + "[WEB]\nEnabled = maybe\n"));
+    CHECK(throwsOn(std::string(kMinimal) + "[WEB]\nBind =\n"));
+}

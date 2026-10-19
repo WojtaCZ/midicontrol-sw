@@ -113,6 +113,24 @@ Config parseConfig(const std::string& iniText) {
         getInt("VerseGapMs", cfg.verseGapMs, 0);
     }
 
+    auto webIt = sections.find("WEB");
+    if (webIt != sections.end()) {
+        const auto& web = webIt->second;
+        if (auto it = web.find("Enabled"); it != web.end()) {
+            cfg.webEnabled = parseBool("Enabled", it->second);
+        }
+        if (auto it = web.find("Port"); it != web.end()) {
+            cfg.webPort = parseInt("Port", it->second, 1);
+            if (cfg.webPort > 65535) {
+                throw std::runtime_error("config: invalid value for Port: '" + it->second + "'");
+            }
+        }
+        if (auto it = web.find("Bind"); it != web.end()) {
+            if (it->second.empty()) throw std::runtime_error("config: Bind is empty");
+            cfg.webBind = it->second;
+        }
+    }
+
     return cfg;
 }
 

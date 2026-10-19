@@ -13,6 +13,7 @@
 //   [PLAYBACK] WarmupMs, KeepPowerOn, VerseGapMs (all optional, see Config)
 // The song structure (prelude, verses) comes from the anchors in each MIDI file.
 //   [BINDINGS] Bind0=song.mid, ...   (parsed, not used yet)
+//   [WEB]      Enabled, Port, Bind (status page, all optional, see Config)
 namespace mc {
 
 struct Config {
@@ -24,6 +25,11 @@ struct Config {
     int warmupMs = 3000;               // organ warm-up after power-on, before the first note
     bool keepPowerOn = false;          // leave organ power on between songs
     int verseGapMs = 0;                // silence before a section repeated with add-verse
+
+    // [WEB] read-only status page
+    bool webEnabled = true;
+    int webPort = 50118;
+    std::string webBind = "0.0.0.0";   // IPv4 address to listen on
 
     // Look up a button binding by key (e.g. "Bind0"). nullopt if absent.
     std::optional<std::string> binding(const std::string& key) const;
