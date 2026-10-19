@@ -58,6 +58,7 @@ void Dispatcher::handle(const Packet& pkt) {
     if (!broadcast) {
         auto it = _last.find(pkt.source);
         if (it != _last.end() && it->second.packetId == pkt.packetId) {
+            if (_out.onDuplicate) _out.onDuplicate(pkt);
             if (_out.send) {
                 if (it->second.nak) {
                     _out.send(pkt.source, MsgType::NAK, {pkt.packetId, it->second.reason});

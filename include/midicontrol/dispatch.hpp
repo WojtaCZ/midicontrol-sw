@@ -50,6 +50,8 @@ public:
         std::function<void(uint8_t ackedPid)> onAck;
         std::function<void(uint8_t nakedPid, uint8_t reason)> onNak;
         std::function<void()> onKeepaliveAck;
+        // Optional: a retransmission that was answered again but not executed.
+        std::function<void(const mc::protocol::Packet&)> onDuplicate;
     };
 
     Dispatcher(CommandSink& sink, Output out) : _sink(sink), _out(std::move(out)) {}

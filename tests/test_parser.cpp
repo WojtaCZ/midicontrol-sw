@@ -74,3 +74,17 @@ TEST(parser_handles_two_frames_back_to_back) {
     CHECK(packets[1].msgType == MsgType::NAK);
     CHECK_EQ(packets[1].payload.size(), size_t(2));
 }
+
+TEST(parser_counts_bad_frames) {
+    auto good = encode(Packet(ADDR_PC, ADDR_BASE, 0x05, MsgType::STOP_SONG, {}));
+    auto bad = good;
+    bad[bad.size() - 2] ^= 0x10;  // corrupt the CRC byte (just before FRAME_END)
+
+    Parser parser;
+    CHECK_EQ(parser.badFrames(), uint64_t(0));
+    CHECK(!feedAll(parser, bad).has_value());
+    CHECK_EQ(parser.badFrames(), uint64_t(1));
+    auto got = feedAll(parser, good);
+    CHECK(got.has_value());
+    CHECK_EQ(parser.badFrames(), uint64_t(1));
+}

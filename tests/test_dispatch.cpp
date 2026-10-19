@@ -48,6 +48,7 @@ struct Rig {
     std::vector<uint8_t> acked;
     std::vector<std::pair<uint8_t, uint8_t>> naked;
     int keepaliveAcks = 0;
+    int duplicates = 0;
     Dispatcher disp;
 
     Rig() : disp(sink, output()) {}
@@ -61,6 +62,7 @@ struct Rig {
         out.onAck = [this](uint8_t pid) { acked.push_back(pid); };
         out.onNak = [this](uint8_t pid, uint8_t r) { naked.emplace_back(pid, r); };
         out.onKeepaliveAck = [this]() { ++keepaliveAcks; };
+        out.onDuplicate = [this](const Packet&) { ++duplicates; };
         return out;
     }
 
@@ -215,4 +217,13 @@ TEST(dispatch_ignores_other_destinations_and_never_answers_broadcast) {
     r.rx(ADDR_REMOTE, 2, MsgType::STOP_SONG, {}, ADDR_BROADCAST);
     CHECK_EQ(r.sink.stops, 1);
     CHECK(r.sent.empty());
+}
+
+TEST(dispatcher_reports_duplicate) {
+    Rig r;
+    r.rx(ADDR_REMOTE, 0x20, MsgType::PLAY_SONG, {'4', '0', '1'});
+    CHECK_EQ(r.duplicates, 0);
+    r.rx(ADDR_REMOTE, 0x20, MsgType::PLAY_SONG, {'4', '0', '1'});  // retransmission
+    CHECK_EQ(r.duplicates, 1);
+    CHECK_EQ(r.sink.plays.size(), 1u);
 }

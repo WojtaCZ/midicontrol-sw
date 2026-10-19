@@ -29,6 +29,7 @@ add_library(midicontrol_core
     src/playback.cpp
     src/dispatch.cpp
     src/firmware_image.cpp
+    src/protocol/names.cpp
 )
 target_include_directories(midicontrol_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -49,6 +50,7 @@ add_executable(midicontrol_tests
     tests/test_playback.cpp
     tests/test_dispatch.cpp
     tests/test_firmware_image.cpp
+    tests/test_names.cpp
 )
 target_link_libraries(midicontrol_tests PRIVATE midicontrol_core)
 target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

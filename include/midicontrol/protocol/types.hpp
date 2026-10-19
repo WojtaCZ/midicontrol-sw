@@ -2,6 +2,7 @@
 #define MIDICONTROL_PROTOCOL_TYPES_HPP
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "midicontrol/protocol/constants.hpp"
@@ -76,6 +77,15 @@ struct Packet {
     Packet(uint8_t src, uint8_t dst, uint8_t id, MsgType type, std::vector<uint8_t> pl = {})
         : source(src), dest(dst), packetId(id), msgType(type), payload(std::move(pl)) {}
 };
+
+// Enum identifier for logs and the status page ("REPLAY_ANCHOR"); "UNKNOWN"
+// for values not in MsgType.
+const char* msgTypeName(MsgType type);
+// NakReason identifier ("NOT_PLAYING"); "UNKNOWN" for other values.
+const char* nakReasonName(uint8_t reason);
+// One-line description: "<TYPE> id=<n>", ACK adds " for=<pid>", NAK adds
+// " for=<pid> <REASON>", other payloads add " [AA BB ...]" (first 16 bytes).
+std::string describePacket(const Packet& pkt);
 
 }  // namespace mc::protocol
 

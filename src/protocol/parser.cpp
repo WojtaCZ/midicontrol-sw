@@ -19,6 +19,7 @@ std::optional<Packet> Parser::feed(uint8_t byte) {
         _state = State::Idle;
         auto pkt = decodeFrame(_buffer);
         _buffer.clear();
+        if (!pkt) ++_badFrames;
         return pkt;  // nullopt on a malformed frame is fine — caller ignores it
     }
 
@@ -30,6 +31,7 @@ std::optional<Packet> Parser::feed(uint8_t byte) {
 
     // Guard against runaway frames (line noise without a FRAME_END).
     if (_buffer.size() >= MAX_FRAME_SIZE) {
+        ++_badFrames;
         _state = State::Idle;
         _buffer.clear();
         return std::nullopt;
