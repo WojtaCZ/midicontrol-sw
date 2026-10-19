@@ -1,11 +1,17 @@
-# systemd user unit for the MIDIControl PC player.
+# systemd user unit for the MIDIControl PC player (always-on service).
 #
 # Install:  cmake --install build            (default prefix /usr/local)
 # Config:   ~/.config/midicontrol/config.conf
 #           (start from @CMAKE_INSTALL_FULL_DATADIR@/midicontrol/config.conf.example)
 # Enable:   systemctl --user daemon-reload
 #           systemctl --user enable --now midicontrol.service
-# Start at boot without a login session: loginctl enable-linger $USER
+# REQUIRED: loginctl enable-linger $USER
+#           (without it the user manager, and this service, only run while
+#           someone is logged in; with it the player starts at boot)
+# Status:   http://<this-pc>:50118/   (read-only page; [WEB] in the config)
+# Control:  midicontrol                 (in a terminal: attaches to the service,
+#                                        same commands; quit detaches)
+#           midicontrol --cmd "update base fw-update.bin"   (one-shot, for scripts)
 # Logs:     journalctl --user -u midicontrol -f
 #
 # The user needs access to the serial device and ALSA sequencer
@@ -14,11 +20,18 @@
 [Unit]
 Description=MIDIControl organ player
 After=sound.target
+# Never stop retrying.
+StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+# READY=1 once the config is loaded and the status page is up (the base may
+# still be unplugged); WATCHDOG=1 only while the serial, keepalive and control
+# threads all make progress, so a hung player is restarted.
+Type=notify
+NotifyAccess=main
+WatchdogSec=30
 ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/midicontrol --headless
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 [Install]

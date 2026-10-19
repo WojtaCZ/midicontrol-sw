@@ -2,12 +2,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 
 #include "midicontrol/comm.hpp"
 #include "midicontrol/config.hpp"
@@ -17,6 +20,7 @@
 #include "midicontrol/instance.hpp"
 #include "midicontrol/log.hpp"
 #include "midicontrol/midi_ports.hpp"
+#include "midicontrol/sd_notify.hpp"
 #include "midicontrol/serial_port.hpp"
 #include "midicontrol/status.hpp"
 #include "midicontrol/web_server.hpp"
@@ -64,6 +68,43 @@ void interactive(ConsoleExecutor& exec) {
         if (exec.execute(line, out, false) == console::ExecResult::Quit) break;
     }
 }
+
+// systemd watchdog: WATCHDOG=1 every 5 s, but only while every CommHandler
+// thread shows progress (WatchdogSec=30 in the unit). A hung thread therefore
+// leads to a restart; the web thread is deliberately not part of the check.
+class Watchdog {
+public:
+    explicit Watchdog(CommHandler& handler) : _handler(handler), _thread(&Watchdog::loop, this) {}
+    ~Watchdog() {
+        {
+            std::lock_guard<std::mutex> lk(_mutex);
+            _stop = true;
+        }
+        _cv.notify_all();
+        _thread.join();
+    }
+
+private:
+    void loop() {
+        bool stalled = false;
+        std::unique_lock<std::mutex> lk(_mutex);
+        while (!_cv.wait_for(lk, std::chrono::seconds(5), [&] { return _stop; })) {
+            if (_handler.threadsAlive(std::chrono::seconds(10))) {
+                stalled = false;
+                sdNotify("WATCHDOG=1");
+            } else if (!stalled) {
+                stalled = true;
+                mc::log::warn(Node::Software, "a worker thread stalled; withholding the watchdog ping");
+            }
+        }
+    }
+
+    CommHandler& _handler;
+    std::mutex _mutex;
+    std::condition_variable _cv;
+    bool _stop = false;
+    std::thread _thread;
+};
 
 int64_t wallMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -165,6 +206,9 @@ int main(int argc, char** argv) {
         },
         socketPath);
     control.start();
+    // Ready once config is loaded and the page is up; the base may be unplugged.
+    sdNotify("READY=1");
+    auto watchdog = std::make_unique<Watchdog>(handler);
 
     if (headless) {
         mc::log::info(Node::Software, "Running headless; send SIGTERM or SIGINT to stop.");
@@ -173,6 +217,8 @@ int main(int argc, char** argv) {
         interactive(exec);
     }
 
+    sdNotify("STOPPING=1");
+    watchdog.reset();
     control.stop();
     if (web) web->stop();
     handler.shutdown();
