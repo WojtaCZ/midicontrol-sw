@@ -96,6 +96,9 @@ if(RTMIDI_FOUND)
         src/midi_ports.cpp
         src/serial_port.cpp
         src/web_server.cpp
+        src/console_exec.cpp
+        src/control_socket.cpp
+        src/instance.cpp
     )
     # Version shown on the status page: git hash and build date at configure time.
     execute_process(COMMAND git rev-parse --short HEAD

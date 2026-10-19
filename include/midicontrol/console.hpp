@@ -1,6 +1,7 @@
 #ifndef MIDICONTROL_CONSOLE_HPP
 #define MIDICONTROL_CONSOLE_HPP
 
+#include <functional>
 #include <string>
 
 // The terminal command line, shared by standalone mode and the thin client
@@ -25,6 +26,11 @@ Command parse(const std::string& line);
 std::string absolutize(const std::string& line, const std::string& cwd);
 
 extern const char* const kCommandsHelp;
+
+// Running a command: its text output goes to `out`.
+using Reply = std::function<void(const std::string&)>;
+enum class ExecResult { Ok, Failed, Quit };
+using Executor = std::function<ExecResult(const std::string& line, const Reply& out)>;
 
 inline constexpr char kEndOfReply = '\x1e';
 std::string endMarker(bool ok);  // "\x1eOK\n" or "\x1eFAIL\n"
