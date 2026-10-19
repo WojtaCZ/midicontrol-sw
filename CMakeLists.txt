@@ -32,6 +32,7 @@ add_library(midicontrol_core
     src/protocol/names.cpp
     src/status.cpp
     src/status_json.cpp
+    src/http.cpp
 )
 target_include_directories(midicontrol_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -55,6 +56,7 @@ add_executable(midicontrol_tests
     tests/test_names.cpp
     tests/test_status.cpp
     tests/test_status_json.cpp
+    tests/test_http.cpp
 )
 target_link_libraries(midicontrol_tests PRIVATE midicontrol_core)
 target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
