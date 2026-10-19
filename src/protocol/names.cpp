@@ -29,6 +29,8 @@ const char* msgTypeName(MsgType type) {
         case MsgType::FW_UPDATE_END: return "FW_UPDATE_END";
         case MsgType::FW_UPDATE_STATUS: return "FW_UPDATE_STATUS";
         case MsgType::ENTER_BOOTLOADER: return "ENTER_BOOTLOADER";
+        case MsgType::DIAG_GET: return "DIAG_GET";
+        case MsgType::DIAG_RESP: return "DIAG_RESP";
     }
     return "UNKNOWN";
 }
