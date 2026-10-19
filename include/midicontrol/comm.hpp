@@ -119,6 +119,10 @@ public:
     // heartbeat within `maxAge` (reader/keepalive only while they run).
     bool threadsAlive(std::chrono::milliseconds maxAge) const;
 
+    // A base firmware update is running: the bootloader ignores KEEPALIVE and
+    // GET_STATUS, so neither is sent and keepalive loss is not reported.
+    void setUpdating(bool on);
+
 private:
     using Clock = std::chrono::steady_clock;
 
@@ -155,6 +159,7 @@ private:
     void handleSerialLoss();
     bool tryReopen();
     uint8_t nextPacketId();
+    uint8_t sendPacket(const mc::protocol::Packet& pkt);  // unreliable, id already set
 
     // Status instrumentation.
     void noteTx(const mc::protocol::Packet& pkt, bool retransmit);
@@ -228,6 +233,7 @@ private:
     std::atomic<int64_t> _hbKeepalive{0};
     std::atomic<int64_t> _hbControl{0};
     std::atomic<bool> _everConnected{false};
+    std::atomic<bool> _updating{false};
     std::atomic<int64_t> _reconnects{0};
 
     // Song being played: sections visited (playback thread appends, control

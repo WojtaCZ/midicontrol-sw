@@ -86,6 +86,7 @@ bool SerialPort::open(const std::string& path, int baud) {
 
 void SerialPort::close() {
     if (_fd >= 0) {
+        ioctl(_fd, TIOCNXCL);  // the flag would outlive us while others hold the tty
         ::close(_fd);
         _fd = -1;
     }

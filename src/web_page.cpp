@@ -161,6 +161,7 @@ function software(){
 }
 function baseSummary(){
   const n="base";
+  if(f(n,"updating"))return "Firmware update in progress";
   if(!f(n,"connected"))return "Waiting for the base (not connected)";
   let s="Connected "+(f(n,"device")||"");
   s+=f(n,"alive")===false?" · keepalives lost":" · keepalive "+(ago(f(n,"keepalive_ack_ms"))||"never");
@@ -170,7 +171,8 @@ function baseSummary(){
 }
 function base(){
   const n="base",conn=f(n,"connected"),items=[];
-  if(!conn)items.push(["yellow","Waiting for the base"]);
+  if(f(n,"updating"))items.push(["yellow","Firmware update in progress"]);
+  else if(!conn)items.push(["yellow","Waiting for the base"]);
   else if(f(n,"alive")===false)items.push(["red","Serial open, keepalives lost"]);
   else items.push(["green","Connected"]);
   const mp=f(n,"midi_port_found");
@@ -255,13 +257,16 @@ function renderTop(){
   u.append(document.createTextNode(s));
 }
 async function poll(){
+  // Give up after 3 s, so a frozen service shows as "no connection".
+  const ac=new AbortController(),timer=setTimeout(()=>ac.abort(),3000);
   try{
-    const r=await fetch("/api/status",{cache:"no-store"});
+    const r=await fetch("/api/status",{cache:"no-store",signal:ac.signal});
     if(!r.ok)throw new Error(r.status);
     data=await r.json();fetchedAt=Date.now();failed=false;
     // Don't redraw while the viewer is selecting text.
     if(String(window.getSelection())==="")render();
   }catch(e){failed=true;}
+  clearTimeout(timer);
   renderTop();
   setTimeout(poll,1000);
 }

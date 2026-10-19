@@ -26,6 +26,7 @@ public:
     using Progress = std::function<void(std::size_t done, std::size_t total)>;
 
     bool updateRemote(const std::string& binPath, Progress cb = {});
+    // Base: CommHandler is told an update runs (see CommHandler::setUpdating).
     bool updateBase(const std::string& binPath, Progress cb = {});
 
 private:

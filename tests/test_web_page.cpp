@@ -25,3 +25,10 @@ TEST(web_page_self_contained) {
     // Data is inserted as text, never parsed as markup.
     CHECK(!has(html, "innerHTML"));
 }
+
+TEST(web_page_fetch_times_out) {
+    // A frozen service must turn the page to "no connection", not just age it.
+    const std::string& html = mc::web::statusPageHtml();
+    CHECK(has(html, "AbortController"));
+    CHECK(has(html, "no connection"));
+}

@@ -178,6 +178,12 @@ bool FirmwareUpdater::updateBase(const std::string& binPath, Progress cb) {
     if (image.empty()) return false;
     info("Updating base over USB (" + std::to_string(image.size()) + " bytes)...");
 
+    struct UpdatingGuard {
+        CommHandler& comm;
+        explicit UpdatingGuard(CommHandler& c) : comm(c) { comm.setUpdating(true); }
+        ~UpdatingGuard() { comm.setUpdating(false); }
+    } updating(_comm);
+
     // Ask the running application to reboot into the USB bootloader.
     info("Requesting reboot into bootloader...");
     _comm.sendReliable(protocol::ADDR_BASE, MsgType::ENTER_BOOTLOADER, {}, /*timeoutMs=*/1000,
@@ -212,11 +218,12 @@ bool FirmwareUpdater::updateBase(const std::string& binPath, Progress cb) {
 
     // Reconnect to the application once it re-enumerates.
     std::string appPort = waitForPort(kAppPid, 1500);
-    if (!appPort.empty()) {
-        _comm.reconnect(appPort);
+    if (!appPort.empty() && _comm.reconnect(appPort)) {
         info("Reconnected to the base on " + appPort + ".");
     } else {
-        error("firmware update: base did not reappear; reconnect manually.");
+        // The image is programmed; the reader keeps looking for the base.
+        error("firmware update: base did not reappear yet; it is reconnected automatically "
+              "when it comes back.");
     }
     return true;
 }

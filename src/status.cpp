@@ -120,6 +120,7 @@ Dot evaluateDot(Node node, const Snapshot& s) {
             return Dot::Green;
         }
         case Node::Base:
+            if (flag(base, "updating", false)) return Dot::Yellow;  // firmware update, not a fault
             if (!flag(base, "connected", false)) return Dot::Yellow;  // waiting for the base
             if (!flag(base, "alive", true)) return Dot::Red;
             if (!flag(base, "status_answered", true)) return Dot::Yellow;

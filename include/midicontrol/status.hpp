@@ -98,7 +98,7 @@ private:
 std::vector<Node> nodesForPeer(uint8_t addr);
 
 // Health dot of a node, from the fields the app layer keeps up to date:
-//   base:     connected, alive, status_answered, status_ms, status_ble
+//   base:     connected, alive, status_answered, status_ms, status_ble, updating
 //   software: song_problems, plus its WARN/ERROR in the problems list
 Dot evaluateDot(Node node, const Snapshot& s);
 

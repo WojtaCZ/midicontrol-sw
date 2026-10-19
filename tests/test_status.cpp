@@ -141,3 +141,16 @@ TEST(status_dot_software) {
     g.r.set(Node::Software, "song_problems", int64_t(1));
     CHECK(evaluateDot(Node::Software, g.r.snapshot()) == Dot::Yellow);
 }
+
+TEST(status_dot_base_updating) {
+    Rig g;
+    g.r.set(Node::Base, "connected", true);
+    g.r.set(Node::Base, "alive", false);  // the bootloader ignores keepalives
+    g.r.set(Node::Base, "updating", true);
+    CHECK(evaluateDot(Node::Base, g.r.snapshot()) == Dot::Yellow);
+    g.r.set(Node::Base, "connected", false);  // re-enumerating
+    CHECK(evaluateDot(Node::Base, g.r.snapshot()) == Dot::Yellow);
+    g.r.set(Node::Base, "updating", false);
+    g.r.set(Node::Base, "connected", true);
+    CHECK(evaluateDot(Node::Base, g.r.snapshot()) == Dot::Red);
+}

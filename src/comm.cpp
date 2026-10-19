@@ -1,19 +1,15 @@
 #include "midicontrol/comm.hpp"
 
-#include <signal.h>
-#include <spawn.h>
-#include <sys/wait.h>
 
 #include <cstdio>
 #include <ctime>
 #include <sstream>
 
 #include "midicontrol/log.hpp"
+#include "midicontrol/process.hpp"
 #include "midicontrol/protocol/codec.hpp"
 #include "midicontrol/protocol/constants.hpp"
 #include "midicontrol/songs.hpp"
-
-extern char** environ;
 
 namespace mc {
 
@@ -117,6 +113,9 @@ bool CommHandler::connect(const std::string& devicePath) {
         std::lock_guard<std::mutex> lk(_mutex);
         if (!_serial.open(devicePath, 115200)) {
             mc::log::error(Node::Base, "Failed to open serial port: " + devicePath);
+            // Keep the reader running anyway: it looks for the base again
+            // (finder) every second, so the service never stays disconnected.
+            startIoThreads();
             return false;
         }
         _devicePath = devicePath;
@@ -183,6 +182,16 @@ bool CommHandler::threadsAlive(std::chrono::milliseconds maxAge) const {
     return now - _hbReader.load() <= limit && now - _hbKeepalive.load() <= limit;
 }
 
+void CommHandler::setUpdating(bool on) {
+    if (!on) {
+        // Start the loss timer afresh once the application is back.
+        _lastBaseKeepalive.store(Clock::now());
+        _baseLostReported.store(false);
+    }
+    _updating.store(on);
+    _status.set(Node::Base, "updating", on);
+}
+
 void CommHandler::noteConnected(const std::string& path, bool reconnect) {
     _everConnected.store(true);
     _status.set(Node::Base, "connected", true);
@@ -242,7 +251,10 @@ bool CommHandler::tryReopen() {
 uint8_t CommHandler::nextPacketId() { return _packetId.fetch_add(1); }
 
 uint8_t CommHandler::send(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload) {
-    Packet pkt(ADDR_PC, dest, nextPacketId(), type, payload);
+    return sendPacket(Packet(ADDR_PC, dest, nextPacketId(), type, payload));
+}
+
+uint8_t CommHandler::sendPacket(const Packet& pkt) {
     auto raw = encode(pkt);
     bool sent = false;
     {
@@ -518,11 +530,15 @@ void CommHandler::pollStatus() {
         _status.set(Node::Base, "status_answered", false);
         return;
     }
-    // A reply racing this bookkeeping can at worst show up as one DEBUG event.
-    const uint8_t pid = send(ADDR_BASE, MsgType::GET_STATUS);
-    std::lock_guard<std::mutex> lk(_routineMutex);
-    _pollPids.insert(pid);
-    _pollPid = pid;
+    // Register the id before sending, so the poll and its ACK are recognised
+    // as routine and a fast NAK finds _pollPid already set.
+    const uint8_t pid = nextPacketId();
+    {
+        std::lock_guard<std::mutex> lk(_routineMutex);
+        _pollPids.insert(pid);
+        _pollPid = pid;
+    }
+    sendPacket(Packet(ADDR_PC, ADDR_BASE, pid, MsgType::GET_STATUS));
 }
 
 void CommHandler::refreshMidiPort() {
@@ -608,7 +624,7 @@ void CommHandler::keepaliveLoop() {
     int64_t lastMidiCheck = 0;
     while (_running.load()) {
         _hbKeepalive.store(steadyMs());
-        if (_connected.load()) {
+        if (_connected.load() && !_updating.load()) {
             send(ADDR_BASE, MsgType::KEEPALIVE);
             auto silent = Clock::now() - _lastBaseKeepalive.load();
             if (silent > std::chrono::milliseconds(KEEPALIVE_LOSS_MS) &&
@@ -745,26 +761,23 @@ void CommHandler::recordSong() {
     std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.mid", &tm);
     std::string fullPath = _config.recFolder + "/" + buf;
 
-    char* argv[] = {const_cast<char*>("arecordmidi"), const_cast<char*>("-p"),
-                    const_cast<char*>(alsaPort.c_str()), const_cast<char*>(fullPath.c_str()),
-                    nullptr};
-    pid_t pid = -1;
-    int rc = posix_spawnp(&pid, "arecordmidi", nullptr, nullptr, argv, environ);
-    if (rc == 0) {
+    const int pid = mc::proc::spawn({"arecordmidi", "-p", alsaPort, fullPath});
+    if (pid > 0) {
         std::lock_guard<std::mutex> lk(_recorderMutex);
         _recorderPid = pid;
         mc::log::info(Node::Software, "Recording to " + fullPath);
     } else {
-        mc::log::error(Node::Software, "Failed to start arecordmidi (rc=" + std::to_string(rc) + ")");
+        mc::log::error(Node::Software, "Failed to start arecordmidi (rc=" + std::to_string(-pid) + ")");
     }
 }
 
 void CommHandler::stopRecorder() {
     std::lock_guard<std::mutex> lk(_recorderMutex);
     if (_recorderPid > 0) {
-        kill(_recorderPid, SIGTERM);
-        int status = 0;
-        waitpid(_recorderPid, &status, 0);
+        // Bounded: a recorder that ignores SIGTERM can't hang the control thread.
+        if (mc::proc::terminate(_recorderPid) == mc::proc::Ended::Killed) {
+            mc::log::warn(Node::Software, "arecordmidi did not stop on SIGTERM; killed");
+        }
         _recorderPid = -1;
     }
 }
