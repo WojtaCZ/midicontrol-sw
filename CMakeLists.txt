@@ -95,7 +95,19 @@ if(RTMIDI_FOUND)
         src/player.cpp
         src/midi_ports.cpp
         src/serial_port.cpp
+        src/web_server.cpp
     )
+    # Version shown on the status page: git hash and build date at configure time.
+    execute_process(COMMAND git rev-parse --short HEAD
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE MC_GIT_HASH OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET RESULT_VARIABLE MC_GIT_RESULT)
+    if(NOT MC_GIT_RESULT EQUAL 0 OR MC_GIT_HASH STREQUAL "")
+        set(MC_GIT_HASH "unknown")
+    endif()
+    string(TIMESTAMP MC_BUILD_DATE "%Y-%m-%d")
+    target_compile_definitions(midicontrol PRIVATE
+        MC_GIT_HASH="${MC_GIT_HASH}" MC_BUILD_DATE="${MC_BUILD_DATE}")
     target_link_libraries(midicontrol PRIVATE midicontrol_core Threads::Threads ${RTMIDI_LIBRARIES})
     target_include_directories(midicontrol PRIVATE ${RTMIDI_INCLUDE_DIRS})
     target_compile_options(midicontrol PRIVATE ${RTMIDI_CFLAGS_OTHER})

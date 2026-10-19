@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <memory>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
@@ -19,6 +20,7 @@
 #include "midicontrol/protocol/types.hpp"
 #include "midicontrol/serial_port.hpp"
 #include "midicontrol/status.hpp"
+#include "midicontrol/web_server.hpp"
 
 using namespace mc;
 using mc::protocol::MsgType;
@@ -40,39 +42,12 @@ const char* kCommands =
     "Commands: play <code>, stop, verse (add verse), list, record, on, off, status,\n"
     "          update <base|remote> <name-update.bin>, quit\n";
 
-std::string payloadToString(const std::vector<uint8_t>& payload) {
-    std::string s(payload.begin(), payload.end());
-    while (!s.empty() && s.back() == '\0') s.pop_back();
-    return s;
-}
-
 const char* nakText(NakReason r) {
     switch (r) {
         case NakReason::INVALID_PAYLOAD: return "invalid song code";
         case NakReason::NOT_FOUND: return "song not found";
         case NakReason::NOT_PLAYING: return "nothing is playing";
         default: return "refused";
-    }
-}
-
-void logPacket(const Packet& pkt) {
-    switch (pkt.msgType) {
-        case MsgType::STATUS_RESP:
-            if (pkt.payload.size() >= 3) {
-                std::cout << "  <- Status: BLE=" << bool(pkt.payload[0])
-                          << ", current=" << bool(pkt.payload[1])
-                          << ", display=" << bool(pkt.payload[2]) << ", pc_alive="
-                          << (pkt.payload.size() >= 4 ? bool(pkt.payload[3]) : false) << "\n";
-            }
-            break;
-        case MsgType::SIGNAL_PLAYING:
-            std::cout << "  <- Playing: " << payloadToString(pkt.payload) << "\n";
-            break;
-        case MsgType::SIGNAL_STOPPED:
-            std::cout << "  <- Stopped\n";
-            break;
-        default:
-            break;  // commands are logged by CommHandler
     }
 }
 
@@ -140,8 +115,13 @@ void interactive(CommHandler& handler) {
                       << " playing=" << handler.isPlaying();
             auto label = handler.sectionLabel();
             if (!label.empty()) std::cout << " section=\"" << label << "\"";
-            std::cout << "\nRequesting status...\n";
-            handler.sendWithAck(mc::protocol::ADDR_BASE, MsgType::GET_STATUS);
+            std::cout << "\n";
+            if (auto st = handler.requestStatus()) {
+                std::cout << "Base: BLE=" << st->ble << ", relay=" << st->relay
+                          << ", display=" << st->display << ", pc_alive=" << st->pc << "\n";
+            } else {
+                std::cout << "Base did not answer GET_STATUS\n";
+            }
         } else if (cmd == "update") {
             std::istringstream uss(rest);
             std::string target, path;
@@ -224,8 +204,18 @@ int main(int argc, char** argv) {
     });
     mc::log::setRegistry(&status);
     CommHandler handler(config, [] { return findMidiControlPorts(); }, status);
-    handler.onPacket(logPacket);
+    status.set(mc::status::Node::Software, "version", std::string(MC_GIT_HASH));
+    status.set(mc::status::Node::Software, "build_date", std::string(MC_BUILD_DATE));
+    status.setNow(mc::status::Node::Software, "started_ms");
+    status.set(mc::status::Node::Software, "config_path", configPath);
+    status.set(mc::status::Node::Software, "play_folder", config.playFolder);
     handler.start([] { return findMidiControlPort(); }, findMidiControlPort().value_or(""));
+
+    std::unique_ptr<WebServer> web;
+    if (config.webEnabled) {
+        web = std::make_unique<WebServer>(status, config.webBind, config.webPort, config.playFolder);
+        web->start();
+    }
 
     if (headless) {
         std::cout << "Running headless; send SIGTERM or SIGINT to stop.\n";
@@ -234,6 +224,7 @@ int main(int argc, char** argv) {
         interactive(handler);
     }
 
+    if (web) web->stop();
     handler.shutdown();
     std::cout << "Done.\n";
     return 0;
