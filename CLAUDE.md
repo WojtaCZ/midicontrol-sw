@@ -29,6 +29,8 @@ Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME
 
 ## Service, status page, control socket
 
+Full operator guide, behaviour, design decisions, known issues and the bench checklist: [`docs/status-web-and-service.md`](docs/status-web-and-service.md).
+
 - **Status page**: read-only, `http://<pc>:50118/` (`GET /`, `GET /api/status` JSON), served by the player process itself on its own thread. Tabs Overview / Software / Base / Controller; Base and Controller show only what the PC sees (firmware debug data later = more `fields` in the same JSON). Port 50118 is also used by the superpowers brainstorm companion server; don't run both.
 - **Single instance**: exclusive `flock` on `$XDG_RUNTIME_DIR/midicontrol.lock` (fallback `/tmp/midicontrol-<uid>/`); the serial port is opened with `TIOCEXCL`.
 - **Control socket** `$XDG_RUNTIME_DIR/midicontrol.sock` (0600): `midicontrol` in a terminal attaches to the running service as a thin client (commands run in the service; `quit` detaches); `--cmd` is the one-shot form. Line protocol in `console.hpp` (reply ends with `\x1eOK` / `\x1eFAIL`).
@@ -63,6 +65,7 @@ Core (testable anywhere):
 - **`songcheck`** — per-file song checks (parse failure, empty display anchor, no anchors, bad file name) and an incremental `Scanner` (mtime/size).
 - **`console`** — terminal command parsing shared by standalone and attached mode, update-path absolutizing, socket reply markers.
 - **`log`** — process-wide logger: console (INFO stdout, WARN/ERROR stderr, DEBUG not printed) plus registry events per node.
+- **`process`** — child spawn with an empty signal mask and default SIGTERM/SIGINT (the service blocks them in all threads), bounded `terminate` (SIGTERM, then SIGKILL after 2 s).
 - **`protocol/names`** — `msgTypeName`, `nakReasonName`, `describePacket` (event text such as `REPLAY_ANCHOR id=8`).
 
 App layer (needs hardware):
@@ -82,7 +85,7 @@ App layer (needs hardware):
 
 ## Tests
 
-`tests/` uses a tiny built-in harness (`test_framework.hpp`, no external deps). Covers CRC vectors, codec/parser, SysEx, NOW_PLAYING_INFO encoding, both SMF SysEx framings, the SMF reader against the real files in `songs/`, song lookup/list paging, verse sequencing and the playback engine (fake clock), the dispatcher's ACK/NAK/duplicate logic, config (keys, path resolution, `[WEB]`), update-file validation, message names, the status registry and dot rules, JSON escaping/schema, HTTP parsing/routing, the embedded page (self-contained), the song-file check, console command parsing and the logger. All deterministic: no real time, no ports. `MC_SONGS_DIR` is injected by CMake.
+`tests/` uses a tiny built-in harness (`test_framework.hpp`, no external deps). Covers CRC vectors, codec/parser, SysEx, NOW_PLAYING_INFO encoding, both SMF SysEx framings, the SMF reader against the real files in `songs/`, song lookup/list paging, verse sequencing and the playback engine (fake clock), the dispatcher's ACK/NAK/duplicate logic, config (keys, path resolution, `[WEB]`), update-file validation, message names, the status registry and dot rules, JSON escaping/schema, HTTP parsing/routing, the embedded page (self-contained), the song-file check, console command parsing, the logger and child-process signal handling. All deterministic: no real time, no ports. `MC_SONGS_DIR` is injected by CMake.
 
 ## Protocol Details
 
