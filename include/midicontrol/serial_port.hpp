@@ -18,7 +18,7 @@ public:
     SerialPort& operator=(const SerialPort&) = delete;
 
     // Open a device path (e.g. "/dev/ttyACM0") at the given baud rate (raw 8N1),
-    // in exclusive mode (TIOCEXCL).
+    // in exclusive mode (TIOCEXCL + flock; false when another process holds the port).
     bool open(const std::string& path, int baud = 115200);
     void close();
     bool isOpen() const { return _fd >= 0; }

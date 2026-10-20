@@ -82,6 +82,7 @@ add_executable(midicontrol_tests
     tests/test_diag_codes.cpp
     tests/test_diag_store.cpp
     tests/test_port_select.cpp
+    tests/test_serial_lock.cpp
     tests/test_log_reader.cpp
     tests/test_diag_poller.cpp
     tests/test_diag_api.cpp

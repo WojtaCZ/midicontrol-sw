@@ -245,3 +245,15 @@ TEST(log_ingest_restart_seeds_fault_identity_from_store) {
     CHECK_EQ(faults, 1);
     CHECK_EQ(store.unseenFaults("base"), size_t(0));
 }
+
+TEST(log_ingest_replayed_body_lines_raise_no_status_events) {
+    TmpDir t;
+    DiagStore store(t.path);
+    Events ev;
+    LogIngest in(store, [] { return int64_t(1); }, ev.sink());
+    feedLines(in, {"--- log before reset ---", "[    5.000] W ble: old warning", "--- end of log before reset ---", "[    0.010] I sys: boot",
+                   "[    0.020] W ble: new warning"});
+    CHECK_EQ(ev.list.size(), size_t(1));
+    CHECK_EQ(ev.list[0], std::string("W ble: new warning"));
+    CHECK_EQ(store.query("base", 'W', 0, 10).size(), size_t(2));  // both are still stored
+}

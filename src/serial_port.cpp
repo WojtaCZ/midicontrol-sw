@@ -2,6 +2,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -50,6 +51,12 @@ bool SerialPort::open(const std::string& path, int baud) {
     if (_fd < 0) return false;
     // Exclusive: a second process can never open (and steal) the base link.
     if (ioctl(_fd, TIOCEXCL) != 0) {
+        close();
+        return false;
+    }
+    // Advisory lock: TIOCEXCL only keeps out processes that open AFTER us; picocom/minicom opened before us
+    // would otherwise share the port and split the lines. They honour flock(); busy = open fails (callers retry).
+    if (flock(_fd, LOCK_EX | LOCK_NB) != 0) {
         close();
         return false;
     }

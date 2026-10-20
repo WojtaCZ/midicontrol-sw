@@ -86,7 +86,8 @@ void LogIngest::store(const LogLine& l) {
     e.tag = l.tag;
     e.text = l.truncated ? l.text + "~" : l.text;
     store_.append(std::move(e));
-    if (event_ && (l.level == 'E' || l.level == 'W')) event_(l.level, l.tag + ": " + l.text);
+    // Lines replayed in the Body phase are old (already seen live or before this service ran): no status event.
+    if (event_ && phase_ != Phase::Body && (l.level == 'E' || l.level == 'W')) event_(l.level, l.tag + ": " + l.text);
 }
 
 void LogIngest::flushFault() {
