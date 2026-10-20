@@ -14,7 +14,10 @@ const char* const kReplayStart = "--- log before reset ---";
 const char* const kReplayEnd = "--- end of log before reset ---";
 }  // namespace
 
-LogIngest::LogIngest(DiagStore& store, Clock now, EventSink event) : store_(store), now_(std::move(now)), event_(std::move(event)) {}
+LogIngest::LogIngest(DiagStore& store, Clock now, EventSink event) : store_(store), now_(std::move(now)), event_(std::move(event)) {
+    // After a service restart the base keeps reprinting its last fault in every banner: know it already.
+    lastFault_ = store_.lastFault("base");
+}
 
 void LogIngest::feed(const uint8_t* data, size_t len) {
     for (size_t i = 0; i < len; ++i) {
@@ -55,6 +58,9 @@ void LogIngest::onLine(std::string line) {
     auto l = parseLogLine(line);
     if (!l) return;
     if (l->tag == "sys") {  // boot banner: logged, but does not end a pending fault or the window
+        // A boot banner without a replay window is a power-on boot: the fault counter restarts, so the
+        // previous fault can never be reprinted any more.
+        if (phase_ == Phase::None && l->text.compare(0, 4, "boot") == 0) lastFault_.reset();
         store(*l);
         return;
     }
@@ -100,8 +106,10 @@ void LogIngest::flushFault() {
     e.text = buf;
     e.fault = *f;
 
-    const bool update = phase_ != Phase::None && lastFault_ && lastFault_->fault &&
-                        lastFault_->fault->kind == f->kind && lastFault_->fault->count == f->count;
+    // Identity of a fault: kind + count + the fault's own uptime (the record-time line's uptime equals the
+    // banner's "up N s"). Kind + count alone repeat after a power cycle.
+    const bool update = phase_ != Phase::None && lastFault_ && lastFault_->fault && lastFault_->fault->kind == f->kind &&
+                        lastFault_->fault->count == f->count && lastFault_->uptimeMs == e.uptimeMs;
     if (update) {
         e.pcTimeMs = lastFault_->pcTimeMs;
         if (store_.replace(lastFault_->id, e)) {

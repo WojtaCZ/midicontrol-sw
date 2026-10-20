@@ -25,7 +25,7 @@ namespace mc::diag {
 //   "--- log before reset ---" and "--- end of log before reset ---"
 // and then prints the boot banner (sys lines, then the fault record) - the same fault a second time, now
 // complete. The window runs from the first marker to the first banner line that is neither "sys" nor a fault
-// line. Only inside it is a fault with the same kind and count as the last stored one taken for the same
+// line. Only inside it is a fault with the same kind, count and fault uptime as the last stored one taken for the same
 // fault and *replaces* that entry; outside it the same kind/count is a new entry, because the base's fault
 // counter restarts after a power loss.
 class LogIngest {
