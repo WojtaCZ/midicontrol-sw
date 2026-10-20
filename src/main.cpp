@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -17,8 +18,11 @@
 #include "midicontrol/console.hpp"
 #include "midicontrol/console_exec.hpp"
 #include "midicontrol/control_socket.hpp"
+#include "midicontrol/diag_api.hpp"
+#include "midicontrol/diag_store.hpp"
 #include "midicontrol/instance.hpp"
 #include "midicontrol/log.hpp"
+#include "midicontrol/log_reader.hpp"
 #include "midicontrol/midi_ports.hpp"
 #include "midicontrol/sd_notify.hpp"
 #include "midicontrol/serial_port.hpp"
@@ -74,7 +78,9 @@ void interactive(ConsoleExecutor& exec) {
 // leads to a restart; the web thread is deliberately not part of the check.
 class Watchdog {
 public:
-    explicit Watchdog(CommHandler& handler) : _handler(handler), _thread(&Watchdog::loop, this) {}
+    // `extraAlive`: more heartbeats that must show progress (the base log reader thread).
+    explicit Watchdog(CommHandler& handler, std::function<bool()> extraAlive = {})
+        : _handler(handler), _extraAlive(std::move(extraAlive)), _thread(&Watchdog::loop, this) {}
     ~Watchdog() {
         {
             std::lock_guard<std::mutex> lk(_mutex);
@@ -89,7 +95,7 @@ private:
         bool stalled = false;
         std::unique_lock<std::mutex> lk(_mutex);
         while (!_cv.wait_for(lk, std::chrono::seconds(5), [&] { return _stop; })) {
-            if (_handler.threadsAlive(std::chrono::seconds(10))) {
+            if (_handler.threadsAlive(std::chrono::seconds(10)) && (!_extraAlive || _extraAlive())) {
                 stalled = false;
                 sdNotify("WATCHDOG=1");
             } else if (!stalled) {
@@ -100,6 +106,7 @@ private:
     }
 
     CommHandler& _handler;
+    std::function<bool()> _extraAlive;
     std::mutex _mutex;
     std::condition_variable _cv;
     bool _stop = false;
@@ -182,9 +189,29 @@ int main(int argc, char** argv) {
     status.set(Node::Software, "config_path", configPath);
     status.set(Node::Software, "play_folder", config.playFolder);
 
-    CommHandler handler(config, [] { return findMidiControlPorts(); }, status);
+    // Diagnostics: the store (also shows faults left unacknowledged by an earlier run), the remote's
+    // DIAG polling inside CommHandler and the thread reading the base's log CDC.
+    mc::diag::DiagStore diagStore(config.diagDir);
+    mc::diag::publishFaultStatus(diagStore, status);
+    status.set(Node::Software, "diag_dir", config.diagDir);
+
+    CommHandler handler(config, [] { return findMidiControlPorts(); }, status, &diagStore);
     handler.start([] { return findMidiControlPort(); }, findMidiControlPort().value_or(""));
-    ConsoleExecutor exec(handler, status);
+    ConsoleExecutor exec(handler, status, &diagStore);
+
+    mc::diag::LogIngest logIngest(
+        diagStore, wallMs,
+        [&status](char level, const std::string& text) {
+            status.event(Node::Base, level == 'E' ? mc::status::Level::Error : mc::status::Level::Warn, text);
+        });
+    logIngest.setOnFault([&] { mc::diag::publishFaultStatus(diagStore, status); });
+    const std::string logPortOverride = config.diagLogPort;
+    mc::diag::SerialLogSource logSource([logPortOverride]() -> std::optional<std::string> {
+        if (!logPortOverride.empty()) return access(logPortOverride.c_str(), F_OK) == 0 ? std::optional<std::string>(logPortOverride) : std::nullopt;
+        return findMidiControlLogPort();
+    });
+    mc::diag::LogReader logReader(logSource, logIngest);
+    if (!oneShot) logReader.start();  // a one-shot command needs no log
 
     if (oneShot) {
         // Standalone one-shot: no page, no socket; just this command.
@@ -197,7 +224,7 @@ int main(int argc, char** argv) {
 
     std::unique_ptr<WebServer> web;
     if (config.webEnabled) {
-        web = std::make_unique<WebServer>(status, config.webBind, config.webPort, config.playFolder);
+        web = std::make_unique<WebServer>(status, config.webBind, config.webPort, config.playFolder, &diagStore);
         web->start();
     }
     ControlServer control(
@@ -208,7 +235,7 @@ int main(int argc, char** argv) {
     control.start();
     // Ready once config is loaded and the page is up; the base may be unplugged.
     sdNotify("READY=1");
-    auto watchdog = std::make_unique<Watchdog>(handler);
+    auto watchdog = std::make_unique<Watchdog>(handler, [&logReader] { return logReader.alive(10000); });
 
     if (headless) {
         mc::log::info(Node::Software, "Running headless; send SIGTERM or SIGINT to stop.");
@@ -221,6 +248,7 @@ int main(int argc, char** argv) {
     watchdog.reset();
     control.stop();
     if (web) web->stop();
+    logReader.stop();
     handler.shutdown();
     mc::log::setRegistry(nullptr);
     std::cout << "Done.\n";

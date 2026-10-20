@@ -183,3 +183,82 @@ TEST(store_append_after_partial_last_line) {
     CHECK_EQ(q.size(), size_t(2));
     CHECK_EQ(q[0].text, std::string("two"));
 }
+
+TEST(store_replace_updates_entry_and_persists) {
+    TmpDir t;
+    uint64_t id1, id2;
+    {
+        DiagStore s(t.path);
+        id1 = s.append(mk("base", 'E', "first", true));
+        id2 = s.append(mk("base", 'I', "other"));
+        DiagEntry upd = mk("base", 'E', "first full", true);
+        upd.fault->rev = "abc1234";
+        CHECK(s.replace(id1, upd));
+        CHECK(!s.replace(9999, upd));
+        auto lf = s.lastFault("base");
+        CHECK(lf.has_value());
+        CHECK_EQ(lf->id, id1);
+        CHECK_EQ(lf->text, std::string("first full"));
+        CHECK_EQ(lf->fault->rev, std::string("abc1234"));
+        CHECK_EQ(s.query("base", 'D', 0, 10).size(), size_t(2));
+    }
+    DiagStore s(t.path);
+    auto lf = s.lastFault("base");
+    CHECK(lf.has_value());
+    CHECK_EQ(lf->fault->rev, std::string("abc1234"));
+    CHECK_EQ(s.query("base", 'D', 0, 10)[0].id, id2);
+}
+
+TEST(store_tail_cache_serves_repeated_queries_without_disk_reads) {
+    TmpDir t;
+    DiagStore s(t.path);
+    for (int i = 0; i < 20; ++i) s.append(mk("base", 'I', "line " + std::to_string(i), i == 3));
+    s.query("base", 'D', 0, 5);
+    const size_t reads = s.diskReads();
+    for (int i = 0; i < 10; ++i) {
+        s.query("base", 'D', 0, 5);
+        s.lastFault("base");
+        s.unseenFaults("base");
+        s.append(mk("base", 'I', "more"));
+    }
+    CHECK_EQ(s.diskReads(), reads);
+    CHECK_EQ(s.query("base", 'D', 0, 3)[0].text, std::string("more"));
+}
+
+TEST(store_cache_window_smaller_than_history_pages_from_disk) {
+    TmpDir t;
+    DiagStore s(t.path, 1 << 20, 3, 5);  // cache keeps only 5 entries per node
+    for (int i = 1; i <= 12; ++i) s.append(mk("base", 'I', "n" + std::to_string(i), i == 2));
+    auto page = s.query("base", 'D', 0, 3);
+    CHECK_EQ(page.size(), size_t(3));
+    CHECK_EQ(page[0].text, std::string("n12"));
+    // before id 4 is older than the cache window: must still be answered (from disk)
+    auto old = s.query("base", 'D', 4, 10);
+    CHECK_EQ(old.size(), size_t(3));
+    CHECK_EQ(old[0].text, std::string("n3"));
+    // the old fault is outside the window but still found and unseen
+    CHECK(s.lastFault("base").has_value());
+    CHECK_EQ(s.unseenFaults("base"), size_t(1));
+}
+
+TEST(store_creates_directory_recursively) {
+    TmpDir t;
+    std::string deep = t.path + "/a/b/c";
+    DiagStore s(deep);
+    s.append(mk("base", 'I', "x"));
+    struct stat st;
+    CHECK(::stat((deep + "/diag-base.jsonl").c_str(), &st) == 0);
+}
+
+TEST(store_write_failure_is_counted_not_fatal) {
+    TmpDir t;
+    DiagStore s(t.path);
+    s.append(mk("base", 'I', "ok"));
+    ::chmod(t.path.c_str(), 0555);
+    if (::access((t.path + "/probe").c_str(), W_OK) == 0) return;  // running as root: cannot make it fail
+    uint64_t id = s.append(mk("remote", 'I', "lost"));
+    s.append(mk("remote", 'I', "lost again"));
+    ::chmod(t.path.c_str(), 0755);
+    CHECK(id > 0);
+    CHECK_EQ(s.writeErrors(), size_t(2));
+}

@@ -36,7 +36,7 @@ TEST(json_schema_keys) {
     r.count(Node::Base, "tx", 3);
     r.event(Node::Base, Level::Warn, "lost");
     auto j = toJson(r.snapshot());
-    CHECK(contains(j, "{\"schema\":1,\"now_ms\":5000,"));
+    CHECK(contains(j, "{\"schema\":2,\"now_ms\":5000,"));
     CHECK(contains(j, "\"nodes\":{\"software\":{\"dot\":\"green\""));
     CHECK(contains(j, "\"base\":{\"dot\":\"yellow\""));
     CHECK(contains(j, "\"controller\":{\"dot\":\"grey\""));

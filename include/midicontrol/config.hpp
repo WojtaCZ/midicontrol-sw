@@ -14,6 +14,7 @@
 // The song structure (prelude, verses) comes from the anchors in each MIDI file.
 //   [BINDINGS] Bind0=song.mid, ...   (parsed, not used yet)
 //   [WEB]      Enabled, Port, Bind (status page, all optional, see Config)
+//   [DIAG]     LogPort (override of the log CDC auto-detection), Dir (diagnostics store)
 namespace mc {
 
 struct Config {
@@ -30,6 +31,10 @@ struct Config {
     bool webEnabled = true;
     int webPort = 50118;
     std::string webBind = "0.0.0.0";   // IPv4 address to listen on
+
+    // [DIAG] base log + remote diagnostics
+    std::string diagLogPort;           // e.g. "/dev/ttyACM1"; empty = auto-detect "MIDIControl log"
+    std::string diagDir;               // store directory; empty = defaultDiagDir() (filled in by loadConfig)
 
     // Look up a button binding by key (e.g. "Bind0"). nullopt if absent.
     std::optional<std::string> binding(const std::string& key) const;
@@ -52,6 +57,9 @@ Config loadConfig(const std::string& path);
 // Resolve a folder value from the config (see loadConfig).
 std::string resolveFolder(const std::string& value, const std::string& configDir,
                           const std::string& home);
+
+// $XDG_STATE_HOME/midicontrol, else $HOME/.local/state/midicontrol (empty if neither is known).
+std::string defaultDiagDir(const std::function<const char*(const char*)>& getenv);
 
 // Pick the config file, first match wins:
 //   1. `cliPath` (--config) if non-empty

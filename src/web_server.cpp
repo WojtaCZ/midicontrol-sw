@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstring>
 
+#include "midicontrol/diag_api.hpp"
 #include "midicontrol/http.hpp"
 #include "midicontrol/log.hpp"
 #include "midicontrol/status_json.hpp"
@@ -56,8 +57,8 @@ void sendAll(int fd, const std::string& data) {
 }  // namespace
 
 WebServer::WebServer(mc::status::StatusRegistry& status, std::string bind, int port,
-                     std::string playFolder)
-    : _status(status), _bind(std::move(bind)), _port(port), _playFolder(std::move(playFolder)) {}
+                     std::string playFolder, mc::diag::DiagStore* diag)
+    : _status(status), _bind(std::move(bind)), _port(port), _playFolder(std::move(playFolder)), _diag(diag) {}
 
 WebServer::~WebServer() { stop(); }
 
@@ -138,11 +139,18 @@ bool WebServer::readConn(Conn& c) {
         switch (mc::http::parseRequest(c.buf, req)) {
             case mc::http::ParseResult::Incomplete:
                 continue;
-            case mc::http::ParseResult::Ok:
+            case mc::http::ParseResult::Ok: {
+                mc::http::DiagHandler diag;
+                if (_diag) {
+                    diag = [this](const std::string& query) {
+                        return mc::diag::apiDiag(*_diag, query, [this] { mc::diag::publishFaultStatus(*_diag, _status); });
+                    };
+                }
                 respond(c.fd, mc::http::route(req, mc::web::statusPageHtml(), [this] {
                     return mc::status::toJson(_status.snapshot());
-                }));
+                }, diag));
                 return true;
+            }
             case mc::http::ParseResult::TooLarge:
                 respond(c.fd, mc::http::errorResponse(413));
                 return true;

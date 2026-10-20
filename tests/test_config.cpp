@@ -147,3 +147,25 @@ TEST(config_web_bad_values) {
     CHECK(throwsOn(std::string(kMinimal) + "[WEB]\nEnabled = maybe\n"));
     CHECK(throwsOn(std::string(kMinimal) + "[WEB]\nBind =\n"));
 }
+
+TEST(config_diag_section) {
+    const std::string minimal = "[FILES]\nPlayFolder = /tmp/p\nRecordFolder = /tmp/r\n";
+    Config none = parseConfig(minimal);
+    CHECK(none.diagLogPort.empty());
+    CHECK(none.diagDir.empty());  // the default is filled in by loadConfig
+    Config cfg = parseConfig(minimal + "[DIAG]\nLogPort = /dev/ttyACM7\nDir = ~/diag\n");
+    CHECK_EQ(cfg.diagLogPort, std::string("/dev/ttyACM7"));
+    CHECK_EQ(cfg.diagDir, std::string("~/diag"));
+}
+
+TEST(config_default_diag_dir) {
+    auto env = [](std::map<std::string, std::string> m) {
+        return [m](const char* k) -> const char* {
+            auto it = m.find(k);
+            return it == m.end() ? nullptr : it->second.c_str();
+        };
+    };
+    CHECK_EQ(defaultDiagDir(env({{"XDG_STATE_HOME", "/s"}, {"HOME", "/h"}})), std::string("/s/midicontrol"));
+    CHECK_EQ(defaultDiagDir(env({{"HOME", "/h"}})), std::string("/h/.local/state/midicontrol"));
+    CHECK_EQ(defaultDiagDir(env({{"XDG_STATE_HOME", ""}, {"HOME", "/h"}})), std::string("/h/.local/state/midicontrol"));
+}

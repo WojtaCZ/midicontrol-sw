@@ -55,3 +55,10 @@ TEST(console_end_marker) {
     CHECK_EQ(endMarker(false), "\x1e" "FAIL\n");
     CHECK(std::string(kCommandsHelp).find("update <base|remote>") != std::string::npos);
 }
+
+TEST(console_parses_diag) {
+    using mc::console::Command;
+    CHECK(mc::console::parse("diag").kind == Command::Kind::Diag);
+    CHECK(mc::console::parse("  DIAG ").kind == Command::Kind::Diag);
+    CHECK(std::string(mc::console::kCommandsHelp).find("diag") != std::string::npos);
+}

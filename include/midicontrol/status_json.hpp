@@ -5,11 +5,12 @@
 
 #include "midicontrol/status.hpp"
 
-// JSON for GET /api/status (schema 1):
+// JSON for GET /api/status (schema 2):
 //
-//   {"schema":1,"now_ms":N,
+//   {"schema":2,"now_ms":N,
 //    "nodes":{"software":{"dot":"green","fields":{...},"counters":{...},
-//                         "events":[{"t":N,"level":"INFO","text":"..."}]},
+//                         "events":[{"t":N,"level":"INFO","text":"..."}],
+//                         "last_fault":<diagnostics entry object|null>,"unseen_faults":N},
 //             "base":{...},"controller":{...}},
 //    "problems":[{"t":N,"level":"WARN","node":"base","text":"..."}],
 //    "songs":[{"code":"523","problem":"empty display anchor"}]}

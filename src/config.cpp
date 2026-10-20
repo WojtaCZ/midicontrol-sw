@@ -131,6 +131,13 @@ Config parseConfig(const std::string& iniText) {
         }
     }
 
+    auto diagIt = sections.find("DIAG");
+    if (diagIt != sections.end()) {
+        const auto& d = diagIt->second;
+        if (auto it = d.find("LogPort"); it != d.end()) cfg.diagLogPort = it->second;
+        if (auto it = d.find("Dir"); it != d.end()) cfg.diagDir = it->second;
+    }
+
     return cfg;
 }
 
@@ -147,6 +154,9 @@ Config loadConfig(const std::string& path) {
     const char* home = std::getenv("HOME");
     cfg.playFolder = resolveFolder(cfg.playFolder, configDir, home ? home : "");
     cfg.recFolder = resolveFolder(cfg.recFolder, configDir, home ? home : "");
+    // The diagnostics directory is created by the store (recursively), so it need not exist yet.
+    cfg.diagDir = cfg.diagDir.empty() ? defaultDiagDir([](const char* k) { return std::getenv(k); })
+                                      : resolveFolder(cfg.diagDir, configDir, home ? home : "");
 
     if (!isDir(cfg.playFolder)) {
         throw std::runtime_error("config: play folder not found: " + cfg.playFolder);
@@ -164,6 +174,14 @@ std::string resolveFolder(const std::string& value, const std::string& configDir
     if (!value.empty() && value[0] == '/') return value;
     if (value.empty()) return value;
     return configDir + "/" + value;
+}
+
+std::string defaultDiagDir(const std::function<const char*(const char*)>& getenv) {
+    const char* xdg = getenv("XDG_STATE_HOME");
+    if (xdg && *xdg) return std::string(xdg) + "/midicontrol";
+    const char* home = getenv("HOME");
+    if (home && *home) return std::string(home) + "/.local/state/midicontrol";
+    return {};
 }
 
 std::string resolveConfigPath(const std::string& cliPath, const EnvLookup& getenv,

@@ -154,6 +154,10 @@ Any other path returns 404 and any method other than GET returns 405. Malformed 
 
 ---
 
+### Diagnostics tab and `/api/diag`
+
+The **Diagnostics** tab shows, per node (base, remote), the last fault (kind, decoded CFSR/HFSR bits, pc/lr, interrupted exception = `xpsr & 0x1FF`, BFAR/MMFAR only when valid, firmware revision, uptime), the reset-cause history and a filterable log table (node, level, tag, text search). It polls `GET /api/diag` every second while it is open; **Mark seen** calls `?ack=<id>`. Until then the node's health dot is yellow (`unseen_faults > 0` in `/api/status`, schema 2). Data: the base's log CDC ("MIDIControl log", config `[DIAG] LogPort=` to override the auto-detection) and the remote's `DIAG_GET`/`DIAG_RESP` records, stored as JSONL in `[DIAG] Dir=`. The terminal command `diag` prints the last fault per node and the last 20 lines. Details: `CLAUDE.md`, section Diagnostics.
+
 ## 3. Commands: terminal attached to the service
 
 The service listens on a Unix socket, `$XDG_RUNTIME_DIR/midicontrol.sock`, mode `0600` (owner only). The web page stays read-only; all control goes through the terminal.

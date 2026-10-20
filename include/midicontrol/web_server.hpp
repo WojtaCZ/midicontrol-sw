@@ -9,6 +9,7 @@
 
 #include "midicontrol/http.hpp"
 #include "midicontrol/songcheck.hpp"
+#include "midicontrol/diag_store.hpp"
 #include "midicontrol/status.hpp"
 
 namespace mc {
@@ -24,8 +25,9 @@ namespace mc {
 // rescans the play folder every 60 s for the song-file check.
 class WebServer {
 public:
+    // `diag` (optional) serves GET /api/diag.
     WebServer(mc::status::StatusRegistry& status, std::string bind, int port,
-              std::string playFolder);
+              std::string playFolder, mc::diag::DiagStore* diag = nullptr);
     ~WebServer();
 
     WebServer(const WebServer&) = delete;
@@ -53,6 +55,7 @@ private:
     std::string _bind;
     int _port;
     std::string _playFolder;
+    mc::diag::DiagStore* _diag;
     mc::songcheck::Scanner _scanner;
     int _listenFd = -1;
     std::vector<Conn> _conns;

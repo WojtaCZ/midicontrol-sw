@@ -83,6 +83,13 @@ void StatusRegistry::setSongs(std::vector<SongEntry> songs) {
     _songs = std::move(songs);
 }
 
+void StatusRegistry::setFaults(Node node, size_t unseen, std::string lastFaultJson) {
+    std::lock_guard<std::mutex> lk(_mutex);
+    NodeState& n = _nodes[static_cast<size_t>(node)];
+    n.unseenFaults = unseen;
+    n.lastFault = std::move(lastFaultJson);
+}
+
 Snapshot StatusRegistry::snapshot() const {
     Snapshot s;
     s.nowMs = now();
@@ -91,6 +98,8 @@ Snapshot StatusRegistry::snapshot() const {
         s.nodes[i].fields = _nodes[i].fields;
         s.nodes[i].counters = _nodes[i].counters;
         s.nodes[i].events.assign(_nodes[i].events.begin(), _nodes[i].events.end());
+        s.nodes[i].unseenFaults = _nodes[i].unseenFaults;
+        s.nodes[i].lastFault = _nodes[i].lastFault;
     }
     s.problems.assign(_problems.begin(), _problems.end());
     s.songs = _songs;
@@ -105,7 +114,21 @@ std::vector<Node> nodesForPeer(uint8_t addr) {
     }
 }
 
+namespace {
+Dot evaluateHealth(Node node, const Snapshot& s);
+}
+
 Dot evaluateDot(Node node, const Snapshot& s) {
+    Dot d = evaluateHealth(node, s);
+    // An unacknowledged fault is amber until it is marked seen; it never hides a red.
+    if (s.node(node).unseenFaults > 0 && node != Node::Software && (d == Dot::Green || (d == Dot::Grey && node == Node::Controller))) {
+        return Dot::Yellow;
+    }
+    return d;
+}
+
+namespace {
+Dot evaluateHealth(Node node, const Snapshot& s) {
     const NodeSnapshot& base = s.node(Node::Base);
     switch (node) {
         case Node::Software: {
@@ -137,5 +160,6 @@ Dot evaluateDot(Node node, const Snapshot& s) {
     }
     return Dot::Grey;
 }
+}  // namespace
 
 }  // namespace mc::status

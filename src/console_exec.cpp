@@ -2,6 +2,7 @@
 
 #include <sstream>
 
+#include "midicontrol/diag_api.hpp"
 #include "midicontrol/firmware_update.hpp"
 #include "midicontrol/log.hpp"
 
@@ -90,6 +91,13 @@ ExecResult ConsoleExecutor::execute(const std::string& line, const console::Repl
             out("Base did not answer GET_STATUS\n");
             return ExecResult::Failed;
         }
+        case Kind::Diag:
+            if (!_diag) {
+                out("Diagnostics are not available\n");
+                return ExecResult::Failed;
+            }
+            out(mc::diag::formatDiag(*_diag));
+            return ExecResult::Ok;
         case Kind::Update:
             return update(c, out, remote);
         case Kind::Usage:

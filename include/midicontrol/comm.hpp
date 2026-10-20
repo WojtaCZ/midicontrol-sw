@@ -17,6 +17,8 @@
 
 #include "midicontrol/config.hpp"
 #include "midicontrol/dispatch.hpp"
+#include "midicontrol/diag_poller.hpp"
+#include "midicontrol/diag_store.hpp"
 #include "midicontrol/display.hpp"
 #include "midicontrol/midi_ports.hpp"
 #include "midicontrol/player.hpp"
@@ -48,8 +50,9 @@ public:
     // Finds the base's serial device (auto-reconnect).
     using SerialFinder = std::function<std::optional<std::string>()>;
 
+    // `diag` (optional): where the remote's DIAG records are stored; without it the remote is not polled.
     CommHandler(const Config& config, MidiPortFinder midiFinder,
-                mc::status::StatusRegistry& status);
+                mc::status::StatusRegistry& status, mc::diag::DiagStore* diag = nullptr);
     ~CommHandler();
 
     // Start the worker threads. With a device path the port is opened right
@@ -167,6 +170,7 @@ private:
     bool isRoutine(const mc::protocol::Packet& pkt, bool tx);
     void noteConnected(const std::string& path, bool reconnect);
     void pollStatus();
+    void storeRemoteDiag(mc::diag::DiagEntry e);  // DiagPoller output (reader / keepalive thread)
     void refreshMidiPort();
     void playbackEnded(const std::string& how, const char* counter);
     static int64_t steadyMs();
@@ -234,6 +238,12 @@ private:
     std::atomic<int64_t> _hbControl{0};
     std::atomic<bool> _everConnected{false};
     std::atomic<bool> _updating{false};
+
+    // Remote diagnostics (DIAG_GET polling, see DiagPoller). Null store = not polled.
+    mc::diag::DiagStore* _diag;
+    std::unique_ptr<mc::diag::DiagPoller> _diagPoller;
+    std::set<uint8_t> _diagPids;      // our DIAG_GET ids (under _routineMutex): routine traffic
+    std::set<uint8_t> _diagRespPids;  // the remote's DIAG_RESP ids we ACK
     std::atomic<int64_t> _reconnects{0};
 
     // Song being played: sections visited (playback thread appends, control

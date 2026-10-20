@@ -11,6 +11,8 @@
 
 #include "midicontrol/status_json.hpp"
 
+#include "midicontrol/log.hpp"
+
 namespace mc::diag {
 
 namespace {
@@ -215,11 +217,26 @@ std::string safeNode(const std::string& n) {
     return s.empty() ? "unknown" : s;
 }
 
+// mkdir -p (errors are ignored here: the first append reports an unwritable store).
+void makeDirs(const std::string& path) {
+    for (size_t pos = 1; pos != std::string::npos;) {
+        pos = path.find('/', pos);
+        ::mkdir(path.substr(0, pos).c_str(), 0755);
+        if (pos != std::string::npos) ++pos;
+    }
+}
+
 }  // namespace
 
-DiagStore::DiagStore(std::string dir, size_t rotateBytes, int keepFiles)
-    : dir_(std::move(dir)), rotateBytes_(rotateBytes), keepFiles_(keepFiles < 1 ? 1 : keepFiles) {
-    ::mkdir(dir_.c_str(), 0755);
+std::string entryJson(const DiagEntry& e) {
+    std::string l = toLine(e);
+    l.pop_back();  // the newline
+    return l;
+}
+
+DiagStore::DiagStore(std::string dir, size_t rotateBytes, int keepFiles, size_t cacheEntries)
+    : dir_(std::move(dir)), rotateBytes_(rotateBytes), cacheEntries_(cacheEntries < 1 ? 1 : cacheEntries), keepFiles_(keepFiles < 1 ? 1 : keepFiles) {
+    makeDirs(dir_);
     // Largest id of every file in the directory -> next id; sizes of the current files.
     uint64_t maxId = 0;
     if (DIR* d = ::opendir(dir_.c_str())) {
@@ -263,6 +280,7 @@ void DiagStore::rotate(const std::string& node) {
     if (keepFiles_ > 1) std::rename(path(node, 0).c_str(), path(node, 1).c_str());
     else std::remove(path(node, 0).c_str());
     sizes_[safeNode(node)] = 0;
+    cache_.erase(safeNode(node));  // the oldest entries just left the files
 }
 
 uint64_t DiagStore::append(DiagEntry e) {
@@ -282,10 +300,34 @@ uint64_t DiagStore::append(DiagEntry e) {
         }
     }
     if (sz > 0 && sz + line.size() > rotateBytes_) rotate(e.node);
-    std::ofstream f(path(e.node, 0), std::ios::app | std::ios::binary);
-    f << line;
-    f.flush();
-    sizes_[safeNode(e.node)] += line.size();
+    {
+        std::ofstream f(path(e.node, 0), std::ios::app | std::ios::binary);
+        f << line;
+        f.flush();
+        if (f) {
+            sizes_[safeNode(e.node)] += line.size();
+            writeFailing_ = false;
+        } else {
+            ++writeErrors_;
+            if (!writeFailing_) {
+                writeFailing_ = true;  // one warning per failure streak
+                mc::log::warn(mc::status::Node::Software, "diagnostics store: cannot write " + path(e.node, 0) + " (entries kept in memory only)");
+            }
+        }
+    }
+    auto it = cache_.find(safeNode(e.node));
+    if (it != cache_.end()) {
+        NodeCache& c = it->second;
+        if (e.fault) {
+            c.faultIds.push_back(e.id);
+            c.lastFault = e;
+        }
+        c.tail.push_back(e);
+        if (c.tail.size() > cacheEntries_) {
+            c.tail.pop_front();
+            c.complete = false;
+        }
+    }
     return e.id;
 }
 
@@ -302,32 +344,102 @@ std::vector<DiagEntry> DiagStore::readAll(const std::string& node) const {
     return out;
 }
 
+DiagStore::NodeCache& DiagStore::cacheFor(const std::string& node) const {
+    auto it = cache_.find(safeNode(node));
+    if (it != cache_.end()) return it->second;
+    ++diskReads_;
+    NodeCache c;
+    std::vector<DiagEntry> all = readAll(node);
+    c.complete = all.size() <= cacheEntries_;
+    for (const auto& e : all) {
+        if (e.fault) {
+            c.faultIds.push_back(e.id);
+            c.lastFault = e;
+        }
+    }
+    const size_t from = all.size() > cacheEntries_ ? all.size() - cacheEntries_ : 0;
+    for (size_t i = from; i < all.size(); ++i) c.tail.push_back(std::move(all[i]));
+    return cache_.emplace(safeNode(node), std::move(c)).first->second;
+}
+
 std::vector<DiagEntry> DiagStore::query(const std::string& node, char minLevel, uint64_t beforeId, size_t limit) const {
     std::lock_guard<std::mutex> lk(mu_);
-    std::vector<DiagEntry> all = readAll(node), out;
-    int maxRank = levelRank(minLevel);
-    for (size_t i = all.size(); i-- > 0 && out.size() < limit;) {
-        if (beforeId && all[i].id >= beforeId) continue;
-        if (levelRank(all[i].level) > maxRank) continue;
-        out.push_back(std::move(all[i]));
-    }
-    return out;
+    const int maxRank = levelRank(minLevel);
+    auto scan = [&](const auto& entries) {
+        std::vector<DiagEntry> out;
+        for (size_t i = entries.size(); i-- > 0 && out.size() < limit;) {
+            if (beforeId && entries[i].id >= beforeId) continue;
+            if (levelRank(entries[i].level) > maxRank) continue;
+            out.push_back(entries[i]);
+        }
+        return out;
+    };
+    const NodeCache& c = cacheFor(node);
+    std::vector<DiagEntry> out = scan(c.tail);
+    if (out.size() >= limit || c.complete) return out;
+    // The page reaches past the cached window: ask the files.
+    ++diskReads_;
+    return scan(readAll(node));
 }
 
 std::optional<DiagEntry> DiagStore::lastFault(const std::string& node) const {
     std::lock_guard<std::mutex> lk(mu_);
-    auto all = readAll(node);
-    for (size_t i = all.size(); i-- > 0;)
-        if (all[i].fault) return all[i];
-    return std::nullopt;
+    return cacheFor(node).lastFault;
 }
 
 size_t DiagStore::unseenFaults(const std::string& node) const {
     std::lock_guard<std::mutex> lk(mu_);
     size_t n = 0;
-    for (const auto& e : readAll(node))
-        if (e.fault && e.id > ackId_) ++n;
+    for (uint64_t id : cacheFor(node).faultIds)
+        if (id > ackId_) ++n;
     return n;
+}
+
+bool DiagStore::replace(uint64_t id, DiagEntry e) {
+    std::lock_guard<std::mutex> lk(mu_);
+    e.id = id;
+    for (int i = 0; i < keepFiles_; ++i) {
+        const std::string p = path(e.node, i);
+        std::ifstream in(p, std::ios::binary);
+        if (!in) continue;
+        std::string out, line;
+        bool found = false;
+        while (std::getline(in, line)) {
+            DiagEntry old;
+            if (!found && fromLine(line, old) && old.id == id) {
+                out += toLine(e);
+                found = true;
+            } else {
+                out += line + "\n";
+            }
+        }
+        in.close();
+        if (!found) continue;
+        const std::string tmp = p + ".tmp";
+        {
+            std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+            f << out;
+            if (!f) {
+                ++writeErrors_;
+                return false;
+            }
+        }
+        std::rename(tmp.c_str(), p.c_str());
+        if (i == 0) sizes_[safeNode(e.node)] = out.size();
+        cache_.erase(safeNode(e.node));
+        return true;
+    }
+    return false;
+}
+
+size_t DiagStore::diskReads() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return diskReads_;
+}
+
+size_t DiagStore::writeErrors() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return writeErrors_;
 }
 
 void DiagStore::ack(uint64_t id) {

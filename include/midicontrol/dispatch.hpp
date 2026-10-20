@@ -52,6 +52,8 @@ public:
         std::function<void()> onKeepaliveAck;
         // Optional: a retransmission that was answered again but not executed.
         std::function<void(const mc::protocol::Packet&)> onDuplicate;
+        // DIAG_RESP from the remote (already ACKed; a retransmission is not delivered twice).
+        std::function<void(const mc::protocol::Packet&)> onDiagResp;
     };
 
     Dispatcher(CommandSink& sink, Output out) : _sink(sink), _out(std::move(out)) {}

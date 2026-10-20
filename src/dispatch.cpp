@@ -109,6 +109,10 @@ void Dispatcher::handle(const Packet& pkt) {
             }
             return;
         }
+        case MsgType::DIAG_RESP:
+            answer(std::nullopt);  // ACKed like STATUS_RESP
+            if (!broadcast && _out.onDiagResp) _out.onDiagResp(pkt);
+            return;
         // Informational messages the PC may receive: accept.
         case MsgType::SONG_LIST_RESP:
         case MsgType::STATUS_RESP:

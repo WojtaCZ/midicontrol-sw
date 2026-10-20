@@ -47,6 +47,8 @@ struct NodeSnapshot {
     std::map<std::string, Value> fields;
     std::map<std::string, uint64_t> counters;
     std::vector<Event> events;  // oldest first
+    size_t unseenFaults = 0;    // faults not yet acknowledged (diagnostics store)
+    std::string lastFault;      // JSON of the node's last fault entry, empty = none
 };
 
 struct Snapshot {
@@ -73,6 +75,8 @@ public:
     void set(Node node, const std::string& field, Value value);
     void setNow(Node node, const std::string& field) { set(node, field, now()); }
     void setSongs(std::vector<SongEntry> songs);
+    // Diagnostics: unacknowledged fault count and the last fault's JSON ("" = none) of a node.
+    void setFaults(Node node, size_t unseen, std::string lastFaultJson);
 
     Snapshot snapshot() const;
 
@@ -81,6 +85,8 @@ private:
         std::map<std::string, Value> fields;
         std::map<std::string, uint64_t> counters;
         std::deque<Event> events;
+        size_t unseenFaults = 0;
+        std::string lastFault;
     };
 
     Clock _now;
@@ -100,6 +106,7 @@ std::vector<Node> nodesForPeer(uint8_t addr);
 // Health dot of a node, from the fields the app layer keeps up to date:
 //   base:     connected, alive, status_answered, status_ms, status_ble, updating
 //   software: song_problems, plus its WARN/ERROR in the problems list
+// Base and controller additionally turn yellow (amber) while the node has unacknowledged faults.
 Dot evaluateDot(Node node, const Snapshot& s);
 
 }  // namespace mc::status

@@ -42,8 +42,14 @@ add_library(midicontrol_core
     src/fault_decode.cpp
     src/diag_codes.cpp
     src/diag_store.cpp
+    src/serial_port.cpp
+    src/log_reader.cpp
+    src/diag_poller.cpp
+    src/diag_api.cpp
 )
+find_package(Threads REQUIRED)
 target_include_directories(midicontrol_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(midicontrol_core PUBLIC Threads::Threads)
 
 # ---------------------------------------------------------------------------
 # Tests: link only the core library, so they build and run without hardware.
@@ -75,6 +81,10 @@ add_executable(midicontrol_tests
     tests/test_fault_decode.cpp
     tests/test_diag_codes.cpp
     tests/test_diag_store.cpp
+    tests/test_port_select.cpp
+    tests/test_log_reader.cpp
+    tests/test_diag_poller.cpp
+    tests/test_diag_api.cpp
 )
 target_link_libraries(midicontrol_tests PRIVATE midicontrol_core)
 target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
@@ -104,7 +114,6 @@ if(RTMIDI_FOUND)
         src/firmware_update.cpp
         src/player.cpp
         src/midi_ports.cpp
-        src/serial_port.cpp
         src/web_server.cpp
         src/console_exec.cpp
         src/control_socket.cpp

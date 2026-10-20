@@ -7,7 +7,7 @@ using namespace mc::http;
 
 namespace {
 Response get(const std::string& path, const std::string& method = "GET") {
-    return route(Request{method, path}, "<html>", [] { return std::string("{\"a\":1}"); });
+    return route(Request{method, path, ""}, "<html>", [] { return std::string("{\"a\":1}"); });
 }
 }  // namespace
 

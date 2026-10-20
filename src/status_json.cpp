@@ -106,7 +106,7 @@ std::string jsonEscape(const std::string& s) {
 
 std::string toJson(const Snapshot& s) {
     std::ostringstream os;
-    os << "{\"schema\":1,\"now_ms\":" << s.nowMs << ",\"nodes\":{";
+    os << "{\"schema\":2,\"now_ms\":" << s.nowMs << ",\"nodes\":{";
     for (size_t i = 0; i < s.nodes.size(); ++i) {
         const Node node = static_cast<Node>(i);
         const NodeSnapshot& n = s.nodes[i];
@@ -129,7 +129,7 @@ std::string toJson(const Snapshot& s) {
         }
         os << "},\"events\":";
         writeEvents(os, n.events, false);
-        os << "}";
+        os << ",\"last_fault\":" << (n.lastFault.empty() ? "null" : n.lastFault) << ",\"unseen_faults\":" << n.unseenFaults << "}";
     }
     os << "},\"problems\":";
     writeEvents(os, s.problems, true);

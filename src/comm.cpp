@@ -5,6 +5,7 @@
 #include <ctime>
 #include <sstream>
 
+#include "midicontrol/diag_api.hpp"
 #include "midicontrol/log.hpp"
 #include "midicontrol/process.hpp"
 #include "midicontrol/protocol/codec.hpp"
@@ -52,8 +53,8 @@ int64_t CommHandler::steadyMs() {
 }
 
 CommHandler::CommHandler(const Config& config, MidiPortFinder midiFinder,
-                         mc::status::StatusRegistry& status)
-    : _config(config), _status(status), _midiFinder(std::move(midiFinder)) {
+                         mc::status::StatusRegistry& status, mc::diag::DiagStore* diag)
+    : _config(config), _status(status), _midiFinder(std::move(midiFinder)), _diag(diag) {
     Dispatcher::Output out;
     out.send = [this](uint8_t dest, MsgType type, const std::vector<uint8_t>& payload) {
         send(dest, type, payload);
@@ -74,7 +75,22 @@ CommHandler::CommHandler(const Config& config, MidiPortFinder midiFinder,
     out.onDuplicate = [this](const Packet& pkt) {
         for (Node n : mc::status::nodesForPeer(pkt.source)) _status.count(n, "duplicates");
     };
+    out.onDiagResp = [this](const Packet& pkt) {
+        if (pkt.source == ADDR_REMOTE) _diagPoller->onResp(pkt.payload.data(), pkt.payload.size(), steadyMs());
+    };
     _dispatcher = std::make_unique<Dispatcher>(static_cast<CommandSink&>(*this), std::move(out));
+
+    mc::diag::DiagPoller::Hooks dh;
+    dh.sendGet = [this](const std::vector<uint8_t>& payload) {
+        const uint8_t pid = sendWithAck(ADDR_REMOTE, MsgType::DIAG_GET, payload);
+        std::lock_guard<std::mutex> lk(_routineMutex);
+        if (_diagPids.size() > 16) _diagPids.clear();  // ids wrap; only the last few matter
+        _diagPids.insert(pid);
+        return pid;
+    };
+    dh.emit = [this](mc::diag::DiagEntry e) { storeRemoteDiag(std::move(e)); };
+    dh.pcNowMs = [this] { return _status.now(); };
+    _diagPoller = std::make_unique<mc::diag::DiagPoller>(std::move(dh));
 
     _status.set(Node::Base, "connected", false);
     _status.set(Node::Base, "reconnects", int64_t{0});
@@ -146,6 +162,7 @@ void CommHandler::stopIoThreads() {
 
 void CommHandler::disconnect() {
     stopIoThreads();
+    _diagPoller->setRemoteLink(false, steadyMs());
     std::lock_guard<std::mutex> lk(_mutex);
     _serial.close();
     _pending.clear();
@@ -217,6 +234,7 @@ void CommHandler::handleSerialLoss() {
     _connected.store(false);
     _parser.reset();
     _dispatcher->reset();
+    _diagPoller->setRemoteLink(false, steadyMs());  // flushes a half-received FAULT
     _status.set(Node::Base, "connected", false);
     mc::log::warn(Node::Base, "Serial link to the base lost; waiting for it to come back...");
     post({Command::Kind::SerialLost, {}, {}, 0});
@@ -276,7 +294,7 @@ uint8_t CommHandler::sendWithAck(uint8_t dest, MsgType type, const std::vector<u
         _pending[pid] = Pending{Clock::now(), 0, type, dest, payload};
         _serial.write(raw);
     }
-    if (dest == ADDR_REMOTE) {
+    if (dest == ADDR_REMOTE && type != MsgType::DIAG_GET) {
         _status.set(Node::Controller, "last_tx", std::string(msgTypeName(type)));
         _status.setNow(Node::Controller, "last_tx_ms");
         _status.set(Node::Controller, "last_tx_result", std::string("pending"));
@@ -330,6 +348,7 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
             _pending.erase(it);
         }
     }
+    if (nak) _diagPoller->onNak(pid, reason);  // stops the polling after NAK UNKNOWN_MSG
     bool pollNak = false;
     if (nak) {
         std::lock_guard<std::mutex> lk(_routineMutex);
@@ -347,7 +366,7 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
         mc::log::info(pending ? mc::status::nodesForPeer(pending->dest)[0] : Node::Base,
                       "NAK for " + what + ": " + nakReasonName(reason));
     }
-    if (pending && pending->dest == ADDR_REMOTE) {
+    if (pending && pending->dest == ADDR_REMOTE && pending->msgType != MsgType::DIAG_GET) {
         _status.set(Node::Controller, "last_tx_result",
                     nak ? "NAK " + std::string(nakReasonName(reason)) : std::string("ACK"));
     }
@@ -431,29 +450,36 @@ bool CommHandler::isRoutine(const Packet& pkt, bool tx) {
             bounded(_pollRespPids, pkt.packetId);
             return true;
         }
+        case MsgType::DIAG_GET:
+            return tx;  // our own background poll
+        case MsgType::DIAG_RESP:
+            if (tx) return false;
+            bounded(_diagRespPids, pkt.packetId);
+            return true;
         case MsgType::ACK:
             if (pkt.payload.empty()) return false;
-            return tx ? _pollRespPids.count(pkt.payload[0]) > 0
-                      : _pollPids.count(pkt.payload[0]) > 0;
+            if (tx) return _pollRespPids.count(pkt.payload[0]) > 0 || _diagRespPids.count(pkt.payload[0]) > 0;
+            return _pollPids.count(pkt.payload[0]) > 0 || _diagPids.count(pkt.payload[0]) > 0;
         default:
             return false;
     }
 }
 
 void CommHandler::noteTx(const Packet& pkt, bool retransmit) {
+    const bool routine = isRoutine(pkt, true);
     for (Node n : mc::status::nodesForPeer(pkt.dest)) {
         _status.count(n, "tx");
         if (retransmit) _status.count(n, "retries");
         if (pkt.msgType == MsgType::NAK) _status.count(n, "nak_sent");
     }
-    if (pkt.dest == ADDR_REMOTE && !pkt.payload.empty() &&
+    if (!routine && pkt.dest == ADDR_REMOTE && !pkt.payload.empty() &&
         (pkt.msgType == MsgType::ACK || pkt.msgType == MsgType::NAK)) {
         _status.set(Node::Controller, "last_cmd_reply",
                     pkt.msgType == MsgType::ACK || pkt.payload.size() < 2
                         ? std::string(msgTypeName(pkt.msgType))
                         : "NAK " + std::string(nakReasonName(pkt.payload[1])));
     }
-    if (isRoutine(pkt, true)) return;
+    if (routine) return;
     std::string text = "TX " + describePacket(pkt);
     if (retransmit) text += " (retry)";
     for (Node n : mc::status::nodesForPeer(pkt.dest)) mc::log::debug(n, text);
@@ -466,7 +492,8 @@ void CommHandler::noteRx(const Packet& pkt) {
     }
     if (pkt.source == ADDR_REMOTE) {
         _status.setNow(Node::Controller, "last_rx_ms");
-        if (pkt.msgType != MsgType::ACK && pkt.msgType != MsgType::NAK && pkt.dest == ADDR_PC) {
+        if (pkt.msgType != MsgType::ACK && pkt.msgType != MsgType::NAK && pkt.msgType != MsgType::DIAG_RESP &&
+            pkt.dest == ADDR_PC) {
             const std::string name = msgTypeName(pkt.msgType);
             _status.set(Node::Controller, "last_cmd", name);
             _status.setNow(Node::Controller, "last_cmd_ms");
@@ -481,6 +508,7 @@ void CommHandler::noteRx(const Packet& pkt) {
         st.display = pkt.payload[2] != 0;
         st.pc = pkt.payload.size() >= 4 && pkt.payload[3] != 0;
         _status.set(Node::Base, "status_ble", st.ble);
+        _diagPoller->setRemoteLink(st.ble, steadyMs(), _updating.load());  // remote reachable -> DIAG_GET
         _status.set(Node::Base, "status_relay", st.relay);
         _status.set(Node::Base, "status_display", st.display);
         _status.set(Node::Base, "status_pc", st.pc);
@@ -539,6 +567,16 @@ void CommHandler::pollStatus() {
         _pollPid = pid;
     }
     sendPacket(Packet(ADDR_PC, ADDR_BASE, pid, MsgType::GET_STATUS));
+}
+
+void CommHandler::storeRemoteDiag(mc::diag::DiagEntry e) {
+    if (!_diag) return;
+    if (e.level == 'E' || e.level == 'W') {
+        _status.event(Node::Controller, e.level == 'E' ? mc::status::Level::Error : mc::status::Level::Warn, e.tag + ": " + e.text);
+    }
+    const bool fault = e.fault.has_value();
+    _diag->append(std::move(e));
+    if (fault) mc::diag::publishFaultStatus(*_diag, _status);
 }
 
 void CommHandler::refreshMidiPort() {
@@ -634,6 +672,7 @@ void CommHandler::keepaliveLoop() {
                                               std::to_string(KEEPALIVE_LOSS_MS / 1000) + " s).");
             }
             pollStatus();
+            _diagPoller->tick(steadyMs(), false);  // while updating this block is skipped: no DIAG_GET
         }
         if (steadyMs() - lastMidiCheck >= kMidiCheckMs) {
             lastMidiCheck = steadyMs();

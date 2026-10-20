@@ -6,9 +6,11 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstring>
+#include <cstdlib>
 #include <fstream>
 
 namespace mc {
@@ -128,48 +130,93 @@ std::vector<uint8_t> SerialPort::read(size_t maxLen) {
 
 namespace {
 
-constexpr const char* kSysTty = "/sys/class/tty";
+// One USB tty as sysfs describes it.
+struct UsbTty {
+    std::string name;       // "ttyACM0"
+    std::string vid, pid;   // lower-case hex as sysfs prints it
+    int ifNum = -1;         // bInterfaceNumber, -1 if unknown
+    std::string ifString;   // the interface's string descriptor ("MIDIControl log"), may be empty
+};
 
 // idVendor/idProduct of the USB device behind tty `name` ("ttyACM0"), found
-// by walking up the device symlink chain. False if it isn't a USB device.
-bool usbIds(const std::string& name, std::string& vid, std::string& pid) {
-    std::string base = std::string(kSysTty) + "/" + name + "/device";
+// by walking up the device symlink chain; also the interface directory's own
+// attributes (the first directory of the chain). False if it isn't a USB device.
+bool usbInfo(const std::string& sysRoot, const std::string& name, UsbTty& out) {
+    const std::string first = sysRoot + "/class/tty/" + name + "/device";
+    std::string base = first;
     for (int depth = 0; depth < 6; ++depth) {
-        vid = readSysfsLine(base + "/idVendor");
-        pid = readSysfsLine(base + "/idProduct");
-        if (!vid.empty() && !pid.empty()) return true;
+        out.vid = readSysfsLine(base + "/idVendor");
+        out.pid = readSysfsLine(base + "/idProduct");
+        if (!out.vid.empty() && !out.pid.empty()) {
+            out.name = name;
+            const std::string num = readSysfsLine(first + "/bInterfaceNumber");
+            out.ifNum = num.empty() ? -1 : static_cast<int>(std::strtol(num.c_str(), nullptr, 16));
+            out.ifString = readSysfsLine(first + "/interface");
+            return true;
+        }
         base += "/..";
     }
     return false;
 }
 
-}  // namespace
+std::string lower(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
 
-std::optional<std::string> findMidiControlPort(const std::string& vid, const std::string& pid) {
-    // Scan tty devices and resolve each to its USB device's idVendor/idProduct.
-    DIR* dir = opendir(kSysTty);
-    if (!dir) return std::nullopt;
+constexpr const char* kLogInterfaceName = "MIDIControl log";
+constexpr int kProtocolInterface = 0;
+constexpr int kLogInterface = 4;
 
-    std::optional<std::string> result;
+// All ttyACM/ttyUSB devices of the given VID:PID, sorted by name for a stable order.
+std::vector<UsbTty> candidates(const std::string& vid, const std::string& pid, const std::string& sysRoot) {
+    std::vector<UsbTty> out;
+    DIR* dir = opendir((sysRoot + "/class/tty").c_str());
+    if (!dir) return out;
     struct dirent* ent;
     while ((ent = readdir(dir)) != nullptr) {
         std::string name = ent->d_name;
         if (name.rfind("ttyACM", 0) != 0 && name.rfind("ttyUSB", 0) != 0) continue;
-        std::string v, p;
-        if (usbIds(name, v, p) && v == vid && p == pid) {
-            result = "/dev/" + name;
-            break;
-        }
+        UsbTty t;
+        if (usbInfo(sysRoot, name, t) && lower(t.vid) == lower(vid) && lower(t.pid) == lower(pid)) out.push_back(t);
     }
     closedir(dir);
-    return result;
+    std::sort(out.begin(), out.end(), [](const UsbTty& a, const UsbTty& b) { return a.name < b.name; });
+    return out;
+}
+
+}  // namespace
+
+std::optional<std::string> findMidiControlPort(const std::string& vid, const std::string& pid, const std::string& sysRoot) {
+    // The protocol CDC is USB interface 00. The log CDC (a second ttyACM of the same device) must never
+    // be taken for it, whatever order the kernel lists them in.
+    const auto all = candidates(vid, pid, sysRoot);
+    for (const auto& t : all) {
+        if (t.ifNum == kProtocolInterface) return "/dev/" + t.name;
+    }
+    // Old firmware / no interface info: the first one that is not the log CDC.
+    for (const auto& t : all) {
+        if (t.ifNum < 0 && t.ifString != kLogInterfaceName) return "/dev/" + t.name;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> findMidiControlLogPort(const std::string& vid, const std::string& pid, const std::string& sysRoot) {
+    const auto all = candidates(vid, pid, sysRoot);
+    for (const auto& t : all) {
+        if (t.ifString == kLogInterfaceName) return "/dev/" + t.name;
+    }
+    for (const auto& t : all) {
+        if (t.ifNum == kLogInterface) return "/dev/" + t.name;
+    }
+    return std::nullopt;
 }
 
 std::string usbIdOf(const std::string& devicePath) {
     auto slash = devicePath.find_last_of('/');
-    std::string vid, pid;
-    if (!usbIds(devicePath.substr(slash == std::string::npos ? 0 : slash + 1), vid, pid)) return {};
-    std::string id = vid + ":" + pid;
+    UsbTty t;
+    if (!usbInfo("/sys", devicePath.substr(slash == std::string::npos ? 0 : slash + 1), t)) return {};
+    std::string id = t.vid + ":" + t.pid;
     for (char& ch : id) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     return id;
 }

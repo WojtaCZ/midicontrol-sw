@@ -12,7 +12,7 @@
 namespace mc::console {
 
 struct Command {
-    enum class Kind { Empty, Play, Stop, Verse, List, Record, On, Off, Status, Update, Quit, Usage, Unknown };
+    enum class Kind { Empty, Play, Stop, Verse, List, Record, On, Off, Status, Diag, Update, Quit, Usage, Unknown };
     Kind kind = Kind::Empty;
     std::string arg;     // Play: code as typed; Update: path; Usage: usage text; Unknown: the line
     std::string target;  // Update: "base" or "remote"

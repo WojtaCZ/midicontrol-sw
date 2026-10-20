@@ -25,16 +25,26 @@ cmake --install build          # binary, share/midicontrol/config.conf.example, 
 
 Device: USB serial VID:PID=ABCD:1234 (base bootloader: ABCD:1235) plus ALSA MIDI ports named "MIDIControl"; both are re-discovered after a USB reconnect. Uses `arecordmidi` for recording.
 
-Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME/midicontrol/config.conf` (`~/.config/...`), else `./config.conf`. Sections: `[FILES]` (PlayFolder/RecordFolder; `~/` and config-relative paths allowed), `[PLAYBACK]` (WarmupMs, KeepPowerOn, VerseGapMs), `[WEB]` (Enabled=true, Port=50118, Bind=0.0.0.0), `[BINDINGS]` (parsed, unused). See `config.conf`.
+Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME/midicontrol/config.conf` (`~/.config/...`), else `./config.conf`. Sections: `[FILES]` (PlayFolder/RecordFolder; `~/` and config-relative paths allowed), `[PLAYBACK]` (WarmupMs, KeepPowerOn, VerseGapMs), `[WEB]` (Enabled=true, Port=50118, Bind=0.0.0.0), `[DIAG]` (LogPort= override of the log CDC auto-detection, Dir= store directory, default `$XDG_STATE_HOME/midicontrol` or `~/.local/state/midicontrol`, created recursively), `[BINDINGS]` (parsed, unused). See `config.conf`.
 
 ## Service, status page, control socket
 
 Full operator guide, behaviour, design decisions, known issues and the bench checklist: [`docs/status-web-and-service.md`](docs/status-web-and-service.md).
 
-- **Status page**: read-only, `http://<pc>:50118/` (`GET /`, `GET /api/status` JSON), served by the player process itself on its own thread. Tabs Overview / Software / Base / Controller; Base and Controller show only what the PC sees (firmware debug data later = more `fields` in the same JSON). Port 50118 is also used by the superpowers brainstorm companion server; don't run both.
+- **Status page**: read-only, `http://<pc>:50118/` (`GET /`, `GET /api/status` JSON schema 2, `GET /api/diag`), served by the player process itself on its own thread. Tabs Overview / Software / Base / Controller / Diagnostics; Base and Controller show only what the PC sees (firmware debug data later = more `fields` in the same JSON). Port 50118 is also used by the superpowers brainstorm companion server; don't run both.
 - **Single instance**: exclusive `flock` on `$XDG_RUNTIME_DIR/midicontrol.lock` (fallback `/tmp/midicontrol-<uid>/`); the serial port is opened with `TIOCEXCL`.
 - **Control socket** `$XDG_RUNTIME_DIR/midicontrol.sock` (0600): `midicontrol` in a terminal attaches to the running service as a thin client (commands run in the service; `quit` detaches); `--cmd` is the one-shot form. Line protocol in `console.hpp` (reply ends with `\x1eOK` / `\x1eFAIL`).
 - **systemd**: `Type=notify` (`READY=1`, `WATCHDOG=1` sent directly to `$NOTIFY_SOCKET`, no libsystemd), `WatchdogSec=30`, `Restart=always`, `StartLimitIntervalSec=0`. The watchdog ping is sent only while the CommHandler reader, keepalive and control threads all stamp their heartbeats. `loginctl enable-linger $USER` is required for start at boot.
+
+## Diagnostics (base log + remote DIAG records)
+
+- **Sources**: the base's second CDC "MIDIControl log" (text lines `[ssssss.mmm] L tag: text`, read by `LogReader` thread -> `LogIngest` -> `DiagStore`, node "base") and the remote's binary records (`DIAG_GET` every 10 s while the remote link is up, answered by `DIAG_RESP`, driven by `DiagPoller` inside `CommHandler`, node "remote").
+- **Port selection**: `findMidiControlPort()` = USB interface 00 of ABCD:1234 (never the log CDC); `findMidiControlLogPort()` = interface string "MIDIControl log", fallback interface 04. Both take a sysfs root for tests. `[DIAG] LogPort=` overrides the log port. The log port is opened exclusively (TIOCEXCL): close minicom/picocom before the service can read it.
+- **Store**: JSONL per node, rotating (1 MiB x 3), global monotonic ids, in-memory tail cache (2000 entries per node) so the 1 s web polling does not re-read files; fault acknowledgement in `diag-ack.json`. `replace()` rewrites one entry (fault upgrades).
+- **Replay window rule** (`LogIngest`): after a base reset the pre-reset log is replayed between `--- log before reset ---` and `--- end of log before reset ---`, then the boot banner prints the full fault record. Only inside that window (up to the first non-`sys`, non-fault line after the banner) a fault with the same kind and count as the last stored one *replaces* that entry. Outside it the same kind/count is a new entry: the base's fault counter restarts after a power loss.
+- **API**: `GET /api/diag?node=base|remote&level=E|W|I|D&before=<id>&limit=<=200>&ack=<id>` -> `{"schema":1,"entries":[...],"next_before":id|null}`. `/api/status` (schema 2) has per node `last_fault` and `unseen_faults`; base/controller health dot is yellow while `unseen_faults > 0` (until "Mark seen" = `ack`).
+- **Console**: `diag` prints the last fault per node and the last 20 lines.
+- **Remote polling rules**: no DIAG_GET during a firmware update; every DIAG_RESP is ACKed (dispatcher); NAK UNKNOWN_MSG stops the polling until the next link-up; cursor = next_cursor, reset on boot_id change; a full page (n = 8) is followed up at once.
 
 ## Dependencies (C++)
 
@@ -59,9 +69,10 @@ Core (testable anywhere):
 - **`verse`** — scans a parsed file for verse anchors (legacy helper, tests only).
 - **`config`** — INI loader and config-path resolution.
 - **`status`** — `StatusRegistry` (thread-safe; per-node counters, fields, 200-event rings, 50-entry problems list of WARN/ERROR; injected clock), `nodesForPeer` (BASE→Base, REMOTE→Controller, BROADCAST→both, rest→Base) and the dot rules (`evaluateDot`).
-- **`status_json`** — `/api/status` JSON (schema 1) and a UTF-8-safe `jsonEscape`.
-- **`http`** — request parsing (8 KiB limit), routing (`/`, `/api/status`, 404, 405) and response building, no sockets.
+- **`status_json`** — `/api/status` JSON (schema 2: per node `last_fault`, `unseen_faults`) and a UTF-8-safe `jsonEscape`.
+- **`http`** — request parsing (8 KiB limit), routing (`/`, `/api/status`, `/api/diag`, 404, 405) and response building, no sockets.
 - **`web_page`** — the embedded status page (inline CSS/JS, no external requests).
+- **`log_line`, `fault_decode`, `diag_codes`, `diag_store`, `diag_api`, `diag_poller`, `log_reader`** — diagnostics (see the section above): line parser, fault accumulation/decoding, DIAG record decoder, JSONL store, `/api/diag` + `diag` text, remote polling state machine, base log ingest + reader thread.
 - **`songcheck`** — per-file song checks (parse failure, empty display anchor, no anchors, bad file name) and an incremental `Scanner` (mtime/size).
 - **`console`** — terminal command parsing shared by standalone and attached mode, update-path absolutizing, socket reply markers.
 - **`log`** — process-wide logger: console (INFO stdout, WARN/ERROR stderr, DEBUG not printed) plus registry events per node.
@@ -69,7 +80,7 @@ Core (testable anywhere):
 - **`protocol/names`** — `msgTypeName`, `nakReasonName`, `describePacket` (event text such as `REPLAY_ANCHOR id=8`).
 
 App layer (needs hardware):
-- **`serial_port`** — termios wrapper + USB VID:PID discovery via sysfs.
+- **`serial_port`** — termios wrapper + USB VID:PID/interface discovery via sysfs (compiled into the core library, tested with a fake sysfs tree).
 - **`midi_ports`** — RtMidi discovery of "MIDIControl" ports.
 - **`player`** — runs a `PlaybackEngine` on its own thread with the wall clock and RtMidi out. Owned by one thread only; `onFinished` just posts a message (never destroys the player on its own thread).
 - **`comm`** — `CommHandler`: reader thread (RX, `Dispatcher`, retries with the same PacketId, reconnect when the port disappears), keepalive thread (2 s, base lost after 6 s), and a **control thread** with a command queue that alone creates/stops/destroys the `Player` (organ warm-up waits happen there, never on the reader). Sends NOW_PLAYING_INFO to the base and SIGNAL_PLAYING/ANCHOR/STOPPED to the remote (0x03).
@@ -85,7 +96,7 @@ App layer (needs hardware):
 
 ## Tests
 
-`tests/` uses a tiny built-in harness (`test_framework.hpp`, no external deps). Covers CRC vectors, codec/parser, SysEx, NOW_PLAYING_INFO encoding, both SMF SysEx framings, the SMF reader against the real files in `songs/`, song lookup/list paging, verse sequencing and the playback engine (fake clock), the dispatcher's ACK/NAK/duplicate logic, config (keys, path resolution, `[WEB]`), update-file validation, message names, the status registry and dot rules, JSON escaping/schema, HTTP parsing/routing, the embedded page (self-contained), the song-file check, console command parsing, the logger and child-process signal handling. All deterministic: no real time, no ports. `MC_SONGS_DIR` is injected by CMake.
+`tests/` uses a tiny built-in harness (`test_framework.hpp`, no external deps). Covers CRC vectors, codec/parser, SysEx, NOW_PLAYING_INFO encoding, both SMF SysEx framings, the SMF reader against the real files in `songs/`, song lookup/list paging, verse sequencing and the playback engine (fake clock), the dispatcher's ACK/NAK/duplicate logic, config (keys, path resolution, `[WEB]`), update-file validation, message names, the status registry and dot rules, JSON escaping/schema, HTTP parsing/routing, the embedded page (self-contained), the song-file check, console command parsing, the logger and child-process signal handling, the diagnostics core (port selection, store/cache, log ingest incl. reconnect and the replay window, DIAG polling, `/api/diag`, status schema 2). All deterministic: no real time, no ports. `MC_SONGS_DIR` is injected by CMake.
 
 ## Protocol Details
 

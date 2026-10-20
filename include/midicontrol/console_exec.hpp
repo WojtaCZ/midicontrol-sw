@@ -6,6 +6,7 @@
 
 #include "midicontrol/comm.hpp"
 #include "midicontrol/console.hpp"
+#include "midicontrol/diag_store.hpp"
 #include "midicontrol/status.hpp"
 
 namespace mc {
@@ -15,8 +16,9 @@ namespace mc {
 // its own thread; only one firmware update runs at a time.
 class ConsoleExecutor {
 public:
-    ConsoleExecutor(CommHandler& handler, mc::status::StatusRegistry& status)
-        : _handler(handler), _status(status) {}
+    // `diag` (optional) backs the `diag` command.
+    ConsoleExecutor(CommHandler& handler, mc::status::StatusRegistry& status, mc::diag::DiagStore* diag = nullptr)
+        : _handler(handler), _status(status), _diag(diag) {}
 
     // `remote`: `out` is a socket client rather than this process's stdout
     // (log lines such as firmware-update progress are then copied to it).
@@ -27,6 +29,7 @@ private:
 
     CommHandler& _handler;
     mc::status::StatusRegistry& _status;
+    mc::diag::DiagStore* _diag;
     std::mutex _updateMutex;
 };
 

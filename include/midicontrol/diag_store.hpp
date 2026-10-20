@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -21,9 +22,15 @@ namespace mc::diag {
 //             "mmfar":N,"bfar":N,"rev":"..","up":N,"count":N,"code":N}}
 // Ids are global (shared by all nodes) and monotonic across restarts. Fault acknowledgement is kept in
 // diag-ack.json. Thread-safe. Level order: E < W < I < D.
+// Reads are served from an in-memory tail cache (last `cacheEntries` entries per node, all fault ids and the
+// last fault), loaded from disk once per node and extended on append; only a page older than the cache goes
+// back to the files.
+// One entry as a JSON object (the JSONL line without its newline; also the /api/diag entry shape).
+std::string entryJson(const DiagEntry& e);
+
 class DiagStore {
 public:
-    explicit DiagStore(std::string dir, size_t rotateBytes = 1 << 20, int keepFiles = 3);
+    explicit DiagStore(std::string dir, size_t rotateBytes = 1 << 20, int keepFiles = 3, size_t cacheEntries = 2000);
 
     uint64_t append(DiagEntry e);  // assigns id, writes one line, rotates
     // Newest first; entries with id < beforeId (0 = no limit) and level at least as severe as minLevel.
@@ -31,20 +38,38 @@ public:
     std::optional<DiagEntry> lastFault(const std::string& node) const;
     size_t unseenFaults(const std::string& node) const;  // faults with id > acked id
     void ack(uint64_t id);
+    // Replace the stored entry with this id (same node as `e`) by `e`; false if there is none.
+    bool replace(uint64_t id, DiagEntry e);
+
+    size_t diskReads() const;   // full file scans so far (tests: the cache must avoid them)
+    size_t writeErrors() const; // appends that could not be written (the entry stays in memory only)
 
 private:
     std::string path(const std::string& node, int idx) const;
     std::vector<DiagEntry> readAll(const std::string& node) const;  // oldest first
     void rotate(const std::string& node);
 
+    struct NodeCache {
+        bool complete = false;  // `tail` holds everything that is on disk
+        std::deque<DiagEntry> tail;  // oldest first
+        std::vector<uint64_t> faultIds;
+        std::optional<DiagEntry> lastFault;
+    };
+    NodeCache& cacheFor(const std::string& node) const;  // loads on first use; mu_ held
+
     std::string dir_;
     size_t rotateBytes_;
+    size_t cacheEntries_;
     int keepFiles_;
     mutable std::mutex mu_;
     uint64_t nextId_ = 1;
     uint64_t ackId_ = 0;
     std::set<std::string> checked_;        // nodes whose file end was verified to be newline-terminated
     std::map<std::string, size_t> sizes_;  // current file size per node
+    mutable std::map<std::string, NodeCache> cache_;
+    mutable size_t diskReads_ = 0;
+    size_t writeErrors_ = 0;
+    bool writeFailing_ = false;  // a failure streak is already logged
 };
 
 }  // namespace mc::diag

@@ -41,6 +41,11 @@ td{padding:2px 10px 2px 0;vertical-align:top}
 .note{opacity:.5;font-style:italic}
 .warn{color:var(--yellow)}
 .empty{opacity:var(--muted)}
+.dg select,.dg input{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 6px;margin-right:8px}
+.dg button{font:inherit;cursor:pointer;margin-left:10px}
+.dg .fl td:first-child{opacity:var(--muted);width:160px;white-space:nowrap}
+.dg .E{color:var(--red)}.dg .W{color:var(--yellow)}.dg .D{opacity:var(--muted)}
+.dg .unseen{color:var(--yellow);font-weight:600}
 </style>
 </head>
 <body>
@@ -49,7 +54,7 @@ td{padding:2px 10px 2px 0;vertical-align:top}
 <main id="main"></main>
 <script>
 "use strict";
-const TABS=[["overview","Overview"],["software","Software"],["base","Base"],["controller","Controller"]];
+const TABS=[["overview","Overview"],["software","Software"],["base","Base"],["controller","Controller"],["diag","Diagnostics"]];
 let data=null, fetchedAt=0, failed=false;
 
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e;}
@@ -231,6 +236,105 @@ function overview(){
   return s;
 }
 
+// --- Diagnostics tab: built once (the filter inputs must keep focus), filled by its own 1 s poll ---
+const DG={sec:null,body:null,faults:null,resets:null,note:null,entries:[],resetEntries:[],node:"",level:"D",tag:"",text:"",timer:null};
+function hex(v){return "0x"+(v>>>0).toString(16).padStart(8,"0");}
+function faultTable(name,node,fl,unseen){
+  const box=el("div");
+  const h=el("h5",null,name+" – last fault");
+  box.append(h);
+  if(!fl){box.append(el("div","empty","no fault recorded"));return box;}
+  const f=fl.fault||{},bits=f.cfsr_bits||[];
+  const ipsr=(f.xpsr>>>0)&0x1FF;
+  const rows=[["Kind",f.kind+(f.count?" #"+f.count:"")],["When",stamp(fl.t)+(unseen>0?"  (not marked seen)":"  (seen)")],
+    ["pc / lr",hex(f.pc)+" / "+hex(f.lr)],
+    ["Interrupted",ipsr===0?"thread mode":"exception "+ipsr+"  (xpsr "+hex(f.xpsr)+")"]];
+  if(f.cfsr!==undefined)rows.push(["CFSR",hex(f.cfsr)+"  "+bits.join(" ")]);
+  if(f.hfsr)rows.push(["HFSR",hex(f.hfsr)+"  "+(f.hfsr_bits||[]).join(" ")]);
+  if(bits.includes("BFARVALID"))rows.push(["BFAR",hex(f.bfar)]);
+  if(bits.includes("MMARVALID"))rows.push(["MMFAR",hex(f.mmfar)]);
+  if(f.rev)rows.push(["Revision",f.rev]);
+  if(f.up)rows.push(["Uptime at fault",dur(f.up)]);
+  const t=el("table","fl mono");
+  for(const [k,v] of rows){const tr=el("tr");tr.append(el("td",null,k),el("td",unseen>0&&k==="When"?"unseen":null,v));t.append(tr);}
+  box.append(t);
+  if(unseen>0){
+    const b=el("button",null,"Mark seen");
+    b.onclick=async()=>{b.disabled=true;try{await fetch("/api/diag?limit=1&ack="+fl.id,{cache:"no-store"});}catch(e){}pollOnce();};
+    h.append(b);
+  }
+  return box;
+}
+function resetText(e){
+  // base banner "reset: IWDG (csr ...)", remote BOOT record "boot, reset: PIN|SOFTWARE"
+  return e.text.startsWith("reset:")||e.text.startsWith("boot, reset")?e.text:null;
+}
+function drawDiag(){
+  if(!DG.sec)return;
+  DG.faults.replaceChildren();
+  if(data){
+    DG.faults.append(faultTable("Base","base",data.nodes.base.last_fault,data.nodes.base.unseen_faults),
+                     faultTable("Remote","controller",data.nodes.controller.last_fault,data.nodes.controller.unseen_faults));
+  }
+  DG.resets.replaceChildren();
+  const rt=el("table","ev");let n=0;
+  for(const e of DG.resetEntries){
+    const r=resetText(e);if(r===null)continue;
+    const tr=el("tr");tr.append(el("td",null,stamp(e.t)),el("td",null,e.node),el("td",null,r));rt.append(tr);
+    if(++n>=10)break;
+  }
+  DG.resets.append(n?rt:el("div","empty","none recorded"));
+  const q=DG.text.toLowerCase(),tg=DG.tag.toLowerCase(),t=el("table","ev");
+  let shown=0;
+  for(const e of DG.entries){
+    if(tg&&!e.tag.toLowerCase().includes(tg))continue;
+    if(q&&!e.text.toLowerCase().includes(q))continue;
+    const tr=el("tr",e.lvl);
+    tr.append(el("td",null,clock(e.t,true)),el("td",null,e.node),el("td",null,e.lvl),el("td",null,e.tag),el("td",null,e.text));
+    t.append(tr);shown++;
+  }
+  DG.body.replaceChildren(shown?t:el("div","empty","no entries"));
+}
+function diagSection(){
+  if(DG.sec)return DG.sec;
+  const s=el("section","dg");
+  DG.faults=el("div");DG.resets=el("div");DG.body=el("div");
+  const bar=el("div");
+  const node=el("select"),level=el("select"),tag=el("input"),text=el("input");
+  for(const [v,n] of [["","both nodes"],["base","base"],["remote","remote"]]){const o=el("option",null,n);o.value=v;node.append(o);}
+  for(const [v,n] of [["D","all levels"],["I","info+"],["W","warnings+"],["E","errors"]]){const o=el("option",null,n);o.value=v;level.append(o);}
+  tag.placeholder="tag";tag.size=8;text.placeholder="search text";text.size=24;
+  node.onchange=()=>{DG.node=node.value;pollOnce();};
+  level.onchange=()=>{DG.level=level.value;pollOnce();};
+  tag.oninput=()=>{DG.tag=tag.value;drawDiag();};
+  text.oninput=()=>{DG.text=text.value;drawDiag();};
+  bar.append(node,level,tag,text);
+  s.append(DG.faults,el("h5",null,"Reset causes"),DG.resets,el("h5",null,"Log"),bar,DG.body);
+  DG.sec=s;
+  return s;
+}
+async function getDiag(qs){
+  const ac=new AbortController(),timer=setTimeout(()=>ac.abort(),3000);
+  try{
+    const r=await fetch("/api/diag?"+qs,{cache:"no-store",signal:ac.signal});
+    if(!r.ok)throw new Error(r.status);
+    return (await r.json()).entries;
+  }finally{clearTimeout(timer);}
+}
+async function pollOnce(){
+  try{
+    DG.entries=await getDiag("limit=200&level="+DG.level+(DG.node?"&node="+DG.node:""));
+    DG.resetEntries=await getDiag("limit=200&level=I");
+  }catch(e){}
+  if(String(window.getSelection())==="")drawDiag();
+}
+function diagLoop(){
+  DG.timer=null;
+  if(current()!=="diag")return;  // polls only while the tab is open
+  pollOnce().then(()=>{if(!DG.timer&&current()==="diag")DG.timer=setTimeout(diagLoop,1000);});
+}
+function diag(){diagSection();drawDiag();if(!DG.timer)diagLoop();return DG.sec;}
+
 // --- page ---
 function current(){const h=location.hash.slice(1);return TABS.some(x=>x[0]===h)?h:"overview";}
 function renderTabs(){
@@ -244,9 +348,10 @@ function renderTabs(){
 function render(){
   renderTabs();
   if(!data)return;
-  const builders={overview,software,base,controller};
-  const sec=builders[current()]();sec.className="on";
-  document.getElementById("main").replaceChildren(sec);
+  const builders={overview,software,base,controller,diag};
+  const sec=builders[current()]();sec.classList.add("on");
+  const main=document.getElementById("main");
+  if(main.firstChild!==sec)main.replaceChildren(sec);  // the cached Diagnostics section keeps its input focus
 }
 function renderTop(){
   const u=document.getElementById("upd");u.replaceChildren();

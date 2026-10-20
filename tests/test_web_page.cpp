@@ -32,3 +32,17 @@ TEST(web_page_fetch_times_out) {
     CHECK(has(html, "AbortController"));
     CHECK(has(html, "no connection"));
 }
+
+TEST(web_page_has_diagnostics_tab) {
+    const std::string& html = mc::web::statusPageHtml();
+    CHECK(has(html, "Diagnostics"));
+    CHECK(has(html, "/api/diag"));
+    CHECK(has(html, "ack="));          // "mark seen"
+    CHECK(has(html, "last_fault"));    // per-node last fault comes from /api/status
+    CHECK(has(html, "0x1FF"));         // interrupted exception = xpsr & 0x1FF
+    CHECK(has(html, "BFARVALID"));     // BFAR/MMFAR only when valid
+    CHECK(has(html, "MMARVALID"));
+    CHECK(!has(html, "innerHTML"));
+    CHECK(!has(html, "http://"));
+    CHECK(!has(html, "https://"));
+}

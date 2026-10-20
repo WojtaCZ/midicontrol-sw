@@ -49,7 +49,9 @@ ParseResult parseRequest(const std::string& buffer, Request& out, size_t maxSize
         return ParseResult::Bad;
     }
     out.method = method;
-    out.path = target.substr(0, target.find('?'));
+    const size_t q = target.find('?');
+    out.path = target.substr(0, q);
+    out.query = q == std::string::npos ? std::string() : target.substr(q + 1);
     return ParseResult::Ok;
 }
 
@@ -69,10 +71,15 @@ Response errorResponse(int status) {
 }
 
 Response route(const Request& req, const std::string& html,
-               const std::function<std::string()>& statusJson) {
+               const std::function<std::string()>& statusJson, const DiagHandler& diagJson) {
     if (req.method != "GET") return errorResponse(405);
     if (req.path == "/") return Response{200, "text/html; charset=utf-8", html};
     if (req.path == "/api/status") return Response{200, "application/json", statusJson()};
+    if (req.path == "/api/diag" && diagJson) {
+        auto body = diagJson(req.query);
+        if (!body) return errorResponse(400);
+        return Response{200, "application/json", *body};
+    }
     return errorResponse(404);
 }
 

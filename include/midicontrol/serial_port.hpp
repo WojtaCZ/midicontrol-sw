@@ -42,10 +42,15 @@ private:
     std::string _path;
 };
 
-// Find the MIDIControl serial device by USB VID:PID (default abcd:1234) using
-// sysfs. Returns the /dev path (e.g. "/dev/ttyACM0") or nullopt if not present.
-std::optional<std::string> findMidiControlPort(const std::string& vid = "abcd",
-                                               const std::string& pid = "1234");
+// Find the MIDIControl *protocol* serial device (USB interface 00 of the VID:PID, default abcd:1234)
+// using sysfs under `sysRoot` (a parameter for tests). The base also exposes a second CDC with the
+// text log; that one is never returned here. nullopt if not present.
+std::optional<std::string> findMidiControlPort(const std::string& vid = "abcd", const std::string& pid = "1234",
+                                               const std::string& sysRoot = "/sys");
+
+// The base's "MIDIControl log" CDC: the interface whose string is "MIDIControl log", else interface 04.
+std::optional<std::string> findMidiControlLogPort(const std::string& vid = "abcd", const std::string& pid = "1234",
+                                                  const std::string& sysRoot = "/sys");
 
 // "ABCD:1234" for a USB serial device path ("/dev/ttyACM0"), empty if unknown.
 std::string usbIdOf(const std::string& devicePath);

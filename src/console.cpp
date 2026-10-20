@@ -38,7 +38,7 @@ void split(const std::string& line, std::string& word, std::string& rest) {
 
 const char* const kCommandsHelp =
     "Commands: play <code>, stop, verse (add verse), list, record, on, off, status,\n"
-    "          update <base|remote> <name-update.bin>, quit\n";
+    "          diag (last faults + log lines), update <base|remote> <name-update.bin>, quit\n";
 
 Command parse(const std::string& raw) {
     using Kind = Command::Kind;
@@ -67,6 +67,8 @@ Command parse(const std::string& raw) {
         c.kind = Kind::Off;
     } else if (word == "status") {
         c.kind = Kind::Status;
+    } else if (word == "diag") {
+        c.kind = Kind::Diag;
     } else if (word == "update") {
         std::string target, path;
         split(rest, target, path);

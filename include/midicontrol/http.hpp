@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 
 // Minimal HTTP/1.1 for the read-only status page: request parsing, routing
@@ -14,7 +15,8 @@ inline constexpr size_t kMaxRequest = 8192;
 
 struct Request {
     std::string method;
-    std::string path;  // without the query string
+    std::string path;   // without the query string
+    std::string query;  // after '?', undecoded; empty if none
 };
 
 enum class ParseResult { Incomplete, Ok, Bad, TooLarge };
@@ -38,10 +40,13 @@ std::string serialize(const Response& r);
 // text/plain "<code> <reason>\n".
 Response errorResponse(int status);
 
-// GET / -> the page, GET /api/status -> statusJson(), other paths 404,
-// other methods 405.
+// Body of GET /api/diag for a query string; nullopt = invalid parameters (400).
+using DiagHandler = std::function<std::optional<std::string>(const std::string& query)>;
+
+// GET / -> the page, GET /api/status -> statusJson(), GET /api/diag -> diagJson(query) (404 without a
+// handler), other paths 404, other methods 405.
 Response route(const Request& req, const std::string& html,
-               const std::function<std::string()>& statusJson);
+               const std::function<std::string()>& statusJson, const DiagHandler& diagJson = nullptr);
 
 }  // namespace mc::http
 
