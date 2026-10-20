@@ -30,3 +30,20 @@ TEST(serial_open_fails_while_another_process_holds_the_flock) {
     ::close(slave);
     ::close(master);
 }
+
+// A hung-up tty (the USB device went away but its /dev node stays, e.g. in a container without udev) reads
+// as EOF forever and the path still exists: the reader must notice it from the hangup, not from the path.
+TEST(serial_read_detects_a_hung_up_port_even_though_the_path_exists) {
+    int master = -1, slave = -1;
+    char name[128] = {};
+    CHECK(openpty(&master, &slave, name, nullptr, nullptr) == 0);
+    mc::SerialPort port;
+    CHECK(port.open(name, 115200));
+    port.read(16);
+    CHECK(port.healthy());
+    ::close(master);  // the device vanishes
+    port.read(16);
+    CHECK(!port.healthy());
+    port.close();
+    ::close(slave);
+}
