@@ -241,6 +241,39 @@ TEST(store_cache_window_smaller_than_history_pages_from_disk) {
     CHECK_EQ(s.unseenFaults("base"), size_t(1));
 }
 
+// Review finding: level=E/W pages with fewer matches than the limit must not rescan the files on every poll.
+TEST(store_level_filter_is_served_from_cache_beyond_the_tail_window) {
+    TmpDir t;
+    DiagStore s(t.path, 1 << 20, 3, 5);  // cache keeps 5 entries per node
+    for (int i = 1; i <= 40; ++i) s.append(mk("base", i % 10 == 0 ? 'E' : 'I', "n" + std::to_string(i)));
+    auto first = s.query("base", 'E', 0, 50);
+    CHECK_EQ(first.size(), size_t(4));
+    const size_t reads = s.diskReads();
+    for (int i = 0; i < 5; ++i) {
+        CHECK_EQ(s.query("base", 'E', 0, 50).size(), size_t(4));
+        CHECK_EQ(s.query("base", 'W', 0, 50).size(), size_t(4));
+    }
+    s.append(mk("base", 'E', "new"));
+    CHECK_EQ(s.query("base", 'E', 0, 50)[0].text, std::string("new"));
+    CHECK_EQ(s.query("base", 'E', 0, 50).size(), size_t(5));
+    CHECK_EQ(s.diskReads(), reads);
+}
+
+TEST(store_ack_is_clamped_to_the_newest_id) {
+    TmpDir t;
+    {
+        DiagStore s(t.path);
+        uint64_t id = s.append(mk("base", 'E', "f", true));
+        s.ack(99999999);
+        CHECK_EQ(s.unseenFaults("base"), size_t(0));
+        uint64_t id2 = s.append(mk("base", 'E', "f2", true));
+        CHECK_EQ(id2, id + 1);
+        CHECK_EQ(s.unseenFaults("base"), size_t(1));  // a later fault still raises the dot
+    }
+    DiagStore s2(t.path);  // and the clamped value is what was persisted
+    CHECK_EQ(s2.unseenFaults("base"), size_t(1));
+}
+
 TEST(store_creates_directory_recursively) {
     TmpDir t;
     std::string deep = t.path + "/a/b/c";

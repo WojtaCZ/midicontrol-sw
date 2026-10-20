@@ -52,6 +52,9 @@ private:
     struct NodeCache {
         bool complete = false;  // `tail` holds everything that is on disk
         std::deque<DiagEntry> tail;  // oldest first
+        // Last `cacheEntries` E/W entries: level=E/W pages are answered from here, not by scanning the files.
+        bool sevComplete = false;  // `sev` holds every E/W entry that is on disk
+        std::deque<DiagEntry> sev;  // oldest first
         std::vector<uint64_t> faultIds;
         std::optional<DiagEntry> lastFault;
     };

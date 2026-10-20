@@ -322,6 +322,13 @@ uint64_t DiagStore::append(DiagEntry e) {
             c.faultIds.push_back(e.id);
             c.lastFault = e;
         }
+        if (e.level == 'E' || e.level == 'W') {
+            c.sev.push_back(e);
+            if (c.sev.size() > cacheEntries_) {
+                c.sev.pop_front();
+                c.sevComplete = false;
+            }
+        }
         c.tail.push_back(e);
         if (c.tail.size() > cacheEntries_) {
             c.tail.pop_front();
@@ -351,7 +358,15 @@ DiagStore::NodeCache& DiagStore::cacheFor(const std::string& node) const {
     NodeCache c;
     std::vector<DiagEntry> all = readAll(node);
     c.complete = all.size() <= cacheEntries_;
+    c.sevComplete = true;
     for (const auto& e : all) {
+        if (e.level == 'E' || e.level == 'W') {
+            c.sev.push_back(e);
+            if (c.sev.size() > cacheEntries_) {
+                c.sev.pop_front();
+                c.sevComplete = false;
+            }
+        }
         if (e.fault) {
             c.faultIds.push_back(e.id);
             c.lastFault = e;
@@ -375,6 +390,10 @@ std::vector<DiagEntry> DiagStore::query(const std::string& node, char minLevel, 
         return out;
     };
     const NodeCache& c = cacheFor(node);
+    if (maxRank <= levelRank('W')) {  // E/W filter: the severity tail answers it without a disk scan
+        std::vector<DiagEntry> sevOut = scan(c.sev);
+        if (sevOut.size() >= limit || c.sevComplete) return sevOut;
+    }
     std::vector<DiagEntry> out = scan(c.tail);
     if (out.size() >= limit || c.complete) return out;
     // The page reaches past the cached window: ask the files.
@@ -444,6 +463,7 @@ size_t DiagStore::writeErrors() const {
 
 void DiagStore::ack(uint64_t id) {
     std::lock_guard<std::mutex> lk(mu_);
+    if (id >= nextId_) id = nextId_ - 1;  // never beyond the newest id: a future id would silence later faults
     if (id <= ackId_) return;
     ackId_ = id;
     std::string tmp = dir_ + "/diag-ack.json.tmp";
