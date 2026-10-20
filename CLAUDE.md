@@ -44,12 +44,13 @@ Full operator guide, behaviour, design decisions, known issues and the bench che
 - **Replay window rule** (`LogIngest`): after a base reset the pre-reset log is replayed between `--- log before reset ---` and `--- end of log before reset ---`, then the boot banner prints the full fault record. Only inside that window (up to the first non-`sys`, non-fault line after the banner) a fault with the same kind and count as the last stored one *replaces* that entry. Outside it the same kind/count is a new entry: the base's fault counter restarts after a power loss.
 - **API**: `GET /api/diag?node=base|remote&level=E|W|I|D&before=<id>&limit=<=200>&ack=<id>` -> `{"schema":1,"entries":[...],"next_before":id|null}`. `/api/status` (schema 2) has per node `last_fault` and `unseen_faults`; base/controller health dot is yellow while `unseen_faults > 0` (until "Mark seen" = `ack`).
 - **Console**: `diag` prints the last fault per node and the last 20 lines.
-- **Remote polling rules**: no DIAG_GET during a firmware update; every DIAG_RESP is ACKed (dispatcher); NAK UNKNOWN_MSG stops the polling until the next link-up; cursor = next_cursor, reset on boot_id change; a full page (n = 8) is followed up at once.
+- **Remote polling rules**: no DIAG_GET during a firmware update; every DIAG_RESP is ACKed (dispatcher); NAK UNREACHABLE and NAK UNKNOWN_MSG stop the polling until the next link-up, NAK BUSY only backs off to the next 10 s tick and never stops it (R27; BUSY with the link up must not silence diagnostics); cursor = next_cursor, reset on boot_id change; a full page (n = 8) is followed up at once.
 
 ## Dependencies (C++)
 
 - C++17 compiler, CMake ≥ 3.16
 - **RtMidi** (pkg-config `rtmidi`) — MIDI playback/port discovery (only the `midicontrol` app target; core + tests have no external deps)
+  - **RtMidi is not available in the dev container** (no package, no network): the `midicontrol` app target does not link there. Bench builds on 2026-10-19/20 used a scratch RtMidi-compatible ALSA-sequencer shim (never committed, covers only the API the app uses); the core library and its tests build and run without it. The user's host builds use the real RtMidi.
 - POSIX termios (serial) + pthreads
 - `arecordmidi` (ALSA utils) for recording
 
