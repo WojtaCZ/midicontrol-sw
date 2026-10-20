@@ -352,7 +352,7 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
             _pending.erase(it);
         }
     }
-    if (nak && _diagPoller) _diagPoller->onNak(pid, reason);  // stops the polling after NAK UNKNOWN_MSG/UNREACHABLE/BUSY
+    if (nak && _diagPoller) _diagPoller->onNak(pid, reason);  // stops the polling after NAK UNKNOWN_MSG/UNREACHABLE (BUSY only retries on the timer)
     bool pollNak = false;
     if (nak) {
         std::lock_guard<std::mutex> lk(_routineMutex);
