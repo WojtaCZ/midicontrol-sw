@@ -81,7 +81,12 @@ void DiagPoller::onNak(uint8_t pid, uint8_t reason) {
     std::lock_guard<std::mutex> lk(mu_);
     if (!outstanding_ || *outstanding_ != pid) return;
     outstanding_.reset();
-    if (reason == static_cast<uint8_t>(mc::protocol::NakReason::UNKNOWN_MSG)) stopped_ = true;
+    // UNKNOWN_MSG: Remote nema diagnostiku. UNREACHABLE/BUSY: Base ho nemuze predat (vypadek BLE) - dotazovat se
+    // znovu jeste nema smysl, pokracuje se az s dalsi hranou "remote link up".
+    if (reason == static_cast<uint8_t>(mc::protocol::NakReason::UNKNOWN_MSG) ||
+        reason == static_cast<uint8_t>(mc::protocol::NakReason::UNREACHABLE) ||
+        reason == static_cast<uint8_t>(mc::protocol::NakReason::BUSY))
+        stopped_ = true;
 }
 
 }  // namespace mc::diag

@@ -123,6 +123,20 @@ TEST(comm_diag_stops_after_nak_unknown_msg_until_next_link_up) {
     CHECK_EQ(r.gets.size(), size_t(4));
 }
 
+TEST(comm_diag_pauses_after_nak_unreachable_or_busy_until_next_link_up) {
+    for (uint8_t reason : {uint8_t(0x06), uint8_t(0x04)}) {  // UNREACHABLE, BUSY
+        Rig r;
+        r.poller.setRemoteLink(true, 0);
+        r.poller.onNak(r.lastPid(), reason);  // base cannot forward: no polling during the outage
+        r.poller.tick(10000, false);
+        r.poller.tick(60000, false);
+        CHECK_EQ(r.gets.size(), size_t(1));
+        r.poller.setRemoteLink(false, 61000);
+        r.poller.setRemoteLink(true, 62000);  // next link-up edge resumes
+        CHECK_EQ(r.gets.size(), size_t(2));
+    }
+}
+
 TEST(comm_diag_cursor_reset_on_boot_id_change) {
     Rig r;
     r.poller.setRemoteLink(true, 0);
