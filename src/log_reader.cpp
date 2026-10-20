@@ -60,7 +60,7 @@ void LogIngest::onLine(std::string line) {
     if (l->tag == "sys") {  // boot banner: logged, but does not end a pending fault or the window
         // A boot banner without a replay window is a power-on boot: the fault counter restarts, so the
         // previous fault can never be reprinted any more.
-        if (phase_ == Phase::None && l->text.compare(0, 4, "boot") == 0) lastFault_.reset();
+        if (phase_ == Phase::None && l->text.rfind("MIDIControl base fw ", 0) == 0) lastFault_.reset();
         store(*l);
         return;
     }

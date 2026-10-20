@@ -143,11 +143,11 @@ TEST(log_ingest_same_fault_after_power_cycle_is_a_new_entry) {
     DiagStore store(t.path);
     LogIngest in(store, [] { return int64_t(1'700'000'000'000); }, nullptr);
     feedLines(in, {"--- log before reset ---", "[    6.000] E fault: HARDFAULT #1 pc=0x08001234 lr=0x08005678 code 0",
-                   "--- end of log before reset ---", "[    0.010] I sys: boot", "[    0.012] E fault: HARDFAULT #1 code 0 up 6.000 s rev abc1234",
+                   "--- end of log before reset ---", "[    0.010] I sys: MIDIControl base fw main rev abc1234 (2026-10-19 12:00:00)", "[    0.012] E fault: HARDFAULT #1 code 0 up 6.000 s rev abc1234",
                    "[    0.500] I ble: ready"});
     CHECK_EQ(store.unseenFaults("base"), size_t(1));
     in.disconnect();  // power cycle: the count restarts, no replay marker this time
-    feedLines(in, {"[    0.010] I sys: boot", "[    0.012] E fault: HARDFAULT #1 code 0 up 2.000 s rev abc1234", "[    0.500] I ble: ready"});
+    feedLines(in, {"[    0.010] I sys: MIDIControl base fw main rev abc1234 (2026-10-19 12:00:00)", "[    0.012] E fault: HARDFAULT #1 code 0 up 2.000 s rev abc1234", "[    0.500] I ble: ready"});
     CHECK_EQ(store.unseenFaults("base"), size_t(2));
 }
 
@@ -209,15 +209,15 @@ TEST(log_ingest_power_cycle_then_same_count_in_replay_is_a_new_entry) {
     DiagStore store(t.path);
     LogIngest in(store, [] { return int64_t(1); }, nullptr);
     feedLines(in, {"--- log before reset ---", "[    6.000] E fault: HARDFAULT #1 pc=0x08001234 lr=0x08005678 code 0", "--- end of log before reset ---",
-                   "[    0.010] I sys: boot", "[    0.012] E fault: HARDFAULT #1 code 0 up 6.000 s rev abc", "[    0.500] I ble: ready"});
+                   "[    0.010] I sys: MIDIControl base fw main rev abc1234 (2026-10-19 12:00:00)", "[    0.012] E fault: HARDFAULT #1 code 0 up 6.000 s rev abc", "[    0.500] I ble: ready"});
     CHECK_EQ(store.unseenFaults("base"), size_t(1));
     store.ack(store.lastFault("base")->id);
     CHECK_EQ(store.unseenFaults("base"), size_t(0));
     in.disconnect();  // power cycle: the count restarts
-    feedLines(in, {"[    0.010] I sys: boot", "[    0.020] I sys: reset: power-on", "[    0.500] I ble: ready"});
+    feedLines(in, {"[    0.010] I sys: MIDIControl base fw main rev abc1234 (2026-10-19 12:00:00)", "[    0.020] I sys: reset: POWER (csr 0x0c000000)", "[    0.500] I ble: ready"});
     in.disconnect();
     feedLines(in, {"--- log before reset ---", "[   99.000] E fault: HARDFAULT #1 pc=0x08009999 lr=0x08001111 code 0", "--- end of log before reset ---",
-                   "[    0.010] I sys: boot", "[    0.012] E fault: HARDFAULT #1 code 0 up 99.000 s rev abc", "[    0.500] I ble: ready"});
+                   "[    0.010] I sys: MIDIControl base fw main rev abc1234 (2026-10-19 12:00:00)", "[    0.012] E fault: HARDFAULT #1 code 0 up 99.000 s rev abc", "[    0.500] I ble: ready"});
     int faults = 0;
     for (const auto& e : store.query("base", 'D', 0, 100)) faults += e.fault ? 1 : 0;
     CHECK_EQ(faults, 2);
@@ -232,13 +232,13 @@ TEST(log_ingest_restart_seeds_fault_identity_from_store) {
         DiagStore store(t.path);
         LogIngest in(store, [] { return int64_t(1); }, nullptr);
         feedLines(in, {"--- log before reset ---", "[    6.000] E fault: HARDFAULT #1 pc=0x08001234 lr=0x08005678 code 0", "--- end of log before reset ---",
-                       "[    0.010] I sys: boot", "[    0.012] E fault: HARDFAULT #1 code 0 up 6.000 s rev abc", "[    0.500] I ble: ready"});
+                       "[    0.010] I sys: MIDIControl base fw main rev abc1234 (2026-10-19 12:00:00)", "[    0.012] E fault: HARDFAULT #1 code 0 up 6.000 s rev abc", "[    0.500] I ble: ready"});
         store.ack(store.lastFault("base")->id);
     }
     DiagStore store(t.path);  // service restart
     LogIngest in(store, [] { return int64_t(2); }, nullptr);
     // a later plain reset reprints the old record in its banner
-    feedLines(in, {"--- log before reset ---", "[   50.000] I ble: x", "--- end of log before reset ---", "[    0.010] I sys: boot",
+    feedLines(in, {"--- log before reset ---", "[   50.000] I ble: x", "--- end of log before reset ---", "[    0.010] I sys: MIDIControl base fw main rev abc1234 (2026-10-19 12:00:00)",
                    "[    0.012] E fault: HARDFAULT #1 code 0 up 6.000 s rev abc", "[    0.500] I ble: ready"});
     int faults = 0;
     for (const auto& e : store.query("base", 'D', 0, 100)) faults += e.fault ? 1 : 0;
@@ -251,7 +251,7 @@ TEST(log_ingest_replayed_body_lines_raise_no_status_events) {
     DiagStore store(t.path);
     Events ev;
     LogIngest in(store, [] { return int64_t(1); }, ev.sink());
-    feedLines(in, {"--- log before reset ---", "[    5.000] W ble: old warning", "--- end of log before reset ---", "[    0.010] I sys: boot",
+    feedLines(in, {"--- log before reset ---", "[    5.000] W ble: old warning", "--- end of log before reset ---", "[    0.010] I sys: MIDIControl base fw main rev abc1234 (2026-10-19 12:00:00)",
                    "[    0.020] W ble: new warning"});
     CHECK_EQ(ev.list.size(), size_t(1));
     CHECK_EQ(ev.list[0], std::string("W ble: new warning"));
