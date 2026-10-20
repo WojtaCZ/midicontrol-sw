@@ -270,6 +270,17 @@ uint64_t DiagStore::append(DiagEntry e) {
     e.id = nextId_++;
     std::string line = toLine(e);
     size_t& sz = sizes_[safeNode(e.node)];
+    if (checked_.insert(safeNode(e.node)).second && sz > 0) {
+        // A crash mid-write can leave a last line without '\n'; terminate it so the new line parses.
+        std::ifstream in(path(e.node, 0), std::ios::binary | std::ios::ate);
+        if (in && in.tellg() > 0) {
+            in.seekg(-1, std::ios::end);
+            if (in.get() != '\n') {
+                std::ofstream(path(e.node, 0), std::ios::app | std::ios::binary) << '\n';
+                ++sz;
+            }
+        }
+    }
     if (sz > 0 && sz + line.size() > rotateBytes_) rotate(e.node);
     std::ofstream f(path(e.node, 0), std::ios::app | std::ios::binary);
     f << line;

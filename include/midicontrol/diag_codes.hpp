@@ -29,6 +29,19 @@ struct DiagRespDecoded {
     std::vector<DiagEntry> entries;
 };
 
+// Stateful decoder: a FAULT whose FAULT_DETAIL records arrive in the next response is held back until
+// complete (or until another record / a boot_id change / flush() ends it).
+class DiagRespDecoder {
+public:
+    std::optional<DiagRespDecoded> decode(const uint8_t* payload, size_t len, int64_t pcTimeMs);
+    std::optional<DiagEntry> flush();  // emits an incomplete pending FAULT, if any
+
+private:
+    std::optional<DiagEntry> pending_;
+    int detail_ = 0;
+};
+
+// Stateless wrapper: one response on its own (an incomplete FAULT is emitted as it is).
 // Records become entries (node "remote", tag "diag"). A FAULT record followed by FAULT_DETAIL
 // records (pc, lr, xpsr, ipsr) folds into one entry carrying a FaultInfo. nullopt on a bad length.
 std::optional<DiagRespDecoded> decodeDiagResp(const uint8_t* payload, size_t len, int64_t pcTimeMs);

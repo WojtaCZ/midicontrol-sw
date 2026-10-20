@@ -22,7 +22,7 @@ std::vector<uint8_t> resp(uint16_t boot, uint16_t next, const std::vector<pd::Re
 
 TEST(diagcodes_text) {
     CHECK_EQ(diagCodeText(13, 3412), std::string("low battery 3412 mV"));
-    CHECK_EQ(diagCodeText(1, (1u << 26) | (1u << 28)), std::string("boot, reset: PIN|SOFTWARE"));
+    CHECK_EQ(diagCodeText(1, 0x14), std::string("boot, reset: PIN|SOFTWARE"));
     CHECK_EQ(diagCodeText(1, 0), std::string("boot"));
     CHECK_EQ(diagCodeText(0x7F, 0), std::string("code 0x7F"));
     CHECK_EQ(diagCodeText(16, 4), std::string("4 records lost"));
@@ -78,4 +78,41 @@ TEST(diagresp_truncated_fault_detail_still_yields_entry) {
     CHECK_EQ(d->entries.size(), size_t(1));
     CHECK_EQ(d->entries[0].fault->kind, std::string("MEMMANAGE"));
     CHECK_EQ(d->entries[0].fault->pc, uint32_t(0x1111));
+}
+
+TEST(diagcodes_boot_all_cause_bits) {
+    // arg = (RCC_CSR >> 24) & 0xFE: bit1 OBL, 2 PIN, 3 POWER, 4 SOFTWARE, 5 IWDG, 6 WWDG, 7 LOWPOWER
+    CHECK_EQ(diagCodeText(1, 0xFE), std::string("boot, reset: OBL|PIN|POWER|SOFTWARE|IWDG|WWDG|LOWPOWER"));
+    CHECK_EQ(diagCodeText(1, 0x20), std::string("boot, reset: IWDG"));
+}
+
+TEST(diagresp_fault_split_across_responses) {
+    DiagRespDecoder dec;
+    // FAULT + 2 details in the first page (last slots), 2 details in the next
+    auto a = resp(2, 3, {{0, 6, 3, 10, 0}, {1, 2, 1, 900, 1}, {2, 3, 1, 900, 0x08001234}});
+    auto b = resp(2, 6, {{3, 3, 1, 900, 0x08005678}, {4, 3, 1, 900, 0x61000000}, {5, 3, 1, 900, 3}, {6, 6, 3, 950, 0}});
+    auto d1 = dec.decode(a.data(), a.size(), 1);
+    CHECK(d1.has_value());
+    CHECK_EQ(d1->entries.size(), size_t(1));  // the incomplete FAULT is held back
+    auto d2 = dec.decode(b.data(), b.size(), 2);
+    CHECK(d2.has_value());
+    CHECK_EQ(d2->entries.size(), size_t(2));
+    CHECK(d2->entries[0].fault.has_value());
+    CHECK_EQ(d2->entries[0].fault->pc, uint32_t(0x08001234));
+    CHECK_EQ(d2->entries[0].fault->lr, uint32_t(0x08005678));
+    CHECK_EQ(d2->entries[0].fault->xpsr, uint32_t(0x61000000));
+    CHECK_EQ(d2->entries[1].text, std::string("ble connected"));
+}
+
+TEST(diagresp_boot_change_flushes_pending_fault) {
+    DiagRespDecoder dec;
+    auto a = resp(2, 2, {{0, 2, 1, 900, 1}, {1, 3, 1, 900, 0x1111}});
+    auto b = resp(3, 1, {{0, 6, 3, 5, 0}});
+    CHECK_EQ(dec.decode(a.data(), a.size(), 1)->entries.size(), size_t(0));
+    auto d = dec.decode(b.data(), b.size(), 2);
+    CHECK_EQ(d->entries.size(), size_t(2));
+    CHECK(d->entries[0].fault.has_value());
+    CHECK_EQ(d->entries[0].boot, uint32_t(2));
+    CHECK_EQ(d->entries[0].fault->pc, uint32_t(0x1111));
+    CHECK_EQ(d->entries[1].boot, uint32_t(3));
 }

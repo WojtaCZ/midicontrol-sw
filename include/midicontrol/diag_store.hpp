@@ -6,6 +6,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,7 @@ private:
     mutable std::mutex mu_;
     uint64_t nextId_ = 1;
     uint64_t ackId_ = 0;
+    std::set<std::string> checked_;        // nodes whose file end was verified to be newline-terminated
     std::map<std::string, size_t> sizes_;  // current file size per node
 };
 

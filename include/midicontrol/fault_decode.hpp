@@ -38,11 +38,17 @@ class BaseFaultParser {
 public:
     bool feed(const LogLine& l);
     std::optional<FaultInfo> take();
+    // True when the fault returned by the last take() completes the one returned earlier with the same
+    // kind and count (the boot replays the record-time line, then the full banner): the caller replaces
+    // its stored entry for that fault instead of adding a new one.
+    bool takenIsUpdate() const { return takenIsUpdate_; }
 
 private:
     std::optional<FaultInfo> cur_;
     uint32_t rawMmfar_ = 0, rawBfar_ = 0;
     bool haveFars_ = false;
+    bool curIsUpdate_ = false, takenIsUpdate_ = false;
+    std::optional<FaultInfo> lastTaken_;  // last fault handed out, to recognise its banner replay
     void applyFars();
 };
 

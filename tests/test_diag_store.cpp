@@ -166,3 +166,20 @@ TEST(store_tolerates_garbage_lines) {
     DiagStore s(d.path);
     CHECK_EQ(s.query("base", 'D', 0, 10).size(), size_t(1));
 }
+
+TEST(store_append_after_partial_last_line) {
+    TmpDir d;
+    {
+        DiagStore s(d.path);
+        s.append(mk("base", 'I', "one"));
+    }
+    {
+        std::ofstream f(d.path + "/diag-base.jsonl", std::ios::app);
+        f << "{\"id\":5,\"t\":1,\"no";  // crash mid-write, no newline
+    }
+    DiagStore s(d.path);
+    s.append(mk("base", 'I', "two"));
+    auto q = s.query("base", 'D', 0, 10);
+    CHECK_EQ(q.size(), size_t(2));
+    CHECK_EQ(q[0].text, std::string("two"));
+}

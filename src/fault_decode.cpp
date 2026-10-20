@@ -76,9 +76,11 @@ bool BaseFaultParser::feed(const LogLine& l) {
     if (header(s, kind, count, rest)) {
         bool merge = cur_ && cur_->kind == kind && cur_->count == count && cur_->uptimeMs == 0 && cur_->rev.empty();
         if (!merge) {
-            cur_ = FaultInfo{};
+            bool upd = !cur_ && lastTaken_ && lastTaken_->kind == kind && lastTaken_->count == count;
+            cur_ = upd ? *lastTaken_ : FaultInfo{};
             cur_->kind = kind;
             cur_->count = count;
+            curIsUpdate_ = upd;
             haveFars_ = false;
         }
         uint32_t v;
@@ -133,6 +135,9 @@ bool BaseFaultParser::feed(const LogLine& l) {
 std::optional<FaultInfo> BaseFaultParser::take() {
     auto r = std::move(cur_);
     cur_.reset();
+    takenIsUpdate_ = r && curIsUpdate_;
+    if (r) lastTaken_ = curIsUpdate_ ? std::nullopt : r;
+    curIsUpdate_ = false;
     haveFars_ = false;
     return r;
 }

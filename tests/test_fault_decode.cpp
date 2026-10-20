@@ -105,3 +105,23 @@ TEST(fault_parser_ignores_unrelated_lines) {
     CHECK(!p.feed(l));
     CHECK(!p.take().has_value());
 }
+
+TEST(fault_parser_replayed_record_then_banner_is_update) {
+    BaseFaultParser p;
+    CHECK(p.feed(fl("HARDFAULT #4 pc=0x08001234 lr=0x08005678 code 0")));
+    // boot: replayed record-time line, then sys lines (not fed), take() on the first non-fault line
+    auto first = p.take();
+    CHECK(first.has_value());
+    CHECK(!p.takenIsUpdate());
+    feedAll(p, {"HARDFAULT #4 code 0 up 9.000 s rev abc1234", "cfsr=0x00000400 IMPRECISERR"});
+    auto full = p.take();
+    CHECK(full.has_value());
+    CHECK(p.takenIsUpdate());  // upgrades the earlier entry (same kind + count)
+    CHECK_EQ(full->count, uint32_t(4));
+    CHECK(full->hasCfsr);
+    CHECK_EQ(full->pc, uint32_t(0x08001234));  // pc/lr from the record-time line are kept
+    // a different fault is not an update
+    CHECK(p.feed(fl("HARDFAULT #5 pc=0x1 lr=0x2 code 0")));
+    CHECK(p.take().has_value());
+    CHECK(!p.takenIsUpdate());
+}

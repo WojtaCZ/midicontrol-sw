@@ -10,7 +10,8 @@ namespace pd = mc::protocol::diag;
 
 namespace {
 const char* faultKind(uint32_t k) {
-    // Same numbering as the base's fault::Kind.
+    // Assumption: the remote's FAULT arg uses the base's fault::Kind numbering (not emitted by the remote yet,
+    // Task 6D-2 defines it); revisit when that lands.
     switch (k) {
         case 1: return "HARDFAULT";
         case 2: return "MEMMANAGE";
@@ -22,15 +23,13 @@ const char* faultKind(uint32_t k) {
     return "UNKNOWN";
 }
 
-std::string resetCause(uint32_t csr) {
-    // STM32G0 RCC_CSR reset flags.
-    static const struct {
-        int bit;
-        const char* name;
-    } f[] = {{25, "OBL"}, {26, "PIN"}, {27, "POWER"}, {28, "SOFTWARE"}, {29, "IWDG"}, {30, "WWDG"}, {31, "LOWPOWER"}};
+std::string resetCause(uint32_t arg) {
+    // The remote sends (RCC_CSR >> 24) & 0xFE (diagring::resetCauseFromCsr): bit1 OBL, 2 PIN, 3 PWR,
+    // 4 SFT, 5 IWDG, 6 WWDG, 7 LPWR.
+    static const char* names[] = {nullptr, "OBL", "PIN", "POWER", "SOFTWARE", "IWDG", "WWDG", "LOWPOWER"};
     std::string s;
-    for (const auto& x : f)
-        if (csr & (1u << x.bit)) s += (s.empty() ? "" : "|") + std::string(x.name);
+    for (int b = 1; b <= 7; ++b)
+        if (arg & (1u << b)) s += (s.empty() ? "" : "|") + std::string(names[b]);
     return s;
 }
 
@@ -78,24 +77,33 @@ std::string diagCodeText(uint8_t code, uint32_t arg) {
     return b;
 }
 
-std::optional<DiagRespDecoded> decodeDiagResp(const uint8_t* p, size_t len, int64_t pcTimeMs) {
+std::optional<DiagEntry> DiagRespDecoder::flush() {
+    auto r = std::move(pending_);
+    pending_.reset();
+    detail_ = 0;
+    return r;
+}
+
+std::optional<DiagRespDecoded> DiagRespDecoder::decode(const uint8_t* p, size_t len, int64_t pcTimeMs) {
     if (!p || len < pd::RESP_HEADER_SIZE) return std::nullopt;
     size_t n = p[4];
     if (n > pd::MAX_RECORDS || len != pd::RESP_HEADER_SIZE + n * pd::RECORD_SIZE) return std::nullopt;
     DiagRespDecoded d;
     d.bootId = static_cast<uint16_t>(p[0] | (p[1] << 8));
     d.nextCursor = static_cast<uint16_t>(p[2] | (p[3] << 8));
-    DiagEntry* fault = nullptr;  // FAULT entry still collecting details
-    int detail = 0;
+    if (pending_ && pending_->boot != d.bootId)  // the node rebooted: the details will never come
+        if (auto e = flush()) d.entries.push_back(std::move(*e));
     for (size_t i = 0; i < n; ++i) {
         pd::Record r = pd::decodeRecord(p + pd::RESP_HEADER_SIZE + i * pd::RECORD_SIZE);
-        if (r.code == static_cast<uint8_t>(pd::Code::FAULT_DETAIL) && fault && detail < 4) {
-            uint32_t* dst[] = {&fault->fault->pc, &fault->fault->lr, &fault->fault->xpsr, nullptr};
-            if (dst[detail]) *dst[detail] = r.arg;  // 4th value (ipsr) is the handler's own, not kept
-            ++detail;
+        if (r.code == static_cast<uint8_t>(pd::Code::FAULT_DETAIL) && pending_ && detail_ < 4) {
+            FaultInfo& f = *pending_->fault;
+            if (detail_ == 0) f.pc = r.arg;
+            else if (detail_ == 1) f.lr = r.arg;
+            else if (detail_ == 2) f.xpsr = r.arg;  // 4th value (ipsr) is the handler's own, not kept
+            if (++detail_ == 4) d.entries.push_back(*flush());
             continue;
         }
-        fault = nullptr;
+        if (auto e = flush()) d.entries.push_back(std::move(*e));
         DiagEntry e;
         e.pcTimeMs = pcTimeMs;
         e.node = "remote";
@@ -110,13 +118,20 @@ std::optional<DiagRespDecoded> decodeDiagResp(const uint8_t* p, size_t len, int6
             f.uptimeMs = r.uptimeMs;
             e.fault = f;
             e.level = 'E';
-        }
-        d.entries.push_back(std::move(e));
-        if (d.entries.back().fault) {
-            fault = &d.entries.back();
-            detail = 0;
+            pending_ = std::move(e);
+            detail_ = 0;
+        } else {
+            d.entries.push_back(std::move(e));
         }
     }
+    return d;
+}
+
+std::optional<DiagRespDecoded> decodeDiagResp(const uint8_t* p, size_t len, int64_t pcTimeMs) {
+    DiagRespDecoder dec;
+    auto d = dec.decode(p, len, pcTimeMs);
+    if (d)
+        if (auto e = dec.flush()) d.value().entries.push_back(std::move(*e));
     return d;
 }
 
