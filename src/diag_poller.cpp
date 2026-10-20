@@ -9,6 +9,10 @@ void DiagPoller::emitAll(std::vector<DiagEntry>& entries) {
     for (auto& e : entries) hooks_.emit(std::move(e));
 }
 
+void DiagPoller::persist() {
+    if (hooks_.saveCursor && bootId_ && !decoder_.hasPending()) hooks_.saveCursor(*bootId_, cursor_);
+}
+
 void DiagPoller::sendGet(int64_t nowMs) {
     dueMs_ = nowMs + kPollMs;
     outstanding_ = hooks_.sendGet({static_cast<uint8_t>(cursor_), static_cast<uint8_t>(cursor_ >> 8)});
@@ -28,12 +32,15 @@ void DiagPoller::setRemoteLink(bool up, int64_t nowMs, bool updating) {
         }
     } else if (auto e = decoder_.flush()) {
         hooks_.emit(std::move(*e));
+        persist();
     }
 }
 
 void DiagPoller::tick(int64_t nowMs, bool updating) {
     std::lock_guard<std::mutex> lk(mu_);
     if (!linkUp_ || stopped_ || updating || nowMs < dueMs_) return;
+    if (!followUpDue_) followUps_ = 0;  // a timed poll starts a new run of follow-ups
+    followUpDue_ = false;
     sendGet(nowMs);
 }
 
@@ -48,7 +55,10 @@ void DiagPoller::onResp(const uint8_t* payload, size_t len, int64_t nowMs) {
         decoder_ = DiagRespDecoder{};
         bootId_ = boot;
         cursor_ = 0;
+        followUps_ = 0;
+        followUpDue_ = false;
         dueMs_ = nowMs;
+        persist();
         return;
     }
     bootId_ = boot;
@@ -59,9 +69,12 @@ void DiagPoller::onResp(const uint8_t* payload, size_t len, int64_t nowMs) {
     const uint8_t n = payload[4];
     if (n == 0) {
         if (auto e = decoder_.flush()) hooks_.emit(std::move(*e));
-    } else if (n >= mc::protocol::diag::MAX_RECORDS) {
+    } else if (n >= mc::protocol::diag::MAX_RECORDS && followUps_ < kMaxFollowUps) {
+        ++followUps_;
+        followUpDue_ = true;
         dueMs_ = nowMs;  // more may be waiting
     }
+    persist();
 }
 
 void DiagPoller::onNak(uint8_t pid, uint8_t reason) {

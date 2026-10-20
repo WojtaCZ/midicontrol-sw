@@ -474,4 +474,21 @@ void DiagStore::ack(uint64_t id) {
     std::rename(tmp.c_str(), (dir_ + "/diag-ack.json").c_str());
 }
 
+std::optional<std::pair<uint16_t, uint16_t>> DiagStore::loadRemoteCursor() const {
+    std::ifstream f(dir_ + "/diag-remote-cursor.txt");
+    unsigned boot = 0, cursor = 0;
+    if (!(f >> boot >> cursor) || boot > 0xFFFF || cursor > 0xFFFF) return std::nullopt;
+    return std::make_pair(static_cast<uint16_t>(boot), static_cast<uint16_t>(cursor));
+}
+
+void DiagStore::saveRemoteCursor(uint16_t boot, uint16_t cursor) {
+    const std::string tmp = dir_ + "/diag-remote-cursor.txt.tmp";
+    {
+        std::ofstream f(tmp, std::ios::trunc);
+        f << boot << ' ' << cursor << '\n';
+        if (!f) return;
+    }
+    std::rename(tmp.c_str(), (dir_ + "/diag-remote-cursor.txt").c_str());
+}
+
 }  // namespace mc::diag

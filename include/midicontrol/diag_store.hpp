@@ -38,6 +38,9 @@ public:
     std::optional<DiagEntry> lastFault(const std::string& node) const;
     size_t unseenFaults(const std::string& node) const;  // faults with id > acked id
     void ack(uint64_t id);
+    // Last (boot_id, cursor) the remote poller reached; survives restarts (diag-remote-cursor.json).
+    std::optional<std::pair<uint16_t, uint16_t>> loadRemoteCursor() const;
+    void saveRemoteCursor(uint16_t boot, uint16_t cursor);
     // Replace the stored entry with this id (same node as `e`) by `e`; false if there is none.
     bool replace(uint64_t id, DiagEntry e);
 

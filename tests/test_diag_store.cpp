@@ -274,6 +274,20 @@ TEST(store_ack_is_clamped_to_the_newest_id) {
     CHECK_EQ(s2.unseenFaults("base"), size_t(1));
 }
 
+TEST(store_remote_cursor_roundtrip) {
+    TmpDir t;
+    {
+        DiagStore s(t.path);
+        CHECK(!s.loadRemoteCursor().has_value());
+        s.saveRemoteCursor(0xABCD, 17);
+    }
+    DiagStore s2(t.path);
+    auto c = s2.loadRemoteCursor();
+    CHECK(c.has_value());
+    CHECK_EQ(c->first, uint16_t(0xABCD));
+    CHECK_EQ(c->second, uint16_t(17));
+}
+
 TEST(store_creates_directory_recursively) {
     TmpDir t;
     std::string deep = t.path + "/a/b/c";

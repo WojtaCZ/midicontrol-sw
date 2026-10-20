@@ -35,6 +35,7 @@ class DiagRespDecoder {
 public:
     std::optional<DiagRespDecoded> decode(const uint8_t* payload, size_t len, int64_t pcTimeMs);
     std::optional<DiagEntry> flush();  // emits an incomplete pending FAULT, if any
+    bool hasPending() const { return pending_.has_value(); }
 
 private:
     std::optional<DiagEntry> pending_;

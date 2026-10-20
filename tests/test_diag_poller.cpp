@@ -1,3 +1,4 @@
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -146,6 +147,60 @@ TEST(comm_diag_full_page_is_followed_up_at_once) {
     r.poller.tick(100, false);
     CHECK_EQ(r.gets.size(), size_t(2));
     CHECK_EQ(r.lastCursor(), uint16_t(8));
+}
+
+TEST(comm_diag_follow_ups_are_capped_then_resume_on_the_timer) {
+    Rig r;
+    r.poller.setRemoteLink(true, 0);
+    std::vector<pd::Record> eight;
+    for (uint16_t i = 0; i < 8; ++i) eight.push_back(rec(i, pd::Code::BLE_CONNECT));
+    int64_t now = 50;
+    uint16_t next = 8;
+    for (int i = 0; i < 10; ++i) {  // a remote that always has more
+        feed(r, resp(7, next, eight), now);
+        next = static_cast<uint16_t>(next + 8);
+        r.poller.tick(now + 1, false);
+        now += 2;
+    }
+    CHECK_EQ(r.gets.size(), size_t(1 + DiagPoller::kMaxFollowUps));
+    r.poller.tick(10100, false);  // the regular timer goes on
+    CHECK_EQ(r.gets.size(), size_t(2 + DiagPoller::kMaxFollowUps));
+    feed(r, resp(7, next, eight), 10101);  // and a new run of follow-ups is allowed
+    r.poller.tick(10102, false);
+    CHECK_EQ(r.gets.size(), size_t(3 + DiagPoller::kMaxFollowUps));
+}
+
+// Review finding: after a service restart the remote's current-boot ring must not be fetched again.
+TEST(comm_diag_cursor_is_persisted_and_resumed_after_restart) {
+    std::optional<std::pair<uint16_t, uint16_t>> saved;
+    auto mkHooks = [&](Rig& r) {
+        auto h = r.hooks();
+        h.loadCursor = [&] { return saved; };
+        h.saveCursor = [&](uint16_t b, uint16_t c) { saved = std::make_pair(b, c); };
+        return h;
+    };
+    {
+        Rig r;
+        DiagPoller p(mkHooks(r));
+        p.setRemoteLink(true, 0);
+        Bytes b = resp(7, 3, {rec(1, pd::Code::BOOT, 0x02), rec(2, pd::Code::BLE_CONNECT)});
+        p.onResp(b.data(), b.size(), 50);
+        CHECK(saved.has_value());
+        CHECK_EQ(saved->first, uint16_t(7));
+        CHECK_EQ(saved->second, uint16_t(3));
+    }
+    Rig r2;  // restarted service
+    DiagPoller p2(mkHooks(r2));
+    p2.setRemoteLink(true, 0);
+    CHECK_EQ(r2.lastCursor(), uint16_t(3));  // resumes, not from 0
+    Bytes none = resp(7, 3, {});
+    p2.onResp(none.data(), none.size(), 10);
+    CHECK_EQ(r2.entries.size(), size_t(0));
+    // the remote rebooted meanwhile: new boot id -> from the start again
+    Bytes nb = resp(8, 2, {rec(1, pd::Code::BOOT, 0x02)});
+    p2.onResp(nb.data(), nb.size(), 20);
+    CHECK_EQ(saved->first, uint16_t(8));
+    CHECK_EQ(saved->second, uint16_t(0));
 }
 
 TEST(comm_diag_pending_fault_flushed_on_empty_response) {

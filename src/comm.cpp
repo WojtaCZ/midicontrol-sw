@@ -76,7 +76,7 @@ CommHandler::CommHandler(const Config& config, MidiPortFinder midiFinder,
         for (Node n : mc::status::nodesForPeer(pkt.source)) _status.count(n, "duplicates");
     };
     out.onDiagResp = [this](const Packet& pkt) {
-        if (pkt.source == ADDR_REMOTE) _diagPoller->onResp(pkt.payload.data(), pkt.payload.size(), steadyMs());
+        if (pkt.source == ADDR_REMOTE && _diagPoller) _diagPoller->onResp(pkt.payload.data(), pkt.payload.size(), steadyMs());
     };
     _dispatcher = std::make_unique<Dispatcher>(static_cast<CommandSink&>(*this), std::move(out));
 
@@ -90,7 +90,11 @@ CommHandler::CommHandler(const Config& config, MidiPortFinder midiFinder,
     };
     dh.emit = [this](mc::diag::DiagEntry e) { storeRemoteDiag(std::move(e)); };
     dh.pcNowMs = [this] { return _status.now(); };
-    _diagPoller = std::make_unique<mc::diag::DiagPoller>(std::move(dh));
+    if (_diag) {  // no store = nothing to poll for
+        dh.loadCursor = [this] { return _diag->loadRemoteCursor(); };
+        dh.saveCursor = [this](uint16_t boot, uint16_t cursor) { _diag->saveRemoteCursor(boot, cursor); };
+        _diagPoller = std::make_unique<mc::diag::DiagPoller>(std::move(dh));
+    }
 
     _status.set(Node::Base, "connected", false);
     _status.set(Node::Base, "reconnects", int64_t{0});
@@ -162,7 +166,7 @@ void CommHandler::stopIoThreads() {
 
 void CommHandler::disconnect() {
     stopIoThreads();
-    _diagPoller->setRemoteLink(false, steadyMs());
+    if (_diagPoller) _diagPoller->setRemoteLink(false, steadyMs());
     std::lock_guard<std::mutex> lk(_mutex);
     _serial.close();
     _pending.clear();
@@ -234,7 +238,7 @@ void CommHandler::handleSerialLoss() {
     _connected.store(false);
     _parser.reset();
     _dispatcher->reset();
-    _diagPoller->setRemoteLink(false, steadyMs());  // flushes a half-received FAULT
+    if (_diagPoller) _diagPoller->setRemoteLink(false, steadyMs());  // flushes a half-received FAULT
     _status.set(Node::Base, "connected", false);
     mc::log::warn(Node::Base, "Serial link to the base lost; waiting for it to come back...");
     post({Command::Kind::SerialLost, {}, {}, 0});
@@ -348,7 +352,7 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
             _pending.erase(it);
         }
     }
-    if (nak) _diagPoller->onNak(pid, reason);  // stops the polling after NAK UNKNOWN_MSG
+    if (nak && _diagPoller) _diagPoller->onNak(pid, reason);  // stops the polling after NAK UNKNOWN_MSG
     bool pollNak = false;
     if (nak) {
         std::lock_guard<std::mutex> lk(_routineMutex);
@@ -508,7 +512,7 @@ void CommHandler::noteRx(const Packet& pkt) {
         st.display = pkt.payload[2] != 0;
         st.pc = pkt.payload.size() >= 4 && pkt.payload[3] != 0;
         _status.set(Node::Base, "status_ble", st.ble);
-        _diagPoller->setRemoteLink(st.ble, steadyMs(), _updating.load());  // remote reachable -> DIAG_GET
+        if (_diagPoller) _diagPoller->setRemoteLink(st.ble, steadyMs(), _updating.load());  // remote reachable -> DIAG_GET
         _status.set(Node::Base, "status_relay", st.relay);
         _status.set(Node::Base, "status_display", st.display);
         _status.set(Node::Base, "status_pc", st.pc);
@@ -672,7 +676,7 @@ void CommHandler::keepaliveLoop() {
                                               std::to_string(KEEPALIVE_LOSS_MS / 1000) + " s).");
             }
             pollStatus();
-            _diagPoller->tick(steadyMs(), false);  // while updating this block is skipped: no DIAG_GET
+            if (_diagPoller) _diagPoller->tick(steadyMs(), false);  // while updating this block is skipped: no DIAG_GET
         }
         if (steadyMs() - lastMidiCheck >= kMidiCheckMs) {
             lastMidiCheck = steadyMs();
