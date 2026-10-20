@@ -38,6 +38,10 @@ add_library(midicontrol_core
     src/console.cpp
     src/log.cpp
     src/process.cpp
+    src/log_line.cpp
+    src/fault_decode.cpp
+    src/diag_codes.cpp
+    src/diag_store.cpp
 )
 target_include_directories(midicontrol_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -67,6 +71,10 @@ add_executable(midicontrol_tests
     tests/test_console.cpp
     tests/test_log.cpp
     tests/test_process.cpp
+    tests/test_log_line.cpp
+    tests/test_fault_decode.cpp
+    tests/test_diag_codes.cpp
+    tests/test_diag_store.cpp
 )
 target_link_libraries(midicontrol_tests PRIVATE midicontrol_core)
 target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
