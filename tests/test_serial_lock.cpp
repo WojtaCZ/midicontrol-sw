@@ -31,19 +31,30 @@ TEST(serial_open_fails_while_another_process_holds_the_flock) {
     ::close(master);
 }
 
-// A hung-up tty (the USB device went away but its /dev node stays, e.g. in a container without udev) reads
-// as EOF forever and the path still exists: the reader must notice it from the hangup, not from the path.
-TEST(serial_read_detects_a_hung_up_port_even_though_the_path_exists) {
-    int master = -1, slave = -1;
-    char name[128] = {};
-    CHECK(openpty(&master, &slave, name, nullptr, nullptr) == 0);
+// A hung-up tty (USB device gone, /dev node still there) reads as EOF without errno and the path still
+// exists: only POLLHUP tells. A pipe whose write end is closed behaves the same way.
+TEST(serial_pending_data_is_delivered_then_eof_with_hangup_fails_the_port) {
+    int fds[2];
+    CHECK(pipe(fds) == 0);
+    CHECK(write(fds[1], "abc", 3) == 3);
+    ::close(fds[1]);  // the device vanishes after its last bytes
     mc::SerialPort port;
-    CHECK(port.open(name, 115200));
-    port.read(16);
+    port.adoptFdForTest(fds[0], "/dev/null");  // path exists, like a stale /dev node
+    auto first = port.read(16);
+    CHECK(first.size() == 3);
     CHECK(port.healthy());
-    ::close(master);  // the device vanishes
-    port.read(16);
+    CHECK(port.read(16).empty());
     CHECK(!port.healthy());
     port.close();
-    ::close(slave);
+}
+
+TEST(serial_hangup_before_any_data_fails_the_port) {
+    int fds[2];
+    CHECK(pipe(fds) == 0);
+    ::close(fds[1]);
+    mc::SerialPort port;
+    port.adoptFdForTest(fds[0], "/dev/null");
+    CHECK(port.read(16).empty());
+    CHECK(!port.healthy());
+    port.close();
 }

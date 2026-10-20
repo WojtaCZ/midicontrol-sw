@@ -125,8 +125,8 @@ bool SerialPort::write(const uint8_t* data, size_t len) {
 std::vector<uint8_t> SerialPort::read(size_t maxLen) {
     std::vector<uint8_t> buf;
     if (_fd < 0) return buf;
-    // A hung-up tty (USB device gone, /dev node still there) reads as EOF, not as an error; only poll() says
-    // so (POLLHUP, together with POLLIN on a real tty). Data still pending is delivered first.
+    // A hung-up tty (USB device gone, /dev node still there) reads as EOF without errno; only POLLHUP says so.
+    // Data still pending is delivered first; the port fails when a read then returns nothing.
     pollfd pfd{_fd, POLLIN, 0};
     const bool hup = ::poll(&pfd, 1, 0) > 0 && (pfd.revents & (POLLHUP | POLLERR | POLLNVAL));
     buf.resize(maxLen);

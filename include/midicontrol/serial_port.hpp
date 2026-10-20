@@ -36,6 +36,9 @@ public:
     // VTIME (~100 ms). Returns the bytes read (possibly empty).
     std::vector<uint8_t> read(size_t maxLen = 256);
 
+    // Test seam: take over an already open fd (a pipe/pty end) without the tty setup.
+    void adoptFdForTest(int fd, const std::string& path) { _fd = fd; _path = path; _failed = false; }
+
 private:
     int _fd = -1;
     std::atomic<bool> _failed{false};  // set by read (reader thread) and write (any thread)

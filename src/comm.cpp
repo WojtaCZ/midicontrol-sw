@@ -640,7 +640,8 @@ void CommHandler::readerLoop() {
         }
 
         auto now = Clock::now();
-        if (now - lastHealth >= std::chrono::milliseconds(500)) {
+        // A read that returned nothing on a failed port must not spin until the 500 ms tick.
+        if (now - lastHealth >= std::chrono::milliseconds(500) || (data.empty() && !_serial.healthy())) {
             lastHealth = now;
             if (!_serial.healthy()) {
                 handleSerialLoss();
