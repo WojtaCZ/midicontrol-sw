@@ -1,6 +1,7 @@
 #include "midicontrol/config.hpp"
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cctype>
@@ -181,7 +182,9 @@ std::string defaultDiagDir(const std::function<const char*(const char*)>& getenv
     if (xdg && *xdg) return std::string(xdg) + "/midicontrol";
     const char* home = getenv("HOME");
     if (home && *home) return std::string(home) + "/.local/state/midicontrol";
-    return {};
+    // Bare service environment: the per-user directory the instance lock also falls back to (never "": the store
+    // would write /diag-*.jsonl at the filesystem root)
+    return "/tmp/midicontrol-" + std::to_string(getuid()) + "/diag";
 }
 
 std::string resolveConfigPath(const std::string& cliPath, const EnvLookup& getenv,

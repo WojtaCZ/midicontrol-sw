@@ -58,7 +58,7 @@ Config loadConfig(const std::string& path);
 std::string resolveFolder(const std::string& value, const std::string& configDir,
                           const std::string& home);
 
-// $XDG_STATE_HOME/midicontrol, else $HOME/.local/state/midicontrol (empty if neither is known).
+// $XDG_STATE_HOME/midicontrol, else $HOME/.local/state/midicontrol, else /tmp/midicontrol-<uid>/diag.
 std::string defaultDiagDir(const std::function<const char*(const char*)>& getenv);
 
 // Pick the config file, first match wins:

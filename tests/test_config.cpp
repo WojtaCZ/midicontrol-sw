@@ -2,6 +2,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
 
 #include "midicontrol/config.hpp"
 #include "test_framework.hpp"
@@ -168,4 +169,7 @@ TEST(config_default_diag_dir) {
     CHECK_EQ(defaultDiagDir(env({{"XDG_STATE_HOME", "/s"}, {"HOME", "/h"}})), std::string("/s/midicontrol"));
     CHECK_EQ(defaultDiagDir(env({{"HOME", "/h"}})), std::string("/h/.local/state/midicontrol"));
     CHECK_EQ(defaultDiagDir(env({{"XDG_STATE_HOME", ""}, {"HOME", "/h"}})), std::string("/h/.local/state/midicontrol"));
+    // Neither known (bare service environment): never "" (the store would write /diag-*.jsonl at the root)
+    CHECK_EQ(defaultDiagDir(env({})), "/tmp/midicontrol-" + std::to_string(getuid()) + "/diag");
+    CHECK_EQ(defaultDiagDir(env({{"XDG_STATE_HOME", ""}, {"HOME", ""}})), "/tmp/midicontrol-" + std::to_string(getuid()) + "/diag");
 }
