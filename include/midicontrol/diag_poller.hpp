@@ -24,7 +24,9 @@ namespace mc::diag {
 //  - cursor = the response's next_cursor; a changed boot_id means the cursor is meaningless: the stale page
 //    is dropped and the next GET starts from 0 (no duplicates);
 //  - an empty response (n = 0) and a link loss flush a FAULT whose FAULT_DETAIL records never came;
-//  - NAK UNKNOWN_MSG for our GET (a remote without diagnostics) stops the polling until the next link-up.
+//  - NAK UNKNOWN_MSG for our GET (a remote without diagnostics) stops the polling until the next link-up;
+//  - NAK UNREACHABLE pauses the timer and clears the link state, so the next setRemoteLink(true) (next STATUS_RESP
+//    with ble=1, <= 5 s) is a fresh edge with one GET; NAK BUSY only waits for the next 10 s tick.
 // The ACK of every DIAG_RESP is the dispatcher's job (like STATUS_RESP).
 class DiagPoller {
 public:

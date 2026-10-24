@@ -81,12 +81,17 @@ void DiagPoller::onNak(uint8_t pid, uint8_t reason) {
     std::lock_guard<std::mutex> lk(mu_);
     if (!outstanding_ || *outstanding_ != pid) return;
     outstanding_.reset();
-    // UNKNOWN_MSG: Remote nema diagnostiku. UNREACHABLE: Base ho nemuze predat (vypadek BLE) - dotazovat se znovu
-    // nema smysl, pokracuje se az s dalsi hranou "remote link up". BUSY: spojeni drzi (modul chvilku v prikazovem
-    // rezimu), dueMs_ zustava, dalsi GET odejde v beznem 10s taktu.
-    if (reason == static_cast<uint8_t>(mc::protocol::NakReason::UNKNOWN_MSG) ||
-        reason == static_cast<uint8_t>(mc::protocol::NakReason::UNREACHABLE))
+    // UNKNOWN_MSG: the remote has no diagnostics -> stop until the next real link-up.
+    // UNREACHABLE: the base cannot forward (BLE down, or connected but the stream not yet open/secured; its STATUS
+    // ble flag is set from %CONNECT%, and a drop shorter than the 5 s status period never shows ble=0). No timer
+    // polling meanwhile, but forget the link state so the next STATUS_RESP with ble=1 is a fresh edge and sends one
+    // GET (R27 kept, R33): at most one GET per status period while connected-but-not-open.
+    // BUSY: the link holds (module briefly in command mode), dueMs_ stays, the next GET goes on the 10 s timer.
+    if (reason == static_cast<uint8_t>(mc::protocol::NakReason::UNKNOWN_MSG)) {
         stopped_ = true;
+    } else if (reason == static_cast<uint8_t>(mc::protocol::NakReason::UNREACHABLE)) {
+        linkUp_ = false;
+    }
 }
 
 }  // namespace mc::diag

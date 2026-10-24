@@ -135,6 +135,33 @@ TEST(comm_diag_pauses_after_nak_unreachable_until_next_link_up) {
     CHECK_EQ(r.gets.size(), size_t(2));
 }
 
+// R33: the base reports ble=1 from %CONNECT%, but NAKs UNREACHABLE until the stream is open and secured, and a short
+// BLE drop between two 5 s STATUS samples never shows ble=0. UNREACHABLE therefore clears the link state: the next
+// STATUS_RESP with ble=1 is a fresh edge (at most one GET per 5 s status period while connected-but-not-open).
+TEST(comm_diag_nak_unreachable_rearms_on_the_next_status_with_link_up) {
+    Rig r;
+    r.poller.setRemoteLink(true, 0);
+    CHECK_EQ(r.gets.size(), size_t(1));
+    r.poller.onNak(r.lastPid(), 0x06);  // UNREACHABLE
+    r.poller.tick(10000, false);
+    CHECK_EQ(r.gets.size(), size_t(1));  // no timer polling meanwhile
+    r.poller.setRemoteLink(true, 5000);  // next STATUS_RESP, still ble=1 (no false in between)
+    CHECK_EQ(r.gets.size(), size_t(2));
+    r.poller.setRemoteLink(true, 10000);  // stream open now: no NAK, so no new edge
+    CHECK_EQ(r.gets.size(), size_t(2));
+    r.poller.tick(15000, false);  // and the normal 10 s timer runs again
+    CHECK_EQ(r.gets.size(), size_t(3));
+}
+
+TEST(comm_diag_nak_unknown_msg_is_not_rearmed_by_status) {
+    Rig r;
+    r.poller.setRemoteLink(true, 0);
+    r.poller.onNak(r.lastPid(), 0x01);  // UNKNOWN_MSG stays a hard stop
+    r.poller.setRemoteLink(true, 5000);
+    r.poller.tick(20000, false);
+    CHECK_EQ(r.gets.size(), size_t(1));
+}
+
 TEST(comm_diag_busy_nak_keeps_polling_on_the_timer) {
     Rig r;
     r.poller.setRemoteLink(true, 0);
