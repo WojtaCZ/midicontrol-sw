@@ -126,6 +126,11 @@ public:
     // GET_STATUS, so neither is sent and keepalive loss is not reported.
     void setUpdating(bool on);
 
+    // A remote firmware update is running over BLE: no DIAG_GET (it would compete with FW_UPDATE_DATA, and the
+    // remote programs its diag slot's "fetched" byte in the W25Q32 the OTA stages to). Unlike setUpdating(), base
+    // keepalive and GET_STATUS continue.
+    void pauseDiag(bool on);
+
 private:
     using Clock = std::chrono::steady_clock;
 

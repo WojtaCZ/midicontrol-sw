@@ -18,7 +18,8 @@ namespace mc::diag {
 // tick() from the keepalive thread).
 //
 //  - GET on remote link-up, then every kPollMs while the link is up;
-//  - never while a firmware update runs (tick() gets `updating`);
+//  - never while a firmware update runs: base update -> tick() gets `updating`; remote update -> setPaused(true)
+//    (base keepalive and status continue, only DIAG_GET waits);
 //  - a full page (n = 8) is followed up at once (at most kMaxFollowUps in a row), so a backlog drains
 //    without waiting 10 s per page;
 //  - cursor = the response's next_cursor; a changed boot_id means the cursor is meaningless: the stale page
@@ -55,6 +56,8 @@ public:
     // `updating`: a firmware update is running, the first GET of a new link waits for tick().
     void setRemoteLink(bool up, int64_t nowMs, bool updating = false);
     void tick(int64_t nowMs, bool updating);
+    // Remote firmware update over BLE: no DIAG_GET until setPaused(false) (an overdue poll then goes on the next tick).
+    void setPaused(bool on);
     void onResp(const uint8_t* payload, size_t len, int64_t nowMs);
     void onNak(uint8_t pid, uint8_t reason);
 
@@ -67,6 +70,7 @@ private:
     std::mutex mu_;
     bool linkUp_ = false;
     bool stopped_ = false;
+    bool paused_ = false;
     int64_t dueMs_ = 0;
     std::optional<uint8_t> outstanding_;
     uint16_t cursor_ = 0;

@@ -166,6 +166,14 @@ bool FirmwareUpdater::updateRemote(const std::string& binPath, Progress cb) {
     auto image = loadImage(binPath, protocol::ADDR_REMOTE);
     if (image.empty()) return false;
     info("Updating remote over BLE (" + std::to_string(image.size()) + " bytes)...");
+
+    // No DIAG_GET while the image streams (spec: never during an OTA); base keepalive/status go on (not setUpdating).
+    struct DiagPauseGuard {
+        CommHandler& comm;
+        explicit DiagPauseGuard(CommHandler& c) : comm(c) { comm.pauseDiag(true); }
+        ~DiagPauseGuard() { comm.pauseDiag(false); }
+    } diagPaused(_comm);
+
     bool ok = streamImage(protocol::ADDR_REMOTE, image, cb);
     if (ok) {
         info("Remote accepted the image; it will reboot and the bootloader will apply it.");

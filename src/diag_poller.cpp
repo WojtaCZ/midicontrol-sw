@@ -25,7 +25,7 @@ void DiagPoller::setRemoteLink(bool up, int64_t nowMs, bool updating) {
     outstanding_.reset();
     if (up) {
         stopped_ = false;
-        if (updating) {
+        if (updating || paused_) {
             dueMs_ = nowMs;
         } else {
             sendGet(nowMs);
@@ -38,10 +38,15 @@ void DiagPoller::setRemoteLink(bool up, int64_t nowMs, bool updating) {
 
 void DiagPoller::tick(int64_t nowMs, bool updating) {
     std::lock_guard<std::mutex> lk(mu_);
-    if (!linkUp_ || stopped_ || updating || nowMs < dueMs_) return;
+    if (!linkUp_ || stopped_ || updating || paused_ || nowMs < dueMs_) return;
     if (!followUpDue_) followUps_ = 0;  // a timed poll starts a new run of follow-ups
     followUpDue_ = false;
     sendGet(nowMs);
+}
+
+void DiagPoller::setPaused(bool on) {
+    std::lock_guard<std::mutex> lk(mu_);
+    paused_ = on;
 }
 
 void DiagPoller::onResp(const uint8_t* payload, size_t len, int64_t nowMs) {

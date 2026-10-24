@@ -85,6 +85,25 @@ TEST(comm_diag_no_get_during_firmware_update) {
     CHECK_EQ(r.gets.size(), size_t(2));
 }
 
+// Remote OTA (updateRemote): base keepalive/status continue (no setUpdating), but DIAG polling pauses: a DIAG_RESP
+// would compete with FW_UPDATE_DATA on the BLE link and the remote would program the slot "fetched" byte in the same
+// W25Q32 the OTA stages to.
+TEST(comm_diag_paused_during_remote_update) {
+    Rig r;
+    r.poller.setRemoteLink(true, 0);
+    CHECK_EQ(r.gets.size(), size_t(1));
+    r.poller.setPaused(true);
+    r.poller.tick(10000, false);
+    r.poller.tick(30000, false);
+    CHECK_EQ(r.gets.size(), size_t(1));
+    r.poller.setRemoteLink(false, 31000);
+    r.poller.setRemoteLink(true, 32000);  // remote reboots after the OTA: link-up while paused defers the GET
+    CHECK_EQ(r.gets.size(), size_t(1));
+    r.poller.setPaused(false);
+    r.poller.tick(32100, false);  // overdue poll goes out once the pause ends
+    CHECK_EQ(r.gets.size(), size_t(2));
+}
+
 TEST(comm_diag_link_up_during_update_defers_the_first_get) {
     Rig r;
     r.poller.setRemoteLink(true, 0, true);

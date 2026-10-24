@@ -203,6 +203,10 @@ bool CommHandler::threadsAlive(std::chrono::milliseconds maxAge) const {
     return now - _hbReader.load() <= limit && now - _hbKeepalive.load() <= limit;
 }
 
+void CommHandler::pauseDiag(bool on) {
+    if (_diagPoller) _diagPoller->setPaused(on);
+}
+
 void CommHandler::setUpdating(bool on) {
     if (!on) {
         // Start the loss timer afresh once the application is back.
