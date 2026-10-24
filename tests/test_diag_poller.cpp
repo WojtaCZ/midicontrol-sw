@@ -290,6 +290,21 @@ TEST(comm_diag_pending_fault_flushed_on_link_down) {
     CHECK_EQ(r.entries.size(), size_t(1));
 }
 
+// Re-review M-1: NAK UNREACHABLE clears the link state, so a later setRemoteLink(false) is no edge and would not flush.
+// The UNREACHABLE branch flushes the half-received FAULT itself, exactly once.
+TEST(comm_diag_pending_fault_flushed_on_nak_unreachable) {
+    Rig r;
+    r.poller.setRemoteLink(true, 0);
+    feed(r, resp(7, 1, {rec(0, pd::Code::FAULT, 1)}), 50);
+    r.poller.tick(10050, false);  // next GET, the base answers UNREACHABLE
+    CHECK_EQ(r.entries.size(), size_t(0));
+    r.poller.onNak(r.lastPid(), 0x06);
+    CHECK_EQ(r.entries.size(), size_t(1));
+    CHECK(r.entries[0].fault.has_value());
+    r.poller.setRemoteLink(false, 10500);  // the real link loss afterwards: nothing left to flush
+    CHECK_EQ(r.entries.size(), size_t(1));
+}
+
 TEST(comm_diag_resp_is_acked_and_delivered_by_dispatcher) {
     struct Sink : CommandSink {
         std::optional<mc::protocol::NakReason> playSong(const std::string&, uint8_t) override { return std::nullopt; }

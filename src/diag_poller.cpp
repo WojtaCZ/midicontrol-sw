@@ -96,6 +96,11 @@ void DiagPoller::onNak(uint8_t pid, uint8_t reason) {
         stopped_ = true;
     } else if (reason == static_cast<uint8_t>(mc::protocol::NakReason::UNREACHABLE)) {
         linkUp_ = false;
+        // As setRemoteLink(false): a later real link loss is no edge any more and would not flush a half-received FAULT
+        if (auto e = decoder_.flush()) {
+            hooks_.emit(std::move(*e));
+            persist();
+        }
     }
 }
 
