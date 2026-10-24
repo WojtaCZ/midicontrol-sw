@@ -10,8 +10,8 @@ namespace pd = mc::protocol::diag;
 
 namespace {
 const char* faultKind(uint32_t k) {
-    // Assumption: the remote's FAULT arg uses the base's fault::Kind numbering (not emitted by the remote yet,
-    // Task 6D-2 defines it); revisit when that lands.
+    // The remote's FAULT arg uses the base's fault::Kind numbering; it emits kind 1 for both HardFault and NMI (told
+    // apart by the ipsr detail, 3 or 2). A remote loop stall is its own record (LOOP_STALL), see decode().
     switch (k) {
         case 1: return "HARDFAULT";
         case 2: return "MEMMANAGE";
@@ -112,9 +112,13 @@ std::optional<DiagRespDecoded> DiagRespDecoder::decode(const uint8_t* p, size_t 
         e.level = levelChar(r.level);
         e.tag = "diag";
         e.text = diagCodeText(r.code, r.arg);
-        if (r.code == static_cast<uint8_t>(pd::Code::FAULT)) {
+        // FAULT and LOOP_STALL are both followed by four FAULT_DETAIL records (pc, lr, xpsr, ipsr; PROTOCOL.md)
+        bool isFault = r.code == static_cast<uint8_t>(pd::Code::FAULT);
+        bool isStall = r.code == static_cast<uint8_t>(pd::Code::LOOP_STALL);
+        if (isFault || isStall) {
             FaultInfo f;
-            f.kind = faultKind(r.arg);
+            f.kind = isStall ? "LOOP_STALL" : faultKind(r.arg);
+            if (isStall) f.pc = r.arg;  // the stall's pc is the record's arg; the first detail repeats it
             f.uptimeMs = r.uptimeMs;
             e.fault = f;
             e.level = 'E';

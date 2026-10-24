@@ -61,6 +61,36 @@ TEST(diagresp_fault_detail_folded) {
     CHECK_EQ(e.fault->xpsr, uint32_t(0x61000000));
 }
 
+// The remote's recordFatal(LOOP_STALL): LOOP_STALL(pc) + 4 x FAULT_DETAIL (pc, lr, xpsr, ipsr), all level ERROR (1).
+TEST(diagresp_loop_stall_is_a_fault_with_details) {
+    auto v = resp(9, 6, {{0, 1, 3, 10, 0x08},  // BOOT
+                         {1, 4, 1, 5000, 0x08002468},  // LOOP_STALL, arg = pc
+                         {2, 3, 1, 5000, 0x08002468}, {3, 3, 1, 5000, 0x0800ABCD}, {4, 3, 1, 5000, 0x21000000}, {5, 3, 1, 5000, 15}});
+    auto d = decodeDiagResp(v.data(), v.size(), 5);
+    CHECK(d.has_value());
+    CHECK_EQ(d->entries.size(), size_t(2));
+    const auto& e = d->entries[1];
+    CHECK_EQ(e.level, 'E');
+    CHECK_EQ(e.text, std::string("loop stall, pc 0x08002468"));
+    CHECK(e.fault.has_value());
+    CHECK_EQ(e.fault->kind, std::string("LOOP_STALL"));
+    CHECK_EQ(e.fault->pc, uint32_t(0x08002468));
+    CHECK_EQ(e.fault->lr, uint32_t(0x0800ABCD));
+    CHECK_EQ(e.fault->xpsr, uint32_t(0x21000000));
+    CHECK_EQ(e.fault->uptimeMs, uint64_t(5000));
+}
+
+// LOOP_STALL whose details never come (n = 0 next / flush): still a fault, pc from the record's arg
+TEST(diagresp_loop_stall_without_details_keeps_pc) {
+    auto v = resp(9, 1, {{0, 4, 1, 5000, 0x08002468}});
+    auto d = decodeDiagResp(v.data(), v.size(), 5);
+    CHECK(d.has_value());
+    CHECK_EQ(d->entries.size(), size_t(1));
+    CHECK(d->entries[0].fault.has_value());
+    CHECK_EQ(d->entries[0].fault->kind, std::string("LOOP_STALL"));
+    CHECK_EQ(d->entries[0].fault->pc, uint32_t(0x08002468));
+}
+
 TEST(diagresp_rejects_bad_length) {
     auto v = resp(1, 1, {{0, 6, 3, 1, 0}});
     CHECK(!decodeDiagResp(v.data(), v.size() - 1, 0).has_value());
