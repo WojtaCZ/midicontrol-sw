@@ -137,7 +137,7 @@ TEST(api_diag_ack_clears_unseen_faults_and_calls_back) {
     auto r = apiDiag(s, "ack=" + std::to_string(id), [&] { ++called; });
     CHECK(r.has_value());
     CHECK_EQ(called, 1);
-    CHECK_EQ(s.unseenFaults("base"), size_t(0));
+    CHECK_EQ(s.unseenFaults("base"), size_t(1));  // acknowledged per node: the base fault stays unseen
     CHECK_EQ(s.unseenFaults("remote"), size_t(0));
 }
 
@@ -207,4 +207,19 @@ TEST(console_diag_text_last_fault_per_node_and_last_20_lines) {
     CHECK(!has(text, "line9\n"));
     CHECK(has(text, "remote warn"));
     CHECK(has(text, "(unseen)"));
+}
+
+TEST(api_diag_kind_reset_finds_resets_older_than_one_page) {
+    TmpDir t;
+    DiagStore s(t.path);
+    s.append(mk("base", 'I', "reset: PIN (csr 0x04000000)"));
+    s.append(mk("remote", 'I', "boot, reset: PIN|POWER"));
+    for (int i = 0; i < 450; ++i) s.append(mk("base", 'I', "ble: chatter"));
+    auto r = apiDiag(s, "kind=reset&limit=10");
+    CHECK(r.has_value());
+    CHECK(r->find("reset: PIN (csr") != std::string::npos);
+    CHECK(r->find("boot, reset: PIN|POWER") != std::string::npos);
+    CHECK(r->find("chatter") == std::string::npos);
+    CHECK(r->find("\"next_before\":null") != std::string::npos);
+    CHECK(!apiDiag(s, "kind=other").has_value());
 }

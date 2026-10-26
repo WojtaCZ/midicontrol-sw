@@ -1,5 +1,6 @@
 #include "midicontrol/diag_store.hpp"
 
+#include <algorithm>
 #include <dirent.h>
 #include <sys/stat.h>
 
@@ -264,8 +265,13 @@ DiagStore::DiagStore(std::string dir, size_t rotateBytes, int keepFiles, size_t 
     Reader r(txt);
     Val v = r.val();
     if (r.ok && v.t == Val::Obj) {
-        ackId_ = getNum(v, "ack");
-        if (ackId_ >= nextId_) nextId_ = ackId_ + 1;
+        ackAll_ = getNum(v, "ack");
+        if (ackAll_ >= nextId_) nextId_ = ackAll_ + 1;
+        for (const char* n : {"base", "remote"}) {
+            const uint64_t id = getNum(v, n);
+            if (id) ackIds_[n] = id;
+            if (id >= nextId_) nextId_ = id + 1;
+        }
     }
 }
 
@@ -409,8 +415,9 @@ std::optional<DiagEntry> DiagStore::lastFault(const std::string& node) const {
 size_t DiagStore::unseenFaults(const std::string& node) const {
     std::lock_guard<std::mutex> lk(mu_);
     size_t n = 0;
+    const uint64_t acked = ackFor(node);
     for (uint64_t id : cacheFor(node).faultIds)
-        if (id > ackId_) ++n;
+        if (id > acked) ++n;
     return n;
 }
 
@@ -464,12 +471,34 @@ size_t DiagStore::writeErrors() const {
 void DiagStore::ack(uint64_t id) {
     std::lock_guard<std::mutex> lk(mu_);
     if (id >= nextId_) id = nextId_ - 1;  // never beyond the newest id: a future id would silence later faults
-    if (id <= ackId_) return;
-    ackId_ = id;
+    std::vector<std::string> nodes;
+    for (const char* n : {"base", "remote"}) {
+        for (uint64_t f : cacheFor(n).faultIds) {
+            if (f == id) nodes.push_back(n);
+        }
+    }
+    if (nodes.empty()) nodes = {"base", "remote"};  // not a fault id: up to there on every node
+    bool changed = false;
+    for (const auto& n : nodes) {
+        if (id <= ackFor(n)) continue;
+        ackIds_[n] = id;
+        changed = true;
+    }
+    if (changed) saveAck();
+}
+
+uint64_t DiagStore::ackFor(const std::string& node) const {
+    auto it = ackIds_.find(node);
+    return std::max(ackAll_, it == ackIds_.end() ? 0 : it->second);
+}
+
+void DiagStore::saveAck() const {
     std::string tmp = dir_ + "/diag-ack.json.tmp";
     {
         std::ofstream f(tmp, std::ios::trunc);
-        f << "{\"ack\":" << ackId_ << "}\n";
+        f << "{\"ack\":" << ackAll_;
+        for (const auto& [n, id] : ackIds_) f << ",\"" << n << "\":" << id;
+        f << "}\n";
     }
     std::rename(tmp.c_str(), (dir_ + "/diag-ack.json").c_str());
 }

@@ -37,6 +37,28 @@ bool parseUint(const std::string& s, uint64_t& out) {
     return true;
 }
 
+// Reset-cause lines: base banner "reset: IWDG (csr ...)", remote BOOT record "boot, reset: PIN|SOFTWARE".
+bool isResetEntry(const DiagEntry& e) { return e.text.rfind("reset:", 0) == 0 || e.text.rfind("boot, reset", 0) == 0; }
+
+// The newest `limit` reset entries of one node, searched over at most kResetScan entries (the page polls this, so
+// it stays bounded; that is several days of base log).
+constexpr size_t kResetScan = 4000;
+std::vector<DiagEntry> resetEntries(const DiagStore& store, const std::string& node, uint64_t before, size_t limit) {
+    std::vector<DiagEntry> out;
+    size_t scanned = 0;
+    while (out.size() < limit && scanned < kResetScan) {
+        auto page = store.query(node, 'I', before, kMaxLimit);
+        if (page.empty()) break;
+        scanned += page.size();
+        for (auto& e : page) {
+            if (isResetEntry(e) && out.size() < limit) out.push_back(std::move(e));
+        }
+        before = page.back().id;
+        if (page.size() < kMaxLimit) break;
+    }
+    return out;
+}
+
 }  // namespace
 
 std::optional<std::string> apiDiag(DiagStore& store, const std::string& query, const std::function<void()>& afterAck) {
@@ -44,7 +66,7 @@ std::optional<std::string> apiDiag(DiagStore& store, const std::string& query, c
     std::vector<std::string> nodes = {"base", "remote"};
     char level = 'D';
     uint64_t before = 0, limit = kDefaultLimit, ack = 0;
-    bool doAck = false;
+    bool doAck = false, resets = false;
     for (const auto& [k, v] : q) {
         if (k == "node") {
             if (v != "base" && v != "remote") return std::nullopt;
@@ -56,6 +78,9 @@ std::optional<std::string> apiDiag(DiagStore& store, const std::string& query, c
             if (!parseUint(v, before)) return std::nullopt;
         } else if (k == "limit") {
             if (!parseUint(v, limit)) return std::nullopt;
+        } else if (k == "kind") {
+            if (v != "reset") return std::nullopt;
+            resets = true;
         } else if (k == "ack") {
             if (!parseUint(v, ack)) return std::nullopt;
             doAck = true;
@@ -69,7 +94,8 @@ std::optional<std::string> apiDiag(DiagStore& store, const std::string& query, c
 
     std::vector<DiagEntry> all;
     for (const auto& n : nodes) {
-        auto part = store.query(n, level, before, static_cast<size_t>(limit));
+        auto part = resets ? resetEntries(store, n, before, static_cast<size_t>(limit))
+                           : store.query(n, level, before, static_cast<size_t>(limit));
         all.insert(all.end(), std::make_move_iterator(part.begin()), std::make_move_iterator(part.end()));
     }
     std::sort(all.begin(), all.end(), [](const DiagEntry& a, const DiagEntry& b) { return a.id > b.id; });
@@ -78,7 +104,7 @@ std::optional<std::string> apiDiag(DiagStore& store, const std::string& query, c
     std::string out = "{\"schema\":1,\"entries\":[";
     for (size_t i = 0; i < all.size(); ++i) out += (i ? "," : "") + entryJson(all[i]);
     out += "],\"next_before\":";
-    out += all.size() >= limit ? std::to_string(all.back().id) : "null";
+    out += !resets && all.size() >= limit ? std::to_string(all.back().id) : "null";
     out += "}";
     return out;
 }

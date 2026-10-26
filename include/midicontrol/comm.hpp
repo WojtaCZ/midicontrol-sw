@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "midicontrol/config.hpp"
+#include "midicontrol/device_info.hpp"
 #include "midicontrol/dispatch.hpp"
 #include "midicontrol/diag_poller.hpp"
 #include "midicontrol/diag_store.hpp"
@@ -175,6 +176,9 @@ private:
     bool isRoutine(const mc::protocol::Packet& pkt, bool tx);
     void noteConnected(const std::string& path, bool reconnect);
     void pollStatus();
+    void onInfoResp(const mc::protocol::Packet& pkt);  // INFO_RESP -> node fields (reader thread)
+    void clearInfo(mc::status::Node node);               // node went away: its INFO fields are unknown
+    void clearBaseReport();                              // serial lost: STATUS_RESP fields are unknown
     void storeRemoteDiag(mc::diag::DiagEntry e);  // DiagPoller output (reader / keepalive thread)
     void refreshMidiPort();
     void playbackEnded(const std::string& how, const char* counter);
@@ -210,6 +214,7 @@ private:
     uint8_t _awaitPid = 0;
     bool _awaitActive = false;
     int _awaitResult = 0;  // 0 = none, 1 = ACK, 2 = NAK
+    uint8_t _awaitReason = 0;  // NAK reason when _awaitResult == 2 (guarded by _ackMutex)
     std::optional<uint8_t> _fwStatus;  // guarded by _ackMutex
 
     std::thread _readerThread;
@@ -229,6 +234,10 @@ private:
     bool _pollOutstanding = false;    // keepalive thread + reader (under _routineMutex)
     uint8_t _pollPid = 0;
     int64_t _pollSentMs = 0;
+    // Organ power: a STATUS_RESP is the base's truth only when no SET_CURRENT went out after its GET_STATUS
+    // (the base answers in order). _statusGen = _setCurrentGen when the last GET_STATUS was sent (_routineMutex).
+    std::atomic<uint64_t> _setCurrentGen{0};
+    uint64_t _statusGen = 0;
 
     // Interactive status request (requestStatus).
     std::mutex _statusMutex;
@@ -249,6 +258,10 @@ private:
     std::unique_ptr<mc::diag::DiagPoller> _diagPoller;
     std::set<uint8_t> _diagPids;      // our DIAG_GET ids (under _routineMutex): routine traffic
     std::set<uint8_t> _diagRespPids;  // the remote's DIAG_RESP ids we ACK
+    std::unique_ptr<mc::devinfo::InfoPoller> _infoPoller;  // GET_INFO to the base and the remote
+    std::set<uint8_t> _infoRespPids;  // INFO_RESP ids we ACK (under _routineMutex): routine traffic
+    std::atomic<bool> _remoteLink{false};    // last STATUS_RESP said ble=1
+    std::atomic<bool> _remotePaused{false};  // remote firmware update running (pauseDiag)
     std::atomic<int64_t> _reconnects{0};
 
     // Song being played: sections visited (playback thread appends, control

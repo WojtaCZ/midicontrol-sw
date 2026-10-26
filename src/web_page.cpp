@@ -110,11 +110,57 @@ function blockEvents(events,withNode){
   }
   return t;
 }
-function nodeTab(status,details,counters,events){
+function nodeTab(status,details,counters,events,extra){
   const s=el("section");
-  s.append(el("h5",null,"Status"),blockStatus(status),el("h5",null,"Details"),blockTable(details),
-           el("h5",null,"Counters"),blockTable(counters),el("h5",null,"Recent events"),blockEvents(events,false));
+  s.append(el("h5",null,"Status"),blockStatus(status),el("h5",null,"Details"),blockTable(details));
+  for(const [title,rows] of extra||[])s.append(el("h5",null,title),blockTable(rows));
+  s.append(el("h5",null,"Counters"),blockTable(counters),el("h5",null,"Recent events"),blockEvents(events,false));
   return s;
+}
+
+// --- device details from INFO_RESP (GET_INFO every 15 s); null fields = not reported ---
+function flag(v,on,off){return v==null?null:(v?on:off);}
+function hasInfo(n){return f(n,"info_ms")!=null;}
+// Uptime advanced by the time since the report, so it keeps counting between polls.
+function uptimeNow(n){const u=f(n,"uptime_ms"),t=f(n,"info_ms");return u==null||t==null?null:u+(serverNow()-t);}
+function infoNote(n,what){
+  if(f(n,"info_unsupported"))return [{label:what,value:"not reported: firmware without GET_INFO (update it)",note:true}];
+  return [{label:what,value:"not reported yet (asked every 15 s while reachable)",note:true}];
+}
+function firmwareRows(n){
+  if(!hasInfo(n))return infoNote(n,"Firmware");
+  const rev=f(n,"fw_revision"),br=f(n,"fw_branch"),up=uptimeNow(n),fc=f(n,"fault_count");
+  return [
+    {label:"Revision",value:rev?rev+(br?" ("+br+")":"")+(f(n,"fw_dirty")?" · uncommitted changes":""):null,mono:true},
+    {label:"Built",value:f(n,"fw_built"),mono:true},
+    {label:"Uptime",value:up!=null?dur(up)+" · booted "+stamp(serverNow()-up):null},
+    {label:"Last reset cause",value:f(n,"reset_cause")},
+    fc!=null?{label:"Faults since power-on",value:String(fc)}:null,
+    {label:"Reported",value:ago(f(n,"info_ms"))}].filter(Boolean);
+}
+function bleChips(n,peerName,withStream){
+  const parts=[];
+  const add=(k,on,off)=>{const v=f(n,k);if(v!=null)parts.push((v?"✔ ":"✘ ")+(v?on:off));};
+  add("ble_module_up","module ready","module not ready");
+  add("ble_connected","connected","not connected");
+  if(withStream)add("ble_stream_open","stream open","stream closed");  // the remote does not track it
+  add("ble_secured","secured","not secured");
+  add("ble_peer_alive",peerName+" alive",peerName+" silent");
+  add("ble_pc_alive","PC alive","PC not seen");
+  return parts.join(" · ");
+}
+function battText(n){
+  const mv=f(n,"battery_mv"),lv=f(n,"battery_level");
+  if(mv==null&&lv==null)return null;
+  let s=(mv?(mv/1000).toFixed(2)+" V":"not measured yet")+(lv!=null?" · level "+lv+"/4":"");
+  if(f(n,"battery_critical"))s+=" · CRITICAL";
+  return s;
+}
+function chargeText(n){
+  if(f(n,"vbus")==null)return null;
+  if(!f(n,"vbus"))return "on battery (no USB)";
+  const v=f(n,"vbus_mv");
+  return "USB "+(v?(v/1000).toFixed(2)+" V":"present")+" · "+(f(n,"charging")?"charging":f(n,"charge_done")?"charged":"not charging");
 }
 function packetCounters(n){
   return [{label:"Packets tx / rx",value:c(n,"tx")+" / "+c(n,"rx")},
@@ -170,7 +216,8 @@ function baseSummary(){
   if(!f(n,"connected"))return "Waiting for the base (not connected)";
   let s="Connected "+(f(n,"device")||"");
   s+=f(n,"alive")===false?" · keepalives lost":" · keepalive "+(ago(f(n,"keepalive_ack_ms"))||"never");
-  s+=" · organ power "+(f(n,"organ_power")?"on":"off");
+  const op=f(n,"organ_power");
+  s+=" · organ power "+(op==null?"unknown":op?"on":"off");
   if(f(n,"status_answered")===false)s+=" · GET_STATUS not answered";
   return s;
 }
@@ -182,7 +229,10 @@ function base(){
   else items.push(["green","Connected"]);
   const mp=f(n,"midi_port_found");
   items.push(mp==null?["grey","MIDI port unknown"]:(mp?["green","MIDI port"]:["yellow","No MIDI port"]));
-  items.push(f(n,"organ_power")?["green","Organ power on"]:["grey","Organ power off"]);
+  const op=f(n,"organ_power");  // the SSR as the base reports it (STATUS_RESP), whoever switched it
+  items.push(op==null?["grey","Organ power unknown"]:op?["green","Organ power on"]:["grey","Organ power off"]);
+  if(hasInfo(n)&&f(n,"ble_secured")===false&&f(n,"ble_connected"))items.push(["yellow","BLE link not secured"]);
+  if(f(n,"fw_dirty"))items.push(["yellow","Firmware with uncommitted changes"]);
   if(conn&&f(n,"status_answered")===false)items.push(["yellow","GET_STATUS not answered"]);
   const sm=f(n,"status_ms");
   let reports=null;
@@ -196,34 +246,48 @@ function base(){
     {label:"Last keepalive ACK",value:ago(f(n,"keepalive_ack_ms"))},
     {label:"Connected since",value:(conn&&since!=null?stamp(since):"not connected")+" (reconnects: "+(f(n,"reconnects")||0)+")"},
     {label:"Base reports",value:reports},
-    {label:"Firmware debug",value:"later: version, uptime, reset cause…",note:true}];
+    {label:"Church display",value:flag(f(n,"display"),"connected","not connected")}];
+  const ble=hasInfo(n)?[
+    {label:"State",value:bleChips(n,"remote",true)},
+    {label:"Name",value:f(n,"ble_name"),mono:true},
+    {label:"Paired remote",value:f(n,"ble_peer")||"none stored (pair from Nastaveni)",mono:true},
+    {label:"Pairing",value:f(n,"ble_pairing")}]:infoNote(n,"Bluetooth");
   const counters=packetCounters(n);
   counters.push({label:"CRC errors / duplicates",value:c(n,"crc_errors")+" / "+c(n,"duplicates")});
-  return nodeTab(items,details,counters,data.nodes[n].events.slice());
+  return nodeTab(items,details,counters,data.nodes[n].events.slice(),[["Firmware",firmwareRows(n)],["Bluetooth",ble]]);
 }
+// From the base's report, not from the dot (the dot also turns amber for an unseen fault or a low battery).
+function baseReportFresh(){const sm=f("base","status_ms");return f("base","connected")&&sm!=null&&serverNow()-sm<=15000;}
 function controllerStatus(){
-  const d=data.nodes.controller.dot;
-  if(d==="green")return [d,"BLE connected (per base)"];
-  if(d==="yellow")return [d,"BLE disconnected (per base)"];
-  return [d,f("base","connected")?"No fresh report from the base":"Base not connected"];
+  if(!f("base","connected"))return ["grey","Base not connected"];
+  if(!baseReportFresh())return ["grey","No fresh report from the base"];
+  return f("base","status_ble")?["green","BLE connected (per base)"]:["yellow","BLE disconnected (per base)"];
 }
 function controllerSummary(){
-  const heard=ago(f("controller","last_rx_ms"));
-  return controllerStatus()[1]+" · "+(heard?"last heard "+heard:"never heard");
+  const heard=ago(f("controller","last_rx_ms")),b=battText("controller");
+  return controllerStatus()[1]+(b?" · battery "+b:"")+" · "+(heard?"last heard "+heard:"never heard");
 }
 function controller(){
   const n="controller",heard=ago(f(n,"last_rx_ms"));
   const items=[controllerStatus(),["grey",heard?"Last heard "+heard:"Never heard"]];
+  const lv=f(n,"battery_level");
+  if(f(n,"battery_critical"))items.push(["red","Battery critical"]);
+  else if(lv!=null)items.push([lv<=1&&!f(n,"vbus")?"yellow":"green","Battery "+lv+"/4"+(f(n,"charging")?", charging":"")]);
+  if(f(n,"fw_dirty"))items.push(["yellow","Firmware with uncommitted changes"]);
   const cmd=f(n,"last_cmd"),tx=f(n,"last_tx");
   const details=[
-    {label:"Route",value:"via base, BLE"+(f("base","status_ms")!=null?" (base reports BLE "+yesno(f("base","status_ble"))+")":"")},
+    {label:"Route",value:"via base, BLE"+(baseReportFresh()?" (base reports BLE "+yesno(f("base","status_ble"))+", "+ago(f("base","status_ms"))+")":"")},
     {label:"Last command",value:cmd?cmd+" at "+clock(f(n,"last_cmd_ms"))+" → "+(f(n,"last_cmd_reply")||"?"):null},
-    {label:"Last sent to it",value:tx?tx+" at "+clock(f(n,"last_tx_ms"))+" · "+(f(n,"last_tx_result")||"?"):null},
-    {label:"Firmware debug",value:"later: battery, version, uptime…",note:true}];
+    {label:"Last sent to it",value:tx?tx+" at "+clock(f(n,"last_tx_ms"))+" · "+(f(n,"last_tx_result")||"?"):null}];
+  const power=hasInfo(n)?[{label:"Battery",value:battText(n)},{label:"Supply",value:chargeText(n)}]:infoNote(n,"Battery");
+  const ble=hasInfo(n)?[
+    {label:"State",value:bleChips(n,"base",false)},
+    {label:"Name",value:f(n,"ble_name"),mono:true},
+    {label:"Connected base",value:f(n,"ble_peer"),mono:true}]:infoNote(n,"Bluetooth");
   const counters=packetCounters(n),cmds=[];
   for(const [k,v] of Object.entries(data.nodes[n].counters))if(k.startsWith("cmd."))cmds.push(k.slice(4)+" "+v);
   counters.push({label:"Commands",value:cmds.length?cmds.join(" · "):"none"});
-  return nodeTab(items,details,counters,data.nodes[n].events.slice());
+  return nodeTab(items,details,counters,data.nodes[n].events.slice(),[["Power",power],["Firmware",firmwareRows(n)],["Bluetooth",ble]]);
 }
 function overview(){
   const s=el("section"),t=el("table","ov");
@@ -237,7 +301,7 @@ function overview(){
 }
 
 // --- Diagnostics tab: built once (the filter inputs must keep focus), filled by its own 1 s poll ---
-const DG={sec:null,body:null,faults:null,resets:null,note:null,entries:[],resetEntries:[],node:"",level:"D",tag:"",text:"",timer:null};
+const DG={sec:null,body:null,faults:null,resets:null,note:null,entries:[],resetEntries:[],resetsAt:0,node:"",level:"D",tag:"",text:"",timer:null};
 function hex(v){return "0x"+(v>>>0).toString(16).padStart(8,"0");}
 function faultTable(name,node,fl,unseen){
   const box=el("div");
@@ -324,7 +388,7 @@ async function getDiag(qs){
 async function pollOnce(){
   try{
     DG.entries=await getDiag("limit=200&level="+DG.level+(DG.node?"&node="+DG.node:""));
-    DG.resetEntries=await getDiag("limit=200&level=I");
+    if(Date.now()-DG.resetsAt>10000){DG.resetEntries=await getDiag("kind=reset&limit=10");DG.resetsAt=Date.now();}
   }catch(e){}
   if(String(window.getSelection())==="")drawDiag();
 }

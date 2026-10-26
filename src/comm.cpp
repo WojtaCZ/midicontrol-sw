@@ -78,7 +78,23 @@ CommHandler::CommHandler(const Config& config, MidiPortFinder midiFinder,
     out.onDiagResp = [this](const Packet& pkt) {
         if (pkt.source == ADDR_REMOTE && _diagPoller) _diagPoller->onResp(pkt.payload.data(), pkt.payload.size(), steadyMs());
     };
+    out.onInfoResp = [this](const Packet& pkt) { onInfoResp(pkt); };
     _dispatcher = std::make_unique<Dispatcher>(static_cast<CommandSink&>(*this), std::move(out));
+
+    mc::devinfo::InfoPoller::Hooks ih;
+    ih.sendGet = [this](mc::devinfo::InfoPoller::Target t) {
+        return sendWithAck(t == mc::devinfo::InfoPoller::Base ? ADDR_BASE : ADDR_REMOTE, MsgType::GET_INFO);
+    };
+    ih.clear = [this](mc::devinfo::InfoPoller::Target t) {
+        clearInfo(t == mc::devinfo::InfoPoller::Base ? Node::Base : Node::Controller);
+    };
+    ih.unsupported = [this](mc::devinfo::InfoPoller::Target t) {
+        const Node n = t == mc::devinfo::InfoPoller::Base ? Node::Base : Node::Controller;
+        _status.set(n, "info_unsupported", true);
+        mc::log::info(n, std::string(t == mc::devinfo::InfoPoller::Base ? "Base" : "Controller") +
+                             " firmware does not answer GET_INFO (older firmware): no device details.");
+    };
+    _infoPoller = std::make_unique<mc::devinfo::InfoPoller>(std::move(ih));
 
     mc::diag::DiagPoller::Hooks dh;
     dh.sendGet = [this](const std::vector<uint8_t>& payload) {
@@ -172,6 +188,8 @@ void CommHandler::disconnect() {
     _pending.clear();
     _connected.store(false);
     _status.set(Node::Base, "connected", false);
+    clearBaseReport();
+    _infoPoller->tick(steadyMs(), false, false);
 }
 
 bool CommHandler::reconnect(const std::string& devicePath) {
@@ -204,6 +222,7 @@ bool CommHandler::threadsAlive(std::chrono::milliseconds maxAge) const {
 }
 
 void CommHandler::pauseDiag(bool on) {
+    _remotePaused.store(on);  // no GET_INFO to the remote during its update either
     if (_diagPoller) _diagPoller->setPaused(on);
 }
 
@@ -244,6 +263,8 @@ void CommHandler::handleSerialLoss() {
     _dispatcher->reset();
     if (_diagPoller) _diagPoller->setRemoteLink(false, steadyMs());  // flushes a half-received FAULT
     _status.set(Node::Base, "connected", false);
+    clearBaseReport();
+    _infoPoller->tick(steadyMs(), false, false);  // down now: a reconnect faster than the 2 s tick is still an edge
     mc::log::warn(Node::Base, "Serial link to the base lost; waiting for it to come back...");
     post({Command::Kind::SerialLost, {}, {}, 0});
 }
@@ -302,7 +323,7 @@ uint8_t CommHandler::sendWithAck(uint8_t dest, MsgType type, const std::vector<u
         _pending[pid] = Pending{Clock::now(), 0, type, dest, payload};
         _serial.write(raw);
     }
-    if (dest == ADDR_REMOTE && type != MsgType::DIAG_GET) {
+    if (dest == ADDR_REMOTE && type != MsgType::DIAG_GET && type != MsgType::GET_INFO) {
         _status.set(Node::Controller, "last_tx", std::string(msgTypeName(type)));
         _status.setNow(Node::Controller, "last_tx_ms");
         _status.set(Node::Controller, "last_tx_result", std::string("pending"));
@@ -335,10 +356,17 @@ bool CommHandler::sendReliable(uint8_t dest, MsgType type, const std::vector<uin
         bool signalled = _ackCv.wait_for(lk, std::chrono::milliseconds(timeoutMs),
                                          [&] { return _awaitResult != 0; });
         int result = _awaitResult;
+        const uint8_t reason = _awaitReason;
         _awaitActive = false;
         lk.unlock();
 
         if (signalled && result == 1) return true;   // ACK
+        if (signalled && result == 2 && reason == static_cast<uint8_t>(NakReason::BUSY)) {
+            // The base could not forward right now (BLE module briefly in command mode / TX full): the link is
+            // usable, so retry like a timeout instead of failing a whole firmware update.
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            continue;
+        }
         if (signalled && result == 2) return false;  // NAK — caller aborts
         // timeout: retry
     }
@@ -357,6 +385,8 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
         }
     }
     if (nak && _diagPoller) _diagPoller->onNak(pid, reason);  // stops the polling after NAK UNKNOWN_MSG/UNREACHABLE (BUSY only retries on the timer)
+    const bool infoGet = pending && pending->msgType == MsgType::GET_INFO;
+    if (nak && infoGet) _infoPoller->onNak(pid, reason, steadyMs());  // reports UNKNOWN_MSG itself, once
     bool pollNak = false;
     if (nak) {
         std::lock_guard<std::mutex> lk(_routineMutex);
@@ -367,20 +397,21 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
     }
     if (pollNak) {
         _status.set(Node::Base, "status_answered", false);
-    } else if (nak) {
+    } else if (nak && !infoGet) {
         std::string what = pending ? std::string(msgTypeName(pending->msgType)) + " id=" +
                                          std::to_string(pid) + " to " + nodeName(pending->dest)
                                    : "id=" + std::to_string(pid);
         mc::log::info(pending ? mc::status::nodesForPeer(pending->dest)[0] : Node::Base,
                       "NAK for " + what + ": " + nakReasonName(reason));
     }
-    if (pending && pending->dest == ADDR_REMOTE && pending->msgType != MsgType::DIAG_GET) {
+    if (pending && pending->dest == ADDR_REMOTE && pending->msgType != MsgType::DIAG_GET && !infoGet) {
         _status.set(Node::Controller, "last_tx_result",
                     nak ? "NAK " + std::string(nakReasonName(reason)) : std::string("ACK"));
     }
     std::lock_guard<std::mutex> lk(_ackMutex);
     if (_awaitActive && pid == _awaitPid) {
         _awaitResult = nak ? 2 : 1;
+        _awaitReason = reason;
         _ackCv.notify_all();
     }
 }
@@ -425,13 +456,21 @@ void CommHandler::checkTimeouts() {
     }
     for (const auto& pkt : resent) noteTx(pkt, true);
     for (const auto& [pid, p] : gaveUp) {
+        // Background polls (DIAG_GET, GET_INFO) time out whenever the remote drops before the base notices: counted,
+        // logged as debug, and they don't overwrite the result of the last real command shown on the page.
+        const bool background = p.msgType == MsgType::DIAG_GET || p.msgType == MsgType::GET_INFO;
         for (Node n : mc::status::nodesForPeer(p.dest)) {
             _status.count(n, "gave_up");
-            mc::log::warn(n, std::string(msgTypeName(p.msgType)) + " id=" + std::to_string(pid) +
-                                 " to " + nodeName(p.dest) + " not acknowledged after " +
-                                 std::to_string(MAX_RETRIES) + " retries");
+            const std::string text = std::string(msgTypeName(p.msgType)) + " id=" + std::to_string(pid) + " to " +
+                                     nodeName(p.dest) + " not acknowledged after " + std::to_string(MAX_RETRIES) +
+                                     " retries";
+            if (background) {
+                mc::log::debug(n, text);
+            } else {
+                mc::log::warn(n, text);
+            }
         }
-        if (p.dest == ADDR_REMOTE) _status.set(Node::Controller, "last_tx_result", std::string("no answer"));
+        if (p.dest == ADDR_REMOTE && !background) _status.set(Node::Controller, "last_tx_result", std::string("no answer"));
     }
 }
 
@@ -460,14 +499,24 @@ bool CommHandler::isRoutine(const Packet& pkt, bool tx) {
         }
         case MsgType::DIAG_GET:
             return tx;  // our own background poll
+        case MsgType::GET_INFO:
+            return tx;  // only the InfoPoller sends it
+        case MsgType::INFO_RESP:
+            if (tx) return false;
+            bounded(_infoRespPids, pkt.packetId);
+            return true;
         case MsgType::DIAG_RESP:
             if (tx) return false;
             bounded(_diagRespPids, pkt.packetId);
             return true;
         case MsgType::ACK:
             if (pkt.payload.empty()) return false;
-            if (tx) return _pollRespPids.count(pkt.payload[0]) > 0 || _diagRespPids.count(pkt.payload[0]) > 0;
-            return _pollPids.count(pkt.payload[0]) > 0 || _diagPids.count(pkt.payload[0]) > 0;
+            if (tx) {
+                return _pollRespPids.count(pkt.payload[0]) > 0 || _diagRespPids.count(pkt.payload[0]) > 0 ||
+                       _infoRespPids.count(pkt.payload[0]) > 0;
+            }
+            return _pollPids.count(pkt.payload[0]) > 0 || _diagPids.count(pkt.payload[0]) > 0 ||
+                   _infoPoller->owns(pkt.payload[0]);
         default:
             return false;
     }
@@ -500,8 +549,9 @@ void CommHandler::noteRx(const Packet& pkt) {
     }
     if (pkt.source == ADDR_REMOTE) {
         _status.setNow(Node::Controller, "last_rx_ms");
+        // Commands only: replies to our polls (DIAG_RESP, INFO_RESP) are not something the user did on the remote
         if (pkt.msgType != MsgType::ACK && pkt.msgType != MsgType::NAK && pkt.msgType != MsgType::DIAG_RESP &&
-            pkt.dest == ADDR_PC) {
+            pkt.msgType != MsgType::INFO_RESP && pkt.dest == ADDR_PC) {
             const std::string name = msgTypeName(pkt.msgType);
             _status.set(Node::Controller, "last_cmd", name);
             _status.setNow(Node::Controller, "last_cmd_ms");
@@ -518,6 +568,18 @@ void CommHandler::noteRx(const Packet& pkt) {
         _status.set(Node::Base, "status_ble", st.ble);
         if (_diagPoller) _diagPoller->setRemoteLink(st.ble, steadyMs(), _updating.load());  // remote reachable -> DIAG_GET
         _status.set(Node::Base, "status_relay", st.relay);
+        _remoteLink.store(st.ble);
+        bool authoritative;
+        {
+            std::lock_guard<std::mutex> lk(_routineMutex);
+            authoritative = _statusGen == _setCurrentGen.load();
+        }
+        if (authoritative) {
+            // The base's SSR, whoever switched it (PC, base menu, remote): shown on the page and used to decide
+            // whether a song needs the warm-up.
+            _organOn.store(st.relay);
+            _status.set(Node::Base, "organ_power", st.relay);
+        }
         _status.set(Node::Base, "status_display", st.display);
         _status.set(Node::Base, "status_pc", st.pc);
         _status.setNow(Node::Base, "status_ms");
@@ -573,6 +635,7 @@ void CommHandler::pollStatus() {
         std::lock_guard<std::mutex> lk(_routineMutex);
         _pollPids.insert(pid);
         _pollPid = pid;
+        _statusGen = _setCurrentGen.load();
     }
     sendPacket(Packet(ADDR_PC, ADDR_BASE, pid, MsgType::GET_STATUS));
 }
@@ -587,6 +650,34 @@ void CommHandler::storeRemoteDiag(mc::diag::DiagEntry e) {
     if (fault) mc::diag::publishFaultStatus(*_diag, _status);
 }
 
+void CommHandler::onInfoResp(const Packet& pkt) {
+    const bool fromBase = pkt.source == ADDR_BASE;
+    if (!fromBase && pkt.source != ADDR_REMOTE) return;
+    const Node node = fromBase ? Node::Base : Node::Controller;
+    auto fields = mc::devinfo::decode(pkt.payload.data(), pkt.payload.size());
+    if (fields.empty()) {
+        mc::log::warn(node, "Malformed INFO_RESP (" + std::to_string(pkt.payload.size()) + " bytes) ignored");
+        return;
+    }
+    for (auto& [key, value] : fields) _status.set(node, key, std::move(value));
+    _status.set(node, "info_unsupported", false);
+    _status.setNow(node, "info_ms");
+    _infoPoller->onResp(fromBase ? mc::devinfo::InfoPoller::Base : mc::devinfo::InfoPoller::Remote, steadyMs());
+}
+
+void CommHandler::clearInfo(Node node) {
+    for (const auto& key : mc::devinfo::fieldKeys()) _status.set(node, key, std::monostate{});
+    _status.set(node, "info_ms", std::monostate{});
+}
+
+void CommHandler::clearBaseReport() {
+    _remoteLink.store(false);
+    for (const char* key : {"status_ble", "status_relay", "status_display", "status_pc", "status_ms"}) {
+        _status.set(Node::Base, key, std::monostate{});
+    }
+    _status.set(Node::Base, "organ_power", std::monostate{});
+}
+
 void CommHandler::refreshMidiPort() {
     auto ports = _midiFinder ? _midiFinder() : std::nullopt;
     _status.set(Node::Base, "midi_port_found", ports.has_value());
@@ -598,6 +689,10 @@ std::optional<CommHandler::BaseStatus> CommHandler::requestStatus(int timeoutMs)
     ++_statusWaiters;
     const uint64_t seq = _statusSeq;
     lk.unlock();
+    {
+        std::lock_guard<std::mutex> rl(_routineMutex);
+        _statusGen = _setCurrentGen.load();
+    }
     sendWithAck(ADDR_BASE, MsgType::GET_STATUS);
     lk.lock();
     bool got = _statusCv.wait_for(lk, std::chrono::milliseconds(timeoutMs),
@@ -682,6 +777,9 @@ void CommHandler::keepaliveLoop() {
             }
             pollStatus();
             if (_diagPoller) _diagPoller->tick(steadyMs(), false);  // while updating this block is skipped: no DIAG_GET
+            _infoPoller->tick(steadyMs(), true, _remoteLink.load() && !_remotePaused.load());
+        } else {
+            _infoPoller->tick(steadyMs(), false, false);  // base gone or updating: its details are void
         }
         if (steadyMs() - lastMidiCheck >= kMidiCheckMs) {
             lastMidiCheck = steadyMs();
@@ -769,12 +867,14 @@ std::vector<std::string> CommHandler::songList() const {
 void CommHandler::organOn() {
     _organOn.store(true);
     _status.set(Node::Base, "organ_power", true);
+    ++_setCurrentGen;  // STATUS_RESPs to earlier GET_STATUS no longer tell the SSR state
     sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {0x01});
 }
 
 void CommHandler::organOff() {
     _organOn.store(false);
     _status.set(Node::Base, "organ_power", false);
+    ++_setCurrentGen;
     sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {0x00});
 }
 
@@ -892,7 +992,7 @@ void CommHandler::controlLoop() {
                 }
                 stopRecorder();
                 _organOn.store(false);
-                _status.set(Node::Base, "organ_power", false);
+                _status.set(Node::Base, "organ_power", std::monostate{});  // unknown until the base reports again
                 break;
             case Command::Kind::Shutdown:
                 if (releasePlayer()) {

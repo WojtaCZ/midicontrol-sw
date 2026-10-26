@@ -21,8 +21,9 @@ bool Dispatcher::needsAck(MsgType type) {
 }
 
 void Dispatcher::reply(const Packet& pkt, std::optional<NakReason> nak) {
-    _last[pkt.source] = Reply{pkt.packetId, nak.has_value(),
-                              nak ? static_cast<uint8_t>(*nak) : uint8_t{0}};
+    auto& seen = _last[pkt.source];
+    seen.push_back(Reply{pkt.packetId, nak.has_value(), nak ? static_cast<uint8_t>(*nak) : uint8_t{0}});
+    if (seen.size() > kRemembered) seen.pop_front();
     if (!_out.send) return;
     if (nak) {
         _out.send(pkt.source, MsgType::NAK, {pkt.packetId, static_cast<uint8_t>(*nak)});
@@ -56,12 +57,17 @@ void Dispatcher::handle(const Packet& pkt) {
 
     // Retransmission of the frame we just answered: answer again, don't execute.
     if (!broadcast) {
-        auto it = _last.find(pkt.source);
-        if (it != _last.end() && it->second.packetId == pkt.packetId) {
+        const Reply* dup = nullptr;
+        if (auto it = _last.find(pkt.source); it != _last.end()) {
+            for (const auto& r : it->second) {
+                if (r.packetId == pkt.packetId) dup = &r;
+            }
+        }
+        if (dup) {
             if (_out.onDuplicate) _out.onDuplicate(pkt);
             if (_out.send) {
-                if (it->second.nak) {
-                    _out.send(pkt.source, MsgType::NAK, {pkt.packetId, it->second.reason});
+                if (dup->nak) {
+                    _out.send(pkt.source, MsgType::NAK, {pkt.packetId, dup->reason});
                 } else {
                     _out.send(pkt.source, MsgType::ACK, {pkt.packetId});
                 }
@@ -112,6 +118,10 @@ void Dispatcher::handle(const Packet& pkt) {
         case MsgType::DIAG_RESP:
             answer(std::nullopt);  // ACKed like STATUS_RESP
             if (!broadcast && _out.onDiagResp) _out.onDiagResp(pkt);
+            return;
+        case MsgType::INFO_RESP:
+            answer(std::nullopt);  // ACKed like STATUS_RESP
+            if (!broadcast && _out.onInfoResp) _out.onInfoResp(pkt);
             return;
         // Informational messages the PC may receive: accept.
         case MsgType::SONG_LIST_RESP:

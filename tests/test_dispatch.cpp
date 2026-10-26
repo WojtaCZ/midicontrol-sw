@@ -227,3 +227,45 @@ TEST(dispatcher_reports_duplicate) {
     CHECK_EQ(r.duplicates, 1);
     CHECK_EQ(r.sink.plays.size(), 1u);
 }
+
+TEST(dispatch_info_resp_acked_and_delivered_once) {
+    Rig r;
+    std::vector<Packet> got;
+    Dispatcher::Output out = r.output();
+    out.onInfoResp = [&](const Packet& p) { got.push_back(p); };
+    Dispatcher disp(r.sink, std::move(out));
+    disp.handle(Packet(ADDR_REMOTE, ADDR_PC, 0x31, MsgType::INFO_RESP, {0x05, 0x04, 1, 0, 0, 0}));
+    disp.handle(Packet(ADDR_REMOTE, ADDR_PC, 0x31, MsgType::INFO_RESP, {0x05, 0x04, 1, 0, 0, 0}));  // retry
+    CHECK_EQ(got.size(), 1u);
+    CHECK_EQ(r.sent.size(), 2u);
+    CHECK(isAck(r.sent[0], ADDR_REMOTE, 0x31));
+    CHECK(isAck(r.sent[1], ADDR_REMOTE, 0x31));
+}
+
+TEST(dispatch_interleaved_retransmission_is_not_executed_twice) {
+    // The remote has DIAG_RESP and INFO_RESP in flight together; our ACK of the first is lost, so it is retransmitted
+    // after the second arrived (bench 2026-10-26: four DIAG records stored twice, 575 ms apart).
+    Rig r;
+    int diag = 0, info = 0;
+    Dispatcher::Output out = r.output();
+    out.onDiagResp = [&](const Packet&) { ++diag; };
+    out.onInfoResp = [&](const Packet&) { ++info; };
+    Dispatcher disp(r.sink, std::move(out));
+    disp.handle(Packet(ADDR_REMOTE, ADDR_PC, 0x40, MsgType::DIAG_RESP, {1, 0, 0, 0, 0}));
+    disp.handle(Packet(ADDR_REMOTE, ADDR_PC, 0x41, MsgType::INFO_RESP, {0x31, 1, 4}));
+    disp.handle(Packet(ADDR_REMOTE, ADDR_PC, 0x40, MsgType::DIAG_RESP, {1, 0, 0, 0, 0}));  // retry of 0x40
+    CHECK_EQ(diag, 1);
+    CHECK_EQ(info, 1);
+    CHECK_EQ(r.sent.size(), 3u);
+    CHECK(isAck(r.sent[2], ADDR_REMOTE, 0x40));  // still answered
+}
+
+TEST(dispatch_remembers_a_few_frames_per_source_not_forever) {
+    Rig r;
+    for (uint8_t pid = 1; pid <= 20; ++pid) r.rx(ADDR_REMOTE, pid, MsgType::STOP_SONG);
+    CHECK_EQ(r.sink.stops, 20);
+    r.rx(ADDR_REMOTE, 20, MsgType::STOP_SONG);  // recent: duplicate
+    CHECK_EQ(r.sink.stops, 20);
+    r.rx(ADDR_REMOTE, 1, MsgType::STOP_SONG);  // long gone (the id space wraps): a new frame
+    CHECK_EQ(r.sink.stops, 21);
+}

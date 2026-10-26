@@ -49,6 +49,8 @@ std::string hex(uint32_t v) {
 }
 }  // namespace
 
+std::string resetCauseText(uint32_t flags) { return resetCause(flags); }
+
 std::string diagCodeText(uint8_t code, uint32_t arg) {
     using C = pd::Code;
     switch (static_cast<C>(code)) {

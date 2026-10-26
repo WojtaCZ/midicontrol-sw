@@ -126,6 +126,19 @@ TEST(status_dot_controller) {
     CHECK(evaluateDot(Node::Controller, h.r.snapshot()) == Dot::Grey);  // never a STATUS_RESP
 }
 
+TEST(status_dot_controller_amber_on_critical_battery) {
+    Rig g;
+    g.r.set(Node::Base, "connected", true);
+    g.r.set(Node::Base, "status_ms", g.t);
+    g.r.set(Node::Base, "status_ble", true);
+    g.r.set(Node::Controller, "battery_critical", false);
+    CHECK(evaluateDot(Node::Controller, g.r.snapshot()) == Dot::Green);
+    g.r.set(Node::Controller, "battery_critical", true);
+    CHECK(evaluateDot(Node::Controller, g.r.snapshot()) == Dot::Yellow);
+    g.r.set(Node::Controller, "battery_critical", std::monostate{});  // remote gone: unknown, not amber
+    CHECK(evaluateDot(Node::Controller, g.r.snapshot()) == Dot::Green);
+}
+
 TEST(status_dot_software) {
     Rig g;
     CHECK(evaluateDot(Node::Software, g.r.snapshot()) == Dot::Green);

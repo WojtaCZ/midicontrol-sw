@@ -46,6 +46,7 @@ add_library(midicontrol_core
     src/log_reader.cpp
     src/diag_poller.cpp
     src/diag_api.cpp
+    src/device_info.cpp
 )
 find_package(Threads REQUIRED)
 target_include_directories(midicontrol_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -67,6 +68,7 @@ add_executable(midicontrol_tests
     tests/test_songs.cpp
     tests/test_playback.cpp
     tests/test_dispatch.cpp
+    tests/test_device_info.cpp
     tests/test_firmware_image.cpp
     tests/test_names.cpp
     tests/test_status.cpp

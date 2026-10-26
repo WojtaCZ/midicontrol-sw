@@ -50,6 +50,9 @@ std::optional<DiagRespDecoded> decodeDiagResp(const uint8_t* payload, size_t len
 // Human text of one record, e.g. BOOT -> "boot, reset: PIN|SOFTWARE", LOW_BATTERY -> "low battery 3412 mV".
 std::string diagCodeText(uint8_t code, uint32_t arg);
 
+// Reset cause flags (RCC_CSR >> 24) & 0xFE as text, e.g. "PIN|SOFTWARE" (empty = no flag). Used by BOOT records and INFO_RESP.
+std::string resetCauseText(uint32_t flags);
+
 }  // namespace mc::diag
 
 #endif

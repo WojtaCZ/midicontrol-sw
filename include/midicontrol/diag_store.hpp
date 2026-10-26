@@ -37,7 +37,7 @@ public:
     std::vector<DiagEntry> query(const std::string& node, char minLevel, uint64_t beforeId, size_t limit) const;
     std::optional<DiagEntry> lastFault(const std::string& node) const;
     size_t unseenFaults(const std::string& node) const;  // faults with id > acked id
-    void ack(uint64_t id);
+    void ack(uint64_t id);  // acknowledges up to `id` on the node that fault belongs to (else on every node)
     // Last (boot_id, cursor) the remote poller reached; survives restarts (diag-remote-cursor.json).
     std::optional<std::pair<uint16_t, uint16_t>> loadRemoteCursor() const;
     void saveRemoteCursor(uint16_t boot, uint16_t cursor);
@@ -69,7 +69,10 @@ private:
     int keepFiles_;
     mutable std::mutex mu_;
     uint64_t nextId_ = 1;
-    uint64_t ackId_ = 0;
+    uint64_t ackAll_ = 0;                    // legacy {"ack":N}: applies to every node
+    std::map<std::string, uint64_t> ackIds_; // per node: "Mark seen" on one node must not clear another's fault
+    uint64_t ackFor(const std::string& node) const;
+    void saveAck() const;
     std::set<std::string> checked_;        // nodes whose file end was verified to be newline-terminated
     std::map<std::string, size_t> sizes_;  // current file size per node
     mutable std::map<std::string, NodeCache> cache_;

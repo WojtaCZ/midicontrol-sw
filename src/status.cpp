@@ -155,7 +155,9 @@ Dot evaluateHealth(Node node, const Snapshot& s) {
             if (!flag(base, "connected", false) || !statusMs || s.nowMs - *statusMs > kStatusFreshMs) {
                 return Dot::Grey;
             }
-            return flag(base, "status_ble", false) ? Dot::Green : Dot::Yellow;
+            if (!flag(base, "status_ble", false)) return Dot::Yellow;
+            // INFO_RESP: a battery below the cut-off is about to switch the remote off
+            return flag(s.node(Node::Controller), "battery_critical", false) ? Dot::Yellow : Dot::Green;
         }
     }
     return Dot::Grey;

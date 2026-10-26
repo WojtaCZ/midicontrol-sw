@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <optional>
@@ -54,6 +55,8 @@ public:
         std::function<void(const mc::protocol::Packet&)> onDuplicate;
         // DIAG_RESP from the remote (already ACKed; a retransmission is not delivered twice).
         std::function<void(const mc::protocol::Packet&)> onDiagResp;
+        // INFO_RESP from the base or the remote (already ACKed).
+        std::function<void(const mc::protocol::Packet&)> onInfoResp;
     };
 
     Dispatcher(CommandSink& sink, Output out) : _sink(sink), _out(std::move(out)) {}
@@ -77,7 +80,10 @@ private:
 
     CommandSink& _sink;
     Output _out;
-    std::map<uint8_t, Reply> _last;  // per source: last reliable frame and our answer
+    // Per source: the last kRemembered reliable frames and our answers. More than one: a node can have several
+    // reliable frames in flight (DIAG_RESP + INFO_RESP), and the retry of an earlier one arrives after a later one.
+    static constexpr size_t kRemembered = 8;
+    std::map<uint8_t, std::deque<Reply>> _last;
 };
 
 }  // namespace mc

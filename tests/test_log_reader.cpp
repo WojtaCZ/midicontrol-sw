@@ -257,3 +257,46 @@ TEST(log_ingest_replayed_body_lines_raise_no_status_events) {
     CHECK_EQ(ev.list[0], std::string("W ble: new warning"));
     CHECK_EQ(store.query("base", 'W', 0, 10).size(), size_t(2));  // both are still stored
 }
+
+TEST(log_ingest_replay_skips_lines_already_read_live) {
+    TmpDir t;
+    DiagStore store(t.path);
+    Events ev;
+    LogIngest in(store, [] { return int64_t(1); }, ev.sink());
+    feedLines(in, {"[    0.010] I sys: MIDIControl base fw main rev abc1234", "[    0.011] I sys: reset: PIN (csr 0x04000000)",
+                   "[    5.000] I ble: connect"});
+    // Reset: the base replays its whole ring, including what the PC already has, plus a line the PC missed.
+    feedLines(in, {"--- log before reset ---", "[    0.010] I sys: MIDIControl base fw main rev abc1234",
+                   "[    0.011] I sys: reset: PIN (csr 0x04000000)", "[    5.000] I ble: connect", "[    7.000] W ble: missed live",
+                   "--- end of log before reset ---", "[    0.010] I sys: MIDIControl base fw main rev abc1234",
+                   "[    0.011] I sys: reset: SOFTWARE (csr 0x10000000)", "[    0.500] I ble: ready"});
+    auto got = texts(store.query("base", 'D', 0, 50));
+    CHECK((got == std::vector<std::string>{"MIDIControl base fw main rev abc1234", "reset: PIN (csr 0x04000000)", "connect", "missed live",
+                                          "MIDIControl base fw main rev abc1234", "reset: SOFTWARE (csr 0x10000000)", "ready"}));
+}
+
+TEST(log_ingest_restart_seeds_seen_lines_from_store) {
+    TmpDir t;
+    DiagStore store(t.path);
+    {
+        LogIngest in(store, [] { return int64_t(1); }, nullptr);
+        feedLines(in, {"[    5.000] I ble: connect"});
+    }
+    LogIngest in(store, [] { return int64_t(2); }, nullptr);  // service restarted
+    feedLines(in, {"--- log before reset ---", "[    5.000] I ble: connect", "--- end of log before reset ---"});
+    CHECK_EQ(store.query("base", 'D', 0, 50).size(), size_t(1));
+}
+
+TEST(log_ingest_replayed_banner_of_an_unseen_run_is_kept) {
+    // Run 1 seen live; run 2 ran while the PC was away; its reset replays run 2's ring, whose banner is identical
+    // (same uptime, same text) to run 1's.
+    TmpDir t;
+    DiagStore store(t.path);
+    LogIngest in(store, [] { return int64_t(1); }, nullptr);
+    feedLines(in, {"[    0.005] I sys: MIDIControl base fw main rev abc1234", "[    0.006] I sys: reset: PIN (csr 0x04000000)", "[    9.000] I ble: run1"});
+    in.disconnect();
+    feedLines(in, {"--- log before reset ---", "[    0.005] I sys: MIDIControl base fw main rev abc1234", "[    0.006] I sys: reset: PIN (csr 0x04000000)",
+                   "[    3.000] I ble: run2", "--- end of log before reset ---", "[    0.005] I sys: MIDIControl base fw main rev abc1234"});
+    // The replay does not continue what was read live (run 1 ended with "run1"): all of it is new.
+    CHECK_EQ(store.query("base", 'D', 0, 50).size(), size_t(7));
+}

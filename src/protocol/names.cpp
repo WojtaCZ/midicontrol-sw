@@ -22,6 +22,8 @@ const char* msgTypeName(MsgType type) {
         case MsgType::SET_CURRENT: return "SET_CURRENT";
         case MsgType::GET_STATUS: return "GET_STATUS";
         case MsgType::STATUS_RESP: return "STATUS_RESP";
+        case MsgType::GET_INFO: return "GET_INFO";
+        case MsgType::INFO_RESP: return "INFO_RESP";
         case MsgType::KEEPALIVE: return "KEEPALIVE";
         case MsgType::KEEPALIVE_ACK: return "KEEPALIVE_ACK";
         case MsgType::FW_UPDATE_START: return "FW_UPDATE_START";

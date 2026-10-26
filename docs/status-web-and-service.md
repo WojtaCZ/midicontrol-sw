@@ -66,7 +66,7 @@ The top bar shows **MIDIControl**, the host:port and "updated N s ago". If a req
 | Block | Software | Base | Controller |
 |---|---|---|---|
 | **Status** | running; idle / warming up / playing `<code>` `<section>`; song-file warnings; activity (e.g. firmware update) | connected / waiting / keepalives lost / firmware update; MIDI port; organ power; "GET_STATUS not answered" | BLE connected / disconnected (per base), or no fresh report; last heard |
-| **Details** | version (git hash + build date), start time and uptime, config path, play folder and song count, current or last song with its sections and how it ended, song codes with ⚠ on problem files | serial device and VID:PID, MIDI out port, last keepalive ACK age, connected since and reconnect count, latest `STATUS_RESP` flags (BLE, relay, display, PC) and their age, a greyed "Firmware debug: later" row | route ("via base, BLE"), last command received and its ACK/NAK, last packet sent to it and its result, a greyed "Firmware debug: later" row |
+| **Details** | version (git hash + build date), start time and uptime, config path, play folder and song count, current or last song with its sections and how it ended, song codes with ⚠ on problem files | serial device and VID:PID, MIDI out port, last keepalive ACK age, connected since and reconnect count, latest `STATUS_RESP` flags (BLE, relay, display, PC) and their age, church display; sections **Firmware** and **Bluetooth** from `INFO_RESP` (below) | route ("via base, BLE", with the age of the base's report), last command received and its ACK/NAK, last packet sent to it and its result; sections **Power**, **Firmware** and **Bluetooth** from `INFO_RESP` |
 | **Counters** | songs played (ended / stopped), warnings / errors | packets tx / rx, retries / gave up, NAK sent / received, CRC errors / duplicates | packets tx / rx, retries / gave up, NAK sent / received, received commands by type |
 | **Recent events** | log lines (INFO/WARN/ERROR) | packets to and from the base, plus link events | packets to and from the controller, plus link events |
 
@@ -95,13 +95,19 @@ Each node keeps its last 200 events in memory. Nothing survives a restart: the j
 |---|---|---|---|---|
 | Software | otherwise | a Software WARN in the last 10 min, or a song file with a problem | a Software ERROR in the last 10 min | never |
 | Base | connected, keepalive OK | waiting for the base (unplugged), GET_STATUS not answered, or a firmware update in progress | serial open but keepalives lost | never |
-| Controller | the base's last STATUS_RESP (≤ 15 s old) says BLE connected | BLE reported disconnected | never: the PC can't tell a fault from "switched off" | base not connected, or no fresh STATUS_RESP |
+| Controller | the base's last STATUS_RESP (≤ 15 s old) says BLE connected | BLE reported disconnected, or the remote reports a critical battery | never: the PC can't tell a fault from "switched off" | base not connected, or no fresh STATUS_RESP |
 
 An unplugged base is a state, not an error: the dot is yellow "Waiting for the base" and the player reconnects on its own.
 
 ### Base status poll
 
 While connected, the player sends `GET_STATUS` to the base every 5 s. A NAK, or no answer within 2 s, shows "not answered" (yellow), not an error. The poll and keepalives pause during a base firmware update, because the bootloader ignores them.
+
+**Organ power** on the page is the base's SSR as `STATUS_RESP` reports it, whoever switched it (PC, the base menu "Napajeni varhan", the remote). The player also uses it to decide whether a song needs the warm-up: switched on at the base, a song starts at once. A `STATUS_RESP` to a `GET_STATUS` sent before the PC's last `SET_CURRENT` is not used (it may predate the switch). Unknown (grey) while the base is not connected.
+
+### Device details (GET_INFO)
+
+The player sends `GET_INFO` to the base and to the remote: once when the node comes up (serial connected; the base reports the BLE link), then every 15 s. The answer `INFO_RESP` is a list of TLV fields (`midicontrol-protocol` `inc/protocol/info.hpp`): firmware revision, branch, build time, "uncommitted changes" flag, uptime, reset cause, faults since power-on, Bluetooth flags (module ready, connected, stream open, secured, peer alive, PC alive), the paired/connected peer's MAC, the device name and the base's pairing state; the base adds church display and SSR, the remote battery voltage and level (0–4), charger state (charging, charged, USB present, critical) and the USB voltage. The page advances the uptime between reports. When the node goes away (serial lost, BLE down) its details are cleared at once. Older firmware answers `NAK UNKNOWN_MSG`: the page says "firmware without GET_INFO" and the player asks again only after the node comes up again. `NAK UNREACHABLE` (remote link not secured yet) retries after 5 s. Routine traffic: counters only, no events. A remote battery below the cut-off turns the Controller dot yellow.
 
 ### Song-file check
 
@@ -140,8 +146,9 @@ Field names, which are the contract between `CommHandler`, `main` and the page:
 | Node | Fields | Counters |
 |---|---|---|
 | software | `version`, `build_date`, `started_ms`, `config_path`, `play_folder`, `song_count`, `song_problems`, `playback`, `song`, `section`, `last_song`, `last_sections`, `last_end`, `activity` | `songs_ended`, `songs_stopped`, `warnings`, `errors` |
-| base | `connected`, `alive`, `updating`, `device`, `vidpid`, `midi_port_found`, `midi_out`, `keepalive_ack_ms`, `connected_since_ms`, `reconnects`, `organ_power`, `status_ms`, `status_ble`, `status_relay`, `status_display`, `status_pc`, `status_answered` | `tx`, `rx`, `retries`, `gave_up`, `nak_sent`, `nak_received`, `crc_errors`, `duplicates`, `warnings`, `errors` |
+| base | `connected`, `alive`, `updating`, `device`, `vidpid`, `midi_port_found`, `midi_out`, `keepalive_ack_ms`, `connected_since_ms`, `reconnects`, `organ_power` (base SSR, null = unknown), `status_ms`, `status_ble`, `status_relay`, `status_display`, `status_pc`, `status_answered` (the `status_*` fields are null while not connected) | `tx`, `rx`, `retries`, `gave_up`, `nak_sent`, `nak_received`, `crc_errors`, `duplicates`, `warnings`, `errors` |
 | controller | `last_rx_ms`, `last_cmd`, `last_cmd_reply`, `last_cmd_ms`, `last_tx`, `last_tx_result`, `last_tx_ms` | the same packet counters, plus `cmd.<MSGTYPE>` per received command |
+| base, controller (INFO_RESP) | `info_ms`, `info_unsupported`, `fw_revision`, `fw_branch`, `fw_built`, `fw_dirty`, `uptime_ms`, `reset_cause`, `fault_count`, `ble_connected`, `ble_stream_open`, `ble_secured`, `ble_bonded`, `ble_module_up`, `ble_peer_alive`, `ble_pc_alive`, `ble_peer`, `ble_name`, `ble_pairing`; base `display`, `ssr`; controller `battery_mv`, `battery_level`, `charging`, `charge_done`, `vbus`, `battery_critical`, `vbus_mv` (all null when not reported) | |
 
 Any other path returns 404 and any method other than GET returns 405. Malformed requests get 400, oversized ones (> 8 KiB) 413, and incomplete ones 408 after 3 s.
 
@@ -156,7 +163,7 @@ Any other path returns 404 and any method other than GET returns 405. Malformed 
 
 ### Diagnostics tab and `/api/diag`
 
-The **Diagnostics** tab shows, per node (base, remote), the last fault (kind, decoded CFSR/HFSR bits, pc/lr, interrupted exception = `xpsr & 0x1FF`, BFAR/MMFAR only when valid, firmware revision, uptime), the reset-cause history and a filterable log table (node, level, tag, text search). It polls `GET /api/diag` every second while it is open; **Mark seen** calls `?ack=<id>`. Until then the node's health dot is yellow (`unseen_faults > 0` in `/api/status`, schema 2). Data: the base's log CDC ("MIDIControl log", config `[DIAG] LogPort=` to override the auto-detection) and the remote's `DIAG_GET`/`DIAG_RESP` records, stored as JSONL in `[DIAG] Dir=`. The terminal command `diag` prints the last fault per node and the last 20 lines. Details: `CLAUDE.md`, section Diagnostics.
+The **Diagnostics** tab shows, per node (base, remote), the last fault (kind, decoded CFSR/HFSR bits, pc/lr, interrupted exception = `xpsr & 0x1FF`, BFAR/MMFAR only when valid, firmware revision, uptime), the reset-cause history (`?kind=reset`: the newest base `reset:` and remote `boot, reset:` lines, searched over the last 4000 info entries per node, refreshed every 10 s) and a filterable log table (node, level, tag, text search). It polls `GET /api/diag` every second while it is open; **Mark seen** calls `?ack=<id>` and acknowledges that node only. Until then the node's health dot is yellow (`unseen_faults > 0` in `/api/status`, schema 2). Data: the base's log CDC ("MIDIControl log", config `[DIAG] LogPort=` to override the auto-detection) and the remote's `DIAG_GET`/`DIAG_RESP` records, stored as JSONL in `[DIAG] Dir=`. The terminal command `diag` prints the last fault per node and the last 20 lines. Details: `CLAUDE.md`, section Diagnostics.
 
 ## 3. Commands: terminal attached to the service
 

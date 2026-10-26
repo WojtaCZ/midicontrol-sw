@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <deque>
 #include <string>
 #include <thread>
 #include <vector>
@@ -47,6 +48,9 @@ private:
     void onLine(std::string line);
     void store(const LogLine& l);
     void flushFault();
+    void remember(const std::string& key);
+    void append(const LogLine& l);  // store + remember
+    void resolveBody();             // decide which buffered replay lines were already read live
 
     DiagStore& store_;
     Clock now_;
@@ -60,6 +64,13 @@ private:
     int64_t faultTimeMs_ = 0;     // PC time of the first fault line of the pending fault
     bool havePending_ = false;
     std::optional<DiagEntry> lastFault_;  // last fault entry stored by this ingest (with its id)
+    // Keys (uptime, tag, text) of the last stored lines, in order. The replay after a reset repeats the ring of the
+    // run that just ended; what the PC already read of it is a prefix of the replay that ends with the last line
+    // stored. Only such a prefix (an exact match of the stored tail) is skipped, so an identical banner of a run the
+    // PC never saw (same uptime, same text) is still stored.
+    std::deque<std::string> seenOrder_;
+    std::vector<LogLine> body_;  // replay lines, buffered until resolveBody()
+    bool bodyResolved_ = false;
 };
 
 // A byte source that can come and go (the log CDC).

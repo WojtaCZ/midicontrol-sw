@@ -12,11 +12,44 @@ namespace {
 constexpr size_t kMaxLine = 1024;  // the base cuts its lines at ~100 bytes; anything longer is noise
 const char* const kReplayStart = "--- log before reset ---";
 const char* const kReplayEnd = "--- end of log before reset ---";
+constexpr size_t kSeenLines = 128;  // > the base's 1.5 KB ring (~25 lines)
+
+std::string lineKey(uint64_t uptimeMs, const std::string& tag, const std::string& text) {
+    return std::to_string(uptimeMs) + '\x1f' + tag + '\x1f' + text;
+}
 }  // namespace
 
 LogIngest::LogIngest(DiagStore& store, Clock now, EventSink event) : store_(store), now_(std::move(now)), event_(std::move(event)) {
     // After a service restart the base keeps reprinting its last fault in every banner: know it already.
     lastFault_ = store_.lastFault("base");
+    // and its last lines, so the next replay does not store them again
+    auto recent = store_.query("base", 'D', 0, kSeenLines);
+    for (auto it = recent.rbegin(); it != recent.rend(); ++it) remember(lineKey(it->uptimeMs, it->tag, it->text));
+}
+
+void LogIngest::remember(const std::string& key) {
+    seenOrder_.push_back(key);
+    if (seenOrder_.size() > kSeenLines) seenOrder_.pop_front();
+}
+
+void LogIngest::resolveBody() {
+    if (bodyResolved_) return;
+    bodyResolved_ = true;
+    size_t skip = 0;
+    if (!seenOrder_.empty()) {
+        // the replayed copy of the last line stored live, latest occurrence, and everything before it matching too
+        for (size_t k = body_.size(); k-- > 0;) {
+            if (lineKey(body_[k].uptimeMs, body_[k].tag, body_[k].text) != seenOrder_.back()) continue;
+            if (k + 1 > seenOrder_.size()) break;
+            bool match = true;
+            const size_t base = seenOrder_.size() - (k + 1);
+            for (size_t j = 0; j <= k && match; ++j) match = lineKey(body_[j].uptimeMs, body_[j].tag, body_[j].text) == seenOrder_[base + j];
+            if (match) skip = k + 1;
+            break;
+        }
+    }
+    for (size_t i = skip; i < body_.size(); ++i) append(body_[i]);
+    body_.clear();
 }
 
 void LogIngest::feed(const uint8_t* data, size_t len) {
@@ -37,6 +70,7 @@ void LogIngest::feed(const uint8_t* data, size_t len) {
 }
 
 void LogIngest::disconnect() {
+    if (phase_ == Phase::Body) resolveBody();
     flushFault();
     partial_.clear();
     overflow_ = false;
@@ -47,10 +81,14 @@ void LogIngest::onLine(std::string line) {
     while (!line.empty() && line.back() == '\r') line.pop_back();
     if (line == kReplayStart) {
         flushFault();
+        if (phase_ == Phase::Body) resolveBody();
         phase_ = Phase::Body;
+        body_.clear();
+        bodyResolved_ = false;
         return;
     }
     if (line == kReplayEnd) {
+        if (phase_ == Phase::Body) resolveBody();
         flushFault();
         phase_ = Phase::Banner;
         return;
@@ -78,6 +116,16 @@ void LogIngest::onLine(std::string line) {
 }
 
 void LogIngest::store(const LogLine& l) {
+    if (phase_ == Phase::Body && !bodyResolved_) {
+        body_.push_back(l);  // stored (or skipped as already read live) by resolveBody()
+        return;
+    }
+    append(l);
+    // Lines replayed in the Body phase are old (already seen live or before this service ran): no status event.
+    if (event_ && phase_ != Phase::Body && (l.level == 'E' || l.level == 'W')) event_(l.level, l.tag + ": " + l.text);
+}
+
+void LogIngest::append(const LogLine& l) {
     DiagEntry e;
     e.pcTimeMs = now_();
     e.node = "base";
@@ -85,12 +133,12 @@ void LogIngest::store(const LogLine& l) {
     e.level = l.level;
     e.tag = l.tag;
     e.text = l.truncated ? l.text + "~" : l.text;
+    remember(lineKey(e.uptimeMs, e.tag, e.text));
     store_.append(std::move(e));
-    // Lines replayed in the Body phase are old (already seen live or before this service ran): no status event.
-    if (event_ && phase_ != Phase::Body && (l.level == 'E' || l.level == 'W')) event_(l.level, l.tag + ": " + l.text);
 }
 
 void LogIngest::flushFault() {
+    if (phase_ == Phase::Body && havePending_) resolveBody();  // keep the lines before the fault ahead of it
     auto f = parser_.take();
     const bool had = havePending_;
     havePending_ = false;

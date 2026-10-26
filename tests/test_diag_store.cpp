@@ -309,3 +309,36 @@ TEST(store_write_failure_is_counted_not_fatal) {
     CHECK(id > 0);
     CHECK_EQ(s.writeErrors(), size_t(2));
 }
+
+TEST(store_ack_on_one_node_keeps_the_other_nodes_fault_unseen) {
+    TmpDir d;
+    uint64_t rf;
+    {
+        DiagStore s(d.path);
+        s.append(mk("base", 'E', "bf", true));
+        rf = s.append(mk("remote", 'E', "rf", true));  // newer than the base fault
+        s.ack(rf);                                       // "Mark seen" on the Remote
+        CHECK_EQ(s.unseenFaults("remote"), size_t(0));
+        CHECK_EQ(s.unseenFaults("base"), size_t(1));
+    }
+    DiagStore s(d.path);  // persisted per node
+    CHECK_EQ(s.unseenFaults("remote"), size_t(0));
+    CHECK_EQ(s.unseenFaults("base"), size_t(1));
+}
+
+TEST(store_legacy_ack_file_applies_to_every_node) {
+    TmpDir d;
+    uint64_t rf;
+    {
+        DiagStore s(d.path);
+        s.append(mk("base", 'E', "bf", true));
+        rf = s.append(mk("remote", 'E', "rf", true));
+    }
+    {
+        std::ofstream f(d.path + "/diag-ack.json", std::ios::trunc);
+        f << "{\"ack\":" << rf << "}\n";
+    }
+    DiagStore s(d.path);
+    CHECK_EQ(s.unseenFaults("base"), size_t(0));
+    CHECK_EQ(s.unseenFaults("remote"), size_t(0));
+}
