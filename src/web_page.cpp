@@ -64,7 +64,8 @@ td{padding:2px 10px 2px 0;vertical-align:top}
 .sp-tab[aria-pressed="true"]{background:#fff4d0;color:#1d140b;box-shadow:inset 0 0 0 3px #e0a800,0 0 10px rgba(255,200,60,.55)}
 .sp-tab:focus-visible{outline:2px solid #f3d77a;outline-offset:2px}
 .sp-num{position:absolute;top:30%;left:0;right:0;transform:translateY(-50%);text-align:center;font-weight:700;font-size:17px}
-.sp-name{position:absolute;top:45%;left:2px;right:2px;text-align:center;font-weight:600;font-size:9px;line-height:1.15;opacity:.85}  /* wraps at spaces; spFit shrinks long words */
+.sp-name{position:absolute;top:45%;left:0;right:0;text-align:center;font-weight:500;font-size:9px;line-height:1.15;letter-spacing:-.02em;opacity:.85;
+  overflow-wrap:break-word;hyphens:auto}  /* wraps at spaces; only a word longer than the tab breaks (hyphenated where the browser can) */
 .sp-panel.notset .sp-tab{opacity:.45}
 .sp-actions{margin:12px 0 22px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;max-width:720px}
 .sp-actions button{font:inherit;font-size:15px;padding:8px 16px;cursor:pointer}
@@ -441,7 +442,7 @@ function diag(){diagSection();drawDiag();if(!DG.timer)diagLoop();return DG.sec;}
 
 // --- Stops tab: built once and cached (the 1 s status poll must not rebuild it or lose edits).
 // /api/stops is loaded when the tab is first opened and after each save, never polled. ---
-const SP={sec:null,E:{},tabs:{},loaded:false,loadErr:false,layout:"",fitPending:false,groups:[],names:{},codes:[],saved:{},total:0,
+const SP={sec:null,E:{},tabs:{},loaded:false,loadErr:false,layout:"",groups:[],names:{},codes:[],saved:{},total:0,
   cur:null,draft:new Set(),dirty:false,edits:0,busy:false,sortK:"code",sortDir:1};
 function spSorted(set){return [...set].sort((a,b)=>a-b);}
 async function spFetch(url,opts){
@@ -487,21 +488,7 @@ function spBuildPanel(){
     }
     col.append(el("div","sp-glabel",g.label),row);p.append(col);
   }
-  spFit();
 }
-// A name too wide for its tab (one long word) gets a smaller font; only as a last resort it breaks mid-word.
-function spFit(){
-  if(!SP.E.panel||!SP.E.panel.isConnected){SP.fitPending=true;return;}
-  SP.fitPending=false;
-  for(const n of SP.E.panel.querySelectorAll(".sp-name")){
-    n.style.fontSize="";n.style.overflowWrap="";
-    if(!n.clientWidth)continue;  // names hidden (phone)
-    let fs=parseFloat(getComputedStyle(n).fontSize);
-    while(n.scrollWidth>n.clientWidth&&fs>6){fs-=.5;n.style.fontSize=fs+"px";}
-    if(n.scrollWidth>n.clientWidth)n.style.overflowWrap="anywhere";
-  }
-}
-window.addEventListener("resize",()=>{if(SP.sec)requestAnimationFrame(spFit);});
 function spChanged(){SP.dirty=true;SP.edits++;spMsg("");spDraw();}
 function spDraw(){
   const E=SP.E,cur=SP.cur,saved=cur!=null?SP.saved[cur]:undefined,has=cur!=null;
@@ -557,6 +544,7 @@ function spPick(code){
 // PUT one song (stops = array, or null = "Not set"). A failure keeps the edits and shows the reason.
 async function spPut(stops){
   const code=SP.cur,edits=SP.edits;
+  const hadFocus=SP.E.actions.contains(document.activeElement);  // the busy buttons are about to be disabled
   SP.busy=true;spMsg("");spDraw();
   let ok=false;
   try{
@@ -567,19 +555,24 @@ async function spPut(stops){
     ok=true;
   }catch(e){spMsg("Not saved: "+e.message,true);}
   SP.busy=false;spDraw();
+  // A disabled button drops focus to the page: keep it near the work (the error, else the song's first lit tab).
+  if(hadFocus&&!SP.sec.contains(document.activeElement)){
+    const t=Object.values(SP.tabs);
+    (ok?t.find(x=>x.getAttribute("aria-pressed")==="true")||t[0]:SP.E.msg).focus();
+  }
   if(ok)spLoad();
   return ok;
 }
 function stops(){
-  if(SP.sec){if(SP.fitPending)requestAnimationFrame(spFit);return SP.sec;}
+  if(SP.sec)return SP.sec;
   const s=el("section","sp"),E=SP.E;
   const head=el("div","sp-head");
   E.cur=el("span","sp-cur");E.count=el("span","sp-count");E.state=el("span","sp-state");
   const title=el("span");title.append(E.cur,E.count);  // "Song 401 · 16 of 42 on"
   head.append(title,E.state);
-  E.load=el("div");E.panel=el("div","sp-panel");E.actions=el("div","sp-actions");
+  E.load=el("div");E.panel=el("div","sp-panel");E.panel.lang="en";E.actions=el("div","sp-actions");
   E.save=el("button",null,"Save");E.alloff=el("button",null,"All off");E.notset=el("button","sp-small","Not set");
-  E.msg=el("span","sp-msg");E.msg.setAttribute("role","status");
+  E.msg=el("span","sp-msg");E.msg.setAttribute("role","status");E.msg.tabIndex=-1;
   E.save.onclick=async()=>{
     if(await spPut(spSorted(SP.draft))){E.save.textContent="Saved ✓";setTimeout(()=>{E.save.textContent="Save";},1200);}
   };
