@@ -60,7 +60,7 @@ private:
     int _port;
     std::string _playFolder;
     mc::organ::OrganConfig _organ;
-    mc::stops::Store _stops;  // owned here; doPlay reads stops.conf itself, never through this
+    mc::stops::Store _stops;  // owned here; doPlay reads the song's .conf itself, never through this
     mc::diag::DiagStore* _diag;
     mc::songcheck::Scanner _scanner;
     int _listenFd = -1;

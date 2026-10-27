@@ -63,7 +63,7 @@ Addresses: `#` home, `#stops` home scrolled to the stops editor, `#adv/overview|
 
 - **Notices**, only when something needs attention, in plain Czech, each with a "Podrobnosti" link to the Advanced page that explains it: player not answering, base not connected / not answering / firmware update, an unseen firmware fault (base or remote), remote battery low or flat, song-file problems.
 - **Systém**: the three parts as a chain Počítač —USB— Základna —BLUETOOTH— Ovladač. Each has its health ring (the node's dot), a state line and one fact: the player's uptime and song count, the organ power (from the base's `STATUS_RESP`), the remote's battery. A wire is green and animated while the link is up, dashed while down or unknown, red when the base's keepalives are lost; the Bluetooth wire uses the base's report (fresh within 15 s), as on the Controller page. Below it: what is playing (song, section) or the last song and how it ended.
-- **Rejstříky písní**: the stops editor (see "Stops editor and `stops.conf`"). It needs no status data, so it works before the first status poll succeeds; leaving or reloading the page with unsaved edits asks first.
+- **Rejstříky písní**: the stops editor (see "Stops editor and the per-song stop files"). It needs no status data, so it works before the first status poll succeeds; leaving or reloading the page with unsaved edits asks first.
 
 ### Advanced (Pokročilé)
 
@@ -173,23 +173,22 @@ Any other path returns 404 and any method other than GET (or PUT on `/api/stops/
 
 ---
 
-### Stops editor and `stops.conf`
+### Stops editor and the per-song stop files
 
 Each song can have a saved set of organ stops (rejstriky). The stops editor on the home page lists the songs of the play folder in its own scrolling list, built for 100+ songs: search by song number (Enter opens the first match), filter all / set / not set, sort by number up or down or by stop count, and a footer with the count shown and how many are set; the list follows the editor while the page scrolls and keeps its position while stops are clicked. It shows the organ's stops for the selected song and saves the set (while there are unsaved changes the Save bar stays at the bottom of the screen); at song start the player puts the organ in that state. The `.mid` files are never modified. Unlike the rest of the page this is a write path (`PUT /api/stops/<code>`): there is no login, so `Bind = 0.0.0.0` exposes it to the whole LAN (trusted LAN only), and `Bind = 127.0.0.1` keeps it local.
 
-**File:** `stops.conf` in the play folder, written only by the page (temp file, `fsync`, `rename`, so a crash or two phones saving at once cannot corrupt it) and editable by hand only while the player is stopped (the next save rewrites the file, dropping comments and unreadable lines; `[songs]` in any case and a missing header are accepted):
+**Files:** one `<CODE>.conf` per song in the play folder, next to its `.mid` and named like it (`401.conf` beside `401.mid`, `406a.conf` beside `406a.mid`; found in any case). Written only by the page (temp file, `fsync`, `rename`, so a crash or two phones saving at once cannot corrupt it) and editable by hand only while the player is stopped (the next save rewrites the file, dropping comments; `[stops]` in any case and a missing header are accepted):
 
 ```ini
-[SONGS]
-401=3 4 5 14
-402=
+[STOPS]
+Stops = 3 4 5 14
 ```
 
-One line per song, `CODE=numbers separated by spaces`, each in 1..stop count. A save changes only that song's line; lines of songs no longer in the folder are kept. A bad line or number is skipped with a warning in the log. An unreadable file (permissions) is an error for the page (500) and leaves the song "not set" at playback.
+`Stops =` takes numbers separated by spaces, each in 1..stop count. A save writes only that song's file; files of songs no longer in the folder stay and are ignored. A bad line or number is skipped with a warning in the log. An unreadable file (permissions) is an error for the page (500) and leaves the song "not set" at playback. The old single `stops.conf` is no longer read; if one is still in the play folder the player logs a warning at start.
 
-**Not set vs all off:** a song with **no line** is "not set": nothing is sent and the organ stays as it is. A song with an **empty** line (`402=`) is "all off": the all-off SysEx and nothing else. The page only enables Uložit (Save) after a tab was changed, and its "Zrušit nastavení" button removes the line. A song shows "nenastaveno" (not set) or "vše vypnuto" (all off).
+**Not set vs all off:** a song with **no file** is "not set": nothing is sent and the organ stays as it is. A song whose file has an **empty** `Stops =` is "all off": the all-off SysEx and nothing else. The page only enables Uložit (Save) after a tab was changed, and its "Zrušit nastavení" button deletes the file. A song shows "nenastaveno" (not set) or "vše vypnuto" (all off).
 
-**At song start** (`CommHandler::doPlay`), after the organ warm-up, if the song has a line and `[ORGAN] StopsEnabled` is true: the all-off SysEx, `AllOffDelayMs`, one Program Change per stop (ascending, on `Channel`, `StopDelayMs` apart and after the last), then the song, all on the same MIDI output port. A stop or a new song during the sequence ends it as during the warm-up. While such a song plays, its own Program Changes are dropped (`DropSongProgramChanges`). Add-verse and replays do not resend stops. The log gets `Stops for 401: 3 4 5 14` (or `not set`, `all off`, `disabled`), also shown as the Software status field `stops`. `stops.conf` is read at each song start, never through the web server's store, so a stops problem can never stop a song from playing.
+**At song start** (`CommHandler::doPlay`), after the organ warm-up, if the song has a file and `[ORGAN] StopsEnabled` is true: the all-off SysEx, `AllOffDelayMs`, one Program Change per stop (ascending, on `Channel`, `StopDelayMs` apart and after the last), then the song, all on the same MIDI output port. A stop or a new song during the sequence ends it as during the warm-up. While such a song plays, its own Program Changes are dropped (`DropSongProgramChanges`). Add-verse and replays do not resend stops. The log gets `Stops for 401: 3 4 5 14` (or `not set`, `all off`, `disabled`), also shown as the Software status field `stops`. The song's file is read at each song start, never through the web server's store, so a stops problem can never stop a song from playing.
 
 **Stop names** default to Czech organ terminology as used in Czech parish dispositions (divisions "Pedál", "I. manuál – hlavní stroj", "II. manuál – žaluziový stroj"; stops noun first, e.g. "Flétna trubicová 8'", mixtures by ranks, e.g. "Mixtura 3řadá"), mapped from the Opus 910 console's Dutch labels (the mapping is commented in `src/organ.cpp`). `NameN` and `Groups` override them.
 
@@ -197,8 +196,8 @@ One line per song, `CODE=numbers separated by spaces`, each in 1..stop count. A 
 
 **API** (`Content-Type: application/json` required on PUT, else 415, so a plain cross-site form cannot post):
 
-- `GET /api/stops` -> `{"schema":1,"groups":[{"label":"PEDAL","first":8,"last":16},...],"names":{"1":"..."},"songs":[{"code":"401","stops":[3,4,5]},{"code":"403","stops":null}]}`; `null` = not set. 500 with the error text if the file is unreadable.
-- `PUT /api/stops/<CODE>` with `{"stops":[...]}` saves the set, `{"stops":null}` removes the entry. The code is upper-cased like song codes and must be a song in the folder; unknown code, bad body or numbers out of range -> 400; a failed write -> 500 with the error text. Success returns `{"code":"401","stops":[...]}`.
+- `GET /api/stops` -> `{"schema":1,"groups":[{"label":"PEDAL","first":8,"last":16},...],"names":{"1":"..."},"songs":[{"code":"401","stops":[3,4,5]},{"code":"403","stops":null}]}`; `null` = not set. 500 with the error text if a song's file is unreadable.
+- `PUT /api/stops/<CODE>` with `{"stops":[...]}` saves the set, `{"stops":null}` deletes the song's file. The code is upper-cased like song codes and must be a song in the folder; unknown code, bad body or numbers out of range -> 400; a failed write or delete -> 500 with the error text. Success returns `{"code":"401","stops":[...]}`.
 
 **Open items (need someone at the organ):**
 
@@ -214,7 +213,7 @@ The **Diagnostics** tab shows, per node (base, remote), the last fault (kind, de
 
 ## 3. Commands: terminal attached to the service
 
-The service listens on a Unix socket, `$XDG_RUNTIME_DIR/midicontrol.sock`, mode `0600` (owner only). The web page cannot control the player (its one write is the per-song stops in `stops.conf`); all control goes through the terminal.
+The service listens on a Unix socket, `$XDG_RUNTIME_DIR/midicontrol.sock`, mode `0600` (owner only). The web page cannot control the player (its one write is the per-song stop files); all control goes through the terminal.
 
 ```bash
 midicontrol                                        # in a terminal
@@ -288,7 +287,7 @@ Core library (`midicontrol_core`, no external dependencies, unit-tested):
 | `status_json.hpp/.cpp` | `/api/status` JSON, UTF-8-safe `jsonEscape` |
 | `http.hpp/.cpp` | request parsing (with body), routing, response building (no sockets) |
 | `organ.hpp/.cpp` | `[ORGAN]` layout (`OrganConfig`, Opus 910 defaults) and the song-start preamble bytes |
-| `stops_file.hpp/.cpp` | `stops.conf` parse/save, `Store`, `/api/stops` JSON, `planFor`, `handlePut` |
+| `stops_file.hpp/.cpp` | per-song `<CODE>.conf` parse/save/remove, `Store`, `/api/stops` JSON, `planFor`, `handlePut` |
 | `web_page.hpp/.cpp` | the embedded page |
 | `songcheck.hpp/.cpp` | per-file checks and the incremental `Scanner` |
 | `console.hpp/.cpp` | command-line parsing (shared by standalone and attached mode), path absolutizing, reply markers |

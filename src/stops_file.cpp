@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -26,6 +27,12 @@ std::string trim(const std::string& s) {
     while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
     while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
     return s.substr(a, b - a);
+}
+
+std::string upper(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    return s;
 }
 
 void warn(std::vector<std::string>* w, const std::string& msg) {
@@ -54,6 +61,15 @@ std::string jsonNumbers(const std::vector<int>& v) {
     throw std::runtime_error("stops: cannot save " + path + ": " + what + ": " + std::strerror(errno));
 }
 
+// Make a rename or unlink durable; the change is already made, so a failure here is not fatal.
+void syncDir(const std::string& dir) {
+    int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dfd >= 0) {
+        (void)::fsync(dfd);
+        ::close(dfd);
+    }
+}
+
 // Minimal scanner for the two PUT body shapes.
 struct Scanner {
     const std::string& s;
@@ -77,46 +93,53 @@ struct Scanner {
 
 }  // namespace
 
-std::string filePath(const std::string& playFolder) {
-    return playFolder + "/" + kFileName;
+std::optional<std::string> findFile(const std::string& playFolder, const std::string& code) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path exact = fs::path(playFolder) / (code + kExtension);
+    if (fs::is_regular_file(exact, ec)) return exact.string();
+    for (const auto& entry : fs::directory_iterator(playFolder, ec)) {
+        std::error_code ec2;
+        if (!entry.is_regular_file(ec2)) continue;
+        const fs::path& p = entry.path();
+        if (upper(p.extension().string()) != upper(kExtension)) continue;
+        if (upper(p.stem().string()) == code) return p.string();
+    }
+    return std::nullopt;
 }
 
-SongStops parse(const std::string& text, int stopCount, std::vector<std::string>* warnings) {
-    SongStops out;
+std::string filePath(const std::string& playFolder, const std::string& code) {
+    if (auto f = findFile(playFolder, code)) return *f;
+    if (auto mid = mc::songs::findSongFile(playFolder, code))
+        return std::filesystem::path(*mid).replace_extension(kExtension).string();
+    return playFolder + "/" + code + kExtension;
+}
+
+Stops parse(const std::string& text, int stopCount, const std::string& name,
+            std::vector<std::string>* warnings) {
+    Stops out;
     std::istringstream in(text);
     std::string raw;
-    bool inSongs = true;  // key=value lines before any header count as [SONGS]
+    bool inStops = true;  // key=value lines before any header count as [STOPS]
     int lineNo = 0;
     while (std::getline(in, raw)) {
         ++lineNo;
         std::string line = trim(raw);
         if (line.empty() || line[0] == '#' || line[0] == ';') continue;
-        std::string where = std::string(kFileName) + ":" + std::to_string(lineNo) + ": ";
+        std::string where = name + ":" + std::to_string(lineNo) + ": ";
         if (line[0] == '[') {
             // Like config.conf: case-insensitive name, optional trailing comment.
             size_t close = line.find(']');
-            std::string name = close == std::string::npos ? line.substr(1) : line.substr(1, close - 1);
+            std::string sec = close == std::string::npos ? line.substr(1) : line.substr(1, close - 1);
             std::string rest = close == std::string::npos ? "" : trim(line.substr(close + 1));
-            std::transform(name.begin(), name.end(), name.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-            name = trim(name);
-            inSongs = (name == "SONGS");
-            if (inSongs && !rest.empty() && rest[0] != '#' && rest[0] != ';')
+            inStops = (upper(trim(sec)) == "STOPS");
+            if (inStops && !rest.empty() && rest[0] != '#' && rest[0] != ';')
                 warn(warnings, where + "ignored text after the section name: " + rest);
             continue;
         }
-        if (!inSongs) {
-            if (line.find('=') != std::string::npos) warn(warnings, where + "ignored line outside [SONGS]: " + line);
-            continue;
-        }
         size_t eq = line.find('=');
-        if (eq == std::string::npos) {
-            warn(warnings, where + "ignored line without '=': " + line);
-            continue;
-        }
-        auto code = mc::songs::sanitizeCode(trim(line.substr(0, eq)));
-        if (!code) {
-            warn(warnings, where + "ignored invalid song code: " + trim(line.substr(0, eq)));
+        if (!inStops || eq == std::string::npos || upper(trim(line.substr(0, eq))) != "STOPS") {
+            warn(warnings, where + "ignored line: " + line);
             continue;
         }
         std::set<int> nums;
@@ -129,51 +152,49 @@ SongStops parse(const std::string& text, int stopCount, std::vector<std::string>
             for (unsigned char c : tok) digits = digits && std::isdigit(c);
             int n = digits ? std::stoi(tok) : 0;
             if (n < 1 || n > stopCount) {
-                warn(warnings, where + "ignored stop '" + tok + "' for " + *code);
+                warn(warnings, where + "ignored stop '" + tok + "'");
                 continue;
             }
             nums.insert(n);
         }
         if (tokens > 0 && nums.empty()) {
             // Nothing usable: fail safe to "not set", never to "all off".
-            warn(warnings, where + "ignored line with no valid stop for " + *code);
+            warn(warnings, where + "ignored line with no valid stop");
             continue;
         }
-        out[*code] = std::vector<int>(nums.begin(), nums.end());
+        if (out) warn(warnings, where + "a second Stops line replaces the first");
+        out = std::vector<int>(nums.begin(), nums.end());
     }
     return out;
 }
 
-std::string serialize(const SongStops& s) {
-    std::vector<const SongStops::value_type*> items;
-    for (const auto& kv : s) items.push_back(&kv);
-    std::sort(items.begin(), items.end(), [](auto* a, auto* b) {
-        return mc::songs::naturalLess(a->first, b->first);
-    });
-    std::string out =
-        "# Organ stops per song. This file is rewritten by the web page on every save:\n"
-        "# comments and unreadable lines are not kept. Edit by hand only while the player is stopped.\n"
-        "# CODE=stop numbers (empty = all stops off). A song without a line is left as it is.\n"
-        "[SONGS]\n";
-    for (auto* kv : items) out += kv->first + "=" + numbersText(kv->second) + "\n";
-    return out;
+std::string serialize(const std::string& code, const std::vector<int>& stops) {
+    return "# Organ stops for song " + code + ". This file is rewritten by the web page on every save:\n"
+           "# comments are not kept. Edit by hand only while the player is stopped.\n"
+           "# Stops = stop numbers (empty = all stops off). Delete the file to leave the organ as it is.\n"
+           "[STOPS]\n"
+           "Stops = " + numbersText(stops) + "\n";
 }
 
-SongStops load(const std::string& path, int stopCount, std::vector<std::string>* warnings) {
-    std::ifstream f(path, std::ios::binary);
+Stops load(const std::string& playFolder, const std::string& code, int stopCount,
+           std::vector<std::string>* warnings) {
+    auto path = findFile(playFolder, code);
+    if (!path) return std::nullopt;
+    std::ifstream f(*path, std::ios::binary);
     if (!f) {
-        // Only a missing file means "nothing set"; anything else must not be mistaken for it.
+        // Only a missing file means "not set"; anything else must not be mistaken for it.
         int e = errno;
-        if (e == ENOENT) return {};
-        throw std::runtime_error("stops: cannot read " + path + ": " + std::strerror(e));
+        if (e == ENOENT) return std::nullopt;
+        throw std::runtime_error("stops: cannot read " + *path + ": " + std::strerror(e));
     }
     std::stringstream ss;
     ss << f.rdbuf();
-    return parse(ss.str(), stopCount, warnings);
+    return parse(ss.str(), stopCount, std::filesystem::path(*path).filename().string(), warnings);
 }
 
-void save(const std::string& path, const SongStops& s) {
-    const std::string text = serialize(s);
+void save(const std::string& playFolder, const std::string& code, const std::vector<int>& stops) {
+    const std::string path = filePath(playFolder, code);
+    const std::string text = serialize(code, stops);
     const std::string tmp = path + ".tmp." + std::to_string(getpid());
     int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd < 0) failSave(tmp, "open");
@@ -206,14 +227,14 @@ void save(const std::string& path, const SongStops& s) {
         errno = e;
         failSave(path, "rename");
     }
-    // Make the rename itself durable; the file is already in place, so a failure here is not fatal.
-    size_t slash = path.find_last_of('/');
-    std::string dir = slash == std::string::npos ? "." : (slash == 0 ? "/" : path.substr(0, slash));
-    int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (dfd >= 0) {
-        (void)::fsync(dfd);
-        ::close(dfd);
-    }
+    syncDir(playFolder);
+}
+
+void remove(const std::string& playFolder, const std::string& code) {
+    auto path = findFile(playFolder, code);
+    if (!path) return;
+    if (::unlink(path->c_str()) != 0 && errno != ENOENT) failSave(*path, "delete");
+    syncDir(playFolder);
 }
 
 std::optional<std::optional<std::vector<int>>> parseBody(const std::string& body, int stopCount) {
@@ -275,45 +296,40 @@ std::string toJson(const mc::organ::OrganConfig& organ, const std::vector<std::s
     return out + "]}";
 }
 
-SongPlan planFor(const mc::organ::OrganConfig& organ, const SongStops& s, const std::string& code) {
+SongPlan planFor(const mc::organ::OrganConfig& organ, const Stops& stops) {
     SongPlan plan;
-    auto it = s.find(code);
     if (!organ.stopsEnabled) {
         plan.text = "disabled";
         return plan;
     }
-    if (it == s.end()) {
+    if (!stops) {
         plan.text = "not set";
         return plan;
     }
-    plan.preamble = mc::organ::buildPreamble(organ, it->second);
+    plan.preamble = mc::organ::buildPreamble(organ, *stops);
     plan.dropProgramChanges = organ.dropSongProgramChanges;
-    plan.text = it->second.empty() ? "all off" : numbersText(it->second);
+    plan.text = stops->empty() ? "all off" : numbersText(*stops);
     return plan;
 }
 
-Store::Store(std::string path, int stopCount) : path_(std::move(path)), stopCount_(stopCount) {}
+Store::Store(std::string playFolder, int stopCount) : folder_(std::move(playFolder)), stopCount_(stopCount) {}
 
-namespace {
-SongStops loadLogged(const std::string& path, int stopCount) {
-    std::vector<std::string> warnings;
-    SongStops s = load(path, stopCount, &warnings);
-    for (const auto& w : warnings) mc::log::warn(mc::status::Node::Software, w);
-    return s;
-}
-}  // namespace
-
-SongStops Store::get() const {
+SongStops Store::get(const std::vector<std::string>& codes) const {
     std::lock_guard<std::mutex> lk(mu_);
-    return loadLogged(path_, stopCount_);
+    SongStops out;
+    for (const auto& code : codes) {
+        std::vector<std::string> warnings;
+        Stops s = load(folder_, code, stopCount_, &warnings);
+        for (const auto& w : warnings) mc::log::warn(mc::status::Node::Software, w);
+        if (s) out[code] = std::move(*s);
+    }
+    return out;
 }
 
-void Store::put(const std::string& code, const std::optional<std::vector<int>>& stops) {
+void Store::put(const std::string& code, const Stops& stops) {
     std::lock_guard<std::mutex> lk(mu_);
-    SongStops s = loadLogged(path_, stopCount_);
-    if (stops) s[code] = *stops;
-    else s.erase(code);
-    save(path_, s);
+    if (stops) save(folder_, code, *stops);
+    else remove(folder_, code);
 }
 
 mc::http::Response handlePut(Store& store, const mc::organ::OrganConfig& organ,

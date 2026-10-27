@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 
 #include "midicontrol/diag_api.hpp"
 #include "midicontrol/http.hpp"
@@ -65,8 +66,14 @@ WebServer::WebServer(mc::status::StatusRegistry& status, std::string bind, int p
       _port(port),
       _playFolder(std::move(playFolder)),
       _organ(organ),
-      _stops(mc::stops::filePath(_playFolder), _organ.stopCount()),
-      _diag(diag) {}
+      _stops(_playFolder, _organ.stopCount()),
+      _diag(diag) {
+    std::error_code ec;
+    if (std::filesystem::exists(_playFolder + "/" + mc::stops::kLegacyFileName, ec))
+        mc::log::warn(Node::Software, std::string(mc::stops::kLegacyFileName) +
+                                          " in the play folder is no longer read: stops are saved per song "
+                                          "in <CODE>.conf; set them again on the page");
+}
 
 WebServer::~WebServer() { stop(); }
 
@@ -155,8 +162,9 @@ bool WebServer::readConn(Conn& c) {
                     };
                 }
                 mc::http::StopsApi api;
-                api.get = [this] {  // throws when stops.conf is unreadable; caught below -> 500
-                    return mc::stops::toJson(_organ, mc::songs::listSongs(_playFolder), _stops.get());
+                api.get = [this] {  // throws when a song's .conf is unreadable; caught below -> 500
+                    auto codes = mc::songs::listSongs(_playFolder);
+                    return mc::stops::toJson(_organ, codes, _stops.get(codes));
                 };
                 api.put = [this](const std::string& code, const std::string& body) {
                     return mc::stops::handlePut(_stops, _organ, mc::songs::listSongs(_playFolder), code, body);

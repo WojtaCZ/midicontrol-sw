@@ -2,7 +2,7 @@
 
 ## Organ stops: verify at the organ
 
-Per-song stops are implemented (stops editor on the home page, `stops.conf`, set at song start). Still to check on the Opus 910, see the spec's open items (`docs/superpowers/specs/2026-10-27-organ-stops-design.md`) and `docs/status-web-and-service.md`:
+Per-song stops are implemented (stops editor on the home page, one `<CODE>.conf` per song, set at song start). Still to check on the Opus 910, see the spec's open items (`docs/superpowers/specs/2026-10-27-organ-stops-design.md`) and `docs/status-web-and-service.md`:
 
 - Program numbers: press ST01 and ST60 with a MIDI monitor on the organ's OUT; adjust `ProgramOffset` or `ProgramN`.
 - The all-off SysEx works and 100 ms after it is enough.
