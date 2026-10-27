@@ -1,0 +1,108 @@
+<h2>Stops per song: mockup 6</h2>
+<p class="subtitle">Shows "not set" versus "saved, all off": Save becomes active only after a change, and "Not set" forgets a song's stops. English stop and group names from the Opus 910 manual. Click a tab anywhere to toggle it. The stops are at the top and the song list is below them. Click a song to edit its stops. Click a column heading to sort the list.</p>
+
+<style>
+  .sp-head{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin:10px 0 10px}
+  .sp-head .cur{font:700 20px system-ui}
+  .sp-head .count{opacity:.7}
+  .sp-panel{display:flex;flex-wrap:wrap;gap:12px 40px;padding:18px;border-radius:10px;background:#3b2a1e}
+  .sp-col{display:flex;flex-direction:column;gap:8px}
+  .glabel{background:linear-gradient(#f3d77a,#c99a2e);color:#000;font:700 13px system-ui;letter-spacing:.04em;text-align:center;padding:4px 8px;border-radius:3px;box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 1px 2px rgba(0,0,0,.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sp-group{display:flex;gap:5px}
+  .tab{width:44px;height:132px;border-radius:5px;position:relative;cursor:pointer;user-select:none;
+       background:#cfc6b4;color:#5a4a3a;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3);transition:background .1s,color .1s}
+  .tab.on{background:#fff4d0;color:#1d140b;box-shadow:inset 0 0 0 3px #e0a800, 0 0 10px rgba(255,200,60,.55)}
+  .tab .num{position:absolute;top:30%;left:0;right:0;transform:translateY(-50%);text-align:center;font:700 17px system-ui}
+  .tab .name{position:absolute;top:45%;left:2px;right:2px;text-align:center;font:600 9px/1.15 system-ui;opacity:.85;overflow-wrap:anywhere;hyphens:auto}
+  .sp-actions{margin:12px 0 22px;display:flex;gap:10px}
+  .sp-actions button{font-size:15px;padding:8px 16px}
+  table.songs{border-collapse:collapse;width:100%;max-width:720px}
+  table.songs th,table.songs td{padding:8px 10px;text-align:left;border-bottom:1px solid rgba(128,128,128,.25)}
+  table.songs th{cursor:pointer;user-select:none;font-size:13px;text-transform:uppercase;opacity:.75}
+  table.songs th.sorted::after{content:attr(data-dir)}
+  table.songs tr.row{cursor:pointer}
+  table.songs tr.row:hover{background:rgba(128,128,128,.12)}
+  table.songs tr.sel{background:rgba(224,168,0,.18)}
+  .stoplist{font:13px ui-monospace,monospace;opacity:.85}
+  .none{opacity:.5;font-style:italic}
+  @media (max-width:900px){ .tab{width:34px;height:102px} .tab .name{font-size:8px} }
+  @media (max-width:520px){ .tab{width:24px;height:72px} .tab .num{top:50%} .tab .num{font-size:13px} .tab .name{display:none} .sp-group{gap:3px} .stoplist{font-size:11px} }
+  .sp-panel.notset .tab{opacity:.45}
+  .sp-head .state{font-size:13px;padding:2px 8px;border-radius:10px;background:rgba(128,128,128,.2)}
+  .sp-head .state.dirty{background:#e0a800;color:#000}
+  .sp-actions button:disabled{opacity:.4;cursor:default}
+  .sp-actions .spacer{flex:1}
+</style>
+
+<div class="sp-head"><span class="cur" id="cur"></span><span class="count" id="count"></span><span class="state" id="state"></span></div>
+<div class="sp-panel" id="panel"></div>
+<div class="sp-actions" style="max-width:720px">
+  <button class="mock-button" id="save">Save</button>
+  <button class="mock-button" id="alloff">All off</button>
+  <span class="spacer"></span>
+  <button class="mock-button" id="notset">Not set</button>
+</div>
+
+<table class="songs">
+  <thead><tr><th data-k="code">Song</th><th data-k="n">Stops on</th><th data-k="list">Stops</th></tr></thead>
+  <tbody id="songs"></tbody>
+</table>
+
+<script>
+(function(){
+  const groups=[[1,7,'ACCESSORIES'],[8,16,'PEDAL'],[17,29,'GREAT'],[30,42,'SWELL']];
+  const names={"1": "Swell to Great", "2": "Great to Pedal", "3": "Swell to Pedal", "4": "Tremulant Great", "5": "Tremulant Swell", "6": "Chorus", "7": "Manual Bass", "8": "Double Bass 16'", "9": "Subbass 16'", "10": "Octave 8'", "11": "Gedackt 8'", "12": "Bass Flute 4'", "13": "Mixture III", "14": "Contra Trumpet 16'", "15": "Trumpet 8'", "16": "MIDI to Pedal", "17": "Bourdon 16'", "18": "Open Diapason 8'", "19": "Rohrflute 8'", "20": "Gamba 8'", "21": "Octave 4'", "22": "Open Flute 4'", "23": "Twelfth 2 2/3'", "24": "Superoctave 2'", "25": "Conical Flute 2'", "26": "Cornet IV", "27": "Mixture IV-VI", "28": "Trumpet 8'", "29": "MIDI to Great", "30": "Open Diapason 8'", "31": "Stopped Flute 8'", "32": "Viola 8'", "33": "Celeste 8'", "34": "Octave 4'", "35": "Flute 4'", "36": "Flute Twelfth 2 2/3'", "37": "Waldflute 2'", "38": "Tierce 1 3/5'", "39": "Rauschpfeife II-IV", "40": "Cromorne 8'", "41": "Oboe 8'", "42": "MIDI to Swell"};
+  // saved[c]: array of stop numbers, or null = not set
+  const saved={};
+  ["401","403","406A","406B","407","512","513","516","517","519","523"].forEach((c,i)=>{
+    saved[c]=i===0?[3,4,5,6,14,15,17,18,19,21,28,29,32,33,34,35]:i===2?[1,8,9,30,31]:i===3?[]:i===5?[2,10,11,17,20,33]:null;
+  });
+  let cur="401", draft=null, dirty=false, sortK="code", sortDir=1;
+  const panel=document.getElementById('panel'), tbody=document.getElementById('songs');
+  const $=id=>document.getElementById(id);
+  function load(c){cur=c;draft=new Set(saved[c]||[]);dirty=false;render()}
+  function change(){dirty=true;render()}
+  function renderStops(){
+    panel.innerHTML='';
+    panel.classList.toggle('notset',saved[cur]===null&&!dirty);
+    groups.forEach(([a,b,label])=>{
+      const col=document.createElement('div');col.className='sp-col';
+      const l=document.createElement('div');l.className='glabel';l.textContent=label;col.appendChild(l);
+      const g=document.createElement('div');g.className='sp-group';col.appendChild(g);
+      for(let n=a;n<=b;n++){
+        const t=document.createElement('div');t.className='tab'+(draft.has(n)?' on':'');
+        t.innerHTML='<div class="num">'+n+'</div><div class="name">'+names[n]+'</div>';
+        t.onclick=()=>{draft.has(n)?draft.delete(n):draft.add(n);change()};
+        g.appendChild(t);
+      }
+      panel.appendChild(col);
+    });
+    $('cur').textContent='Song '+cur;
+    const st=$('state');
+    if(dirty){st.textContent='unsaved changes';st.className='state dirty';$('count').textContent=draft.size+' of 42 on'}
+    else if(saved[cur]===null){st.textContent='not set: organ stops are left as they are';st.className='state';$('count').textContent=''}
+    else {st.textContent=saved[cur].length?'saved':'saved: all stops off';st.className='state';$('count').textContent=draft.size+' of 42 on'}
+    $('save').disabled=!dirty;
+    $('notset').disabled=saved[cur]===null&&!dirty;
+  }
+  function renderSongs(){
+    const rows=Object.keys(saved).map(c=>{const v=saved[c];return {code:c,n:v===null?-1:v.length,list:v===null?null:[...v].sort((a,b)=>a-b).join(' ')}});
+    rows.sort((a,b)=>(a[sortK]>b[sortK]?1:a[sortK]<b[sortK]?-1:0)*sortDir);
+    tbody.innerHTML='';
+    rows.forEach(r=>{
+      const tr=document.createElement('tr');tr.className='row'+(r.code===cur?' sel':'');
+      const list=r.list===null?'<span class="none">not set</span>':r.list===''?'<span class="none">all off</span>':r.list;
+      tr.innerHTML='<td><b>'+r.code+'</b></td><td>'+(r.n<0?'–':r.n)+'</td><td class="stoplist">'+list+'</td>';
+      tr.onclick=()=>{if(r.code===cur)return;if(dirty&&!confirm('Discard unsaved changes to song '+cur+'?'))return;load(r.code)};
+      tbody.appendChild(tr);
+    });
+    document.querySelectorAll('th').forEach(th=>{th.classList.toggle('sorted',th.dataset.k===sortK);th.dataset.dir=sortDir>0?' ▲':' ▼';
+      th.onclick=()=>{if(sortK===th.dataset.k)sortDir=-sortDir;else{sortK=th.dataset.k;sortDir=1}renderSongs()}});
+  }
+  function render(){renderStops();renderSongs()}
+  $('alloff').onclick=()=>{if(draft.size||saved[cur]===null){draft.clear();change()}};
+  $('save').onclick=e=>{saved[cur]=[...draft].sort((a,b)=>a-b);dirty=false;render();e.target.textContent='Saved ✓';setTimeout(()=>e.target.textContent='Save',1200)};
+  $('notset').onclick=()=>{if(confirm('Forget the stops of song '+cur+'? The organ will then be left as it is when this song starts.')){saved[cur]=null;load(cur)}};
+  load(cur);
+})();
+</script>
