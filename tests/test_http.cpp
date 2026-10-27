@@ -7,7 +7,7 @@ using namespace mc::http;
 
 namespace {
 Response get(const std::string& path, const std::string& method = "GET") {
-    return route(Request{method, path, ""}, "<html>", [] { return std::string("{\"a\":1}"); });
+    return route(Request{method, path, "", "", ""}, "<html>", [] { return std::string("{\"a\":1}"); });
 }
 }  // namespace
 
@@ -56,6 +56,48 @@ TEST(http_route) {
     CHECK_EQ(get("/", "HEAD").status, 405);
 }
 
+TEST(http_parse_body_split_and_limits) {
+    Request req;
+    const std::string head = "PUT /api/stops/401 HTTP/1.1\r\nContent-Length: 5\r\n\r\n";
+    CHECK(parseRequest(head + "ab", req) == ParseResult::Incomplete);
+    CHECK(parseRequest(head + "abcde", req) == ParseResult::Ok);
+    CHECK_EQ(req.body, "abcde");
+    CHECK(parseRequest("PUT /x HTTP/1.1\r\ncontent-type: Application/JSON\r\n"
+                       "content-length: 1\r\n\r\n{", req) == ParseResult::Ok);
+    CHECK_EQ(req.contentType, "application/json");
+    CHECK(parseRequest("PUT /x HTTP/1.1\r\nContent-Length: 5000\r\n\r\n", req) ==
+          ParseResult::TooLarge);
+    CHECK(parseRequest("PUT /x HTTP/1.1\r\nContent-Length: x\r\n\r\n", req) == ParseResult::Bad);
+}
+
+TEST(http_route_stops) {
+    std::string gotCode, gotBody;
+    StopsApi api;
+    api.get = [] { return std::string("{\"stops\":[]}"); };
+    api.put = [&](const std::string& code, const std::string& body) {
+        gotCode = code;
+        gotBody = body;
+        return Response{200, "application/json", "{}"};
+    };
+    auto call = [&](const Request& r, const StopsApi* s) {
+        return route(r, "<html>", [] { return std::string("{}"); }, nullptr, s);
+    };
+    auto r = call(Request{"GET", "/api/stops", "", "", ""}, &api);
+    CHECK_EQ(r.status, 200);
+    CHECK_EQ(r.contentType, "application/json");
+    CHECK_EQ(r.body, "{\"stops\":[]}");
+    r = call(Request{"PUT", "/api/stops/401", "", "application/json", "{\"a\":1}"}, &api);
+    CHECK_EQ(r.status, 200);
+    CHECK_EQ(gotCode, "401");
+    CHECK_EQ(gotBody, "{\"a\":1}");
+    gotCode.clear();
+    CHECK_EQ(call(Request{"PUT", "/api/stops/401", "", "text/plain", "x"}, &api).status, 415);
+    CHECK_EQ(gotCode, "");
+    CHECK_EQ(call(Request{"PUT", "/api/status", "", "application/json", "{}"}, &api).status, 405);
+    CHECK_EQ(call(Request{"PUT", "/api/stops/401", "", "application/json", "{}"}, nullptr).status, 404);
+    CHECK_EQ(call(Request{"POST", "/", "", "", ""}, &api).status, 405);
+}
+
 TEST(http_serialize) {
     auto s = serialize(Response{200, "text/plain", "hi"});
     CHECK(s.rfind("HTTP/1.1 200 OK\r\n", 0) == 0);
@@ -66,5 +108,6 @@ TEST(http_serialize) {
     auto e = errorResponse(404);
     CHECK_EQ(e.status, 404);
     CHECK_EQ(e.body, "404 Not Found\n");
+    CHECK(serialize(errorResponse(415)).rfind("HTTP/1.1 415 Unsupported Media Type\r\n", 0) == 0);
     CHECK(serialize(errorResponse(413)).rfind("HTTP/1.1 413 Payload Too Large\r\n", 0) == 0);
 }

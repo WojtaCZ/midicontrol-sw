@@ -185,8 +185,8 @@ TEST(http_route_diag) {
     CHECK_EQ(r.body, std::string("{\"q\":\"node=base&limit=5\"}"));
     req.query = "bad";
     CHECK_EQ(route(req, "<html>", status, diag).status, 400);
-    CHECK_EQ(route(Request{"GET", "/api/diag", ""}, "<html>", status).status, 404);  // no diag handler
-    CHECK_EQ(route(Request{"POST", "/api/diag", ""}, "<html>", status, diag).status, 405);
+    CHECK_EQ(route(Request{"GET", "/api/diag", "", "", ""}, "<html>", status).status, 404);  // no diag handler
+    CHECK_EQ(route(Request{"POST", "/api/diag", "", "", ""}, "<html>", status, diag).status, 405);
 }
 
 TEST(console_diag_text_last_fault_per_node_and_last_20_lines) {
