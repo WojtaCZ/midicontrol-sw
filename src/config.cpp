@@ -139,6 +139,9 @@ Config parseConfig(const std::string& iniText) {
         if (auto it = d.find("Dir"); it != d.end()) cfg.diagDir = it->second;
     }
 
+    auto organIt = sections.find("ORGAN");
+    if (organIt != sections.end()) cfg.organ = organ::parseOrgan(organIt->second);
+
     return cfg;
 }
 

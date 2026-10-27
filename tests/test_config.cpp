@@ -173,3 +173,11 @@ TEST(config_default_diag_dir) {
     CHECK_EQ(defaultDiagDir(env({})), "/tmp/midicontrol-" + std::to_string(getuid()) + "/diag");
     CHECK_EQ(defaultDiagDir(env({{"XDG_STATE_HOME", ""}, {"HOME", ""}})), "/tmp/midicontrol-" + std::to_string(getuid()) + "/diag");
 }
+
+TEST(config_organ_section) {
+    const std::string minimal = "[FILES]\nPlayFolder = /tmp/p\nRecordFolder = /tmp/r\n";
+    CHECK_EQ(parseConfig(minimal).organ.stopCount(), 42);
+    Config cfg = parseConfig(minimal + "[ORGAN]\nChannel=5\n");
+    CHECK_EQ(cfg.organ.channel, 5);
+    CHECK_EQ(cfg.organ.stopCount(), 42);
+}

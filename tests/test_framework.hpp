@@ -104,6 +104,18 @@ inline int runAll() {
         }                                                                                  \
     } while (0)
 
+// Passes when `expr` throws any std::exception.
+#define CHECK_THROWS(expr)                                                                 \
+    do {                                                                                   \
+        bool _threw = false;                                                               \
+        try {                                                                              \
+            (void)(expr);                                                                  \
+        } catch (const std::exception&) {                                                  \
+            _threw = true;                                                                 \
+        }                                                                                  \
+        if (!_threw) FAIL_AT("CHECK_THROWS failed: " #expr " did not throw");              \
+    } while (0)
+
 #define CHECK_TRUE(cond) CHECK(cond)
 #define CHECK_FALSE(cond) CHECK(!(cond))
 

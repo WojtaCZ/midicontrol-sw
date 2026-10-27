@@ -28,6 +28,12 @@
 // the section being repeated.
 namespace mc {
 
+// One raw MIDI message to send, then wait `delayAfterSeconds` before the next one.
+struct MidiStep {
+    std::vector<uint8_t> bytes;
+    double delayAfterSeconds = 0.0;
+};
+
 // One section of the song, from its anchor to the next one.
 struct Section {
     size_t firstEvent = 0;  // index into MidiFile::events (first event at the anchor's tick)

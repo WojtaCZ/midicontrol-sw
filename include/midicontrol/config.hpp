@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "midicontrol/organ.hpp"
+
 // Loads config.conf (INI format):
 //   [FILES]    PlayFolder=..., RecordFolder=...   (~/ and paths relative to
 //              the config file are resolved by loadConfig)
@@ -14,6 +16,7 @@
 // The song structure (prelude, verses) comes from the anchors in each MIDI file.
 //   [BINDINGS] Bind0=song.mid, ...   (parsed, not used yet)
 //   [WEB]      Enabled, Port, Bind (status page, all optional, see Config)
+//   [ORGAN]    stop layout and Program Change mapping (all optional, see organ.hpp)
 //   [DIAG]     LogPort (override of the log CDC auto-detection), Dir (diagnostics store)
 namespace mc {
 
@@ -35,6 +38,9 @@ struct Config {
     // [DIAG] base log + remote diagnostics
     std::string diagLogPort;           // e.g. "/dev/ttyACM1"; empty = auto-detect "MIDIControl log"
     std::string diagDir;               // store directory; empty = defaultDiagDir() (filled in by loadConfig)
+
+    // [ORGAN] stops per song (Opus 910 defaults)
+    mc::organ::OrganConfig organ = mc::organ::defaultOrgan();
 
     // Look up a button binding by key (e.g. "Bind0"). nullopt if absent.
     std::optional<std::string> binding(const std::string& key) const;

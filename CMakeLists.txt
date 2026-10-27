@@ -24,6 +24,7 @@ add_library(midicontrol_core
     src/smf.cpp
     src/verse.cpp
     src/config.cpp
+    src/organ.cpp
     src/display.cpp
     src/songs.cpp
     src/playback.cpp
@@ -64,6 +65,7 @@ add_executable(midicontrol_tests
     tests/test_sysex.cpp
     tests/test_smf.cpp
     tests/test_config.cpp
+    tests/test_organ.cpp
     tests/test_display.cpp
     tests/test_songs.cpp
     tests/test_playback.cpp
