@@ -30,7 +30,7 @@ struct Config {
     bool keepPowerOn = false;          // leave organ power on between songs
     int verseGapMs = 0;                // silence before a section repeated with add-verse
 
-    // [WEB] read-only status page
+    // [WEB] status page + Stops editor (writes stops.conf; 0.0.0.0 exposes that to the LAN)
     bool webEnabled = true;
     int webPort = 50118;
     std::string webBind = "0.0.0.0";   // IPv4 address to listen on

@@ -14,3 +14,7 @@ Per-song stops are implemented (Stops tab, `stops.conf`, set at song start). Sti
 - Decide how organ power behaves between songs and during a session: stay on, turn off
   after a pause, power-cycle to reset the stops (see "Organ stops" above),
   what happens at the start and end of a session.
+
+## Web: Host header not checked
+
+- The HTTP server does not check the Host header, so a DNS-rebinding page on a LAN device could PUT stops. Consider accepting only IP-literal or own-hostname Host values.

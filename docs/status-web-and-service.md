@@ -1,6 +1,6 @@
 # Status web page and always-on service
 
-The PC player (`midicontrol`) runs as an unattended systemd user service, serves a read-only status page on port **50118**, and accepts terminal commands through a local control socket. This document covers how to install and use it and how it behaves. It also records how it was built and tested, the decisions taken, and what is still open.
+The PC player (`midicontrol`) runs as an unattended systemd user service, serves a status page with a Stops editor on port **50118**, and accepts terminal commands through a local control socket. This document covers how to install and use it and how it behaves. It also records how it was built and tested, the decisions taken, and what is still open.
 
 - Design (the binding spec): [`superpowers/specs/2026-10-19-status-web-design.md`](superpowers/specs/2026-10-19-status-web-design.md)
 - Implementation plan: [`superpowers/plans/2026-10-19-status-web.md`](superpowers/plans/2026-10-19-status-web.md)
@@ -66,9 +66,11 @@ The top bar shows **MIDIControl**, the host:port and "updated N s ago". If a req
 | Block | Software | Base | Controller |
 |---|---|---|---|
 | **Status** | running; idle / warming up / playing `<code>` `<section>`; song-file warnings; activity (e.g. firmware update) | connected / waiting / keepalives lost / firmware update; MIDI port; organ power; "GET_STATUS not answered" | BLE connected / disconnected (per base), or no fresh report; last heard |
-| **Details** | version (git hash + build date), start time and uptime, config path, play folder and song count, current or last song with its sections and how it ended, song codes with ⚠ on problem files | serial device and VID:PID, MIDI out port, last keepalive ACK age, connected since and reconnect count, latest `STATUS_RESP` flags (BLE, relay, display, PC) and their age, church display; sections **Firmware** and **Bluetooth** from `INFO_RESP` (below) | route ("via base, BLE", with the age of the base's report), last command received and its ACK/NAK, last packet sent to it and its result; sections **Power**, **Firmware** and **Bluetooth** from `INFO_RESP` |
+| **Details** | version (git hash + build date), start time and uptime, config path, play folder and song count, current or last song with its sections and how it ended, song codes with ⚠ on problem files; the stops of the current song | serial device and VID:PID, MIDI out port, last keepalive ACK age, connected since and reconnect count, latest `STATUS_RESP` flags (BLE, relay, display, PC) and their age, church display; sections **Firmware** and **Bluetooth** from `INFO_RESP` (below) | route ("via base, BLE", with the age of the base's report), last command received and its ACK/NAK, last packet sent to it and its result; sections **Power**, **Firmware** and **Bluetooth** from `INFO_RESP` |
 | **Counters** | songs played (ended / stopped), warnings / errors | packets tx / rx, retries / gave up, NAK sent / received, CRC errors / duplicates | packets tx / rx, retries / gave up, NAK sent / received, received commands by type |
 | **Recent events** | log lines (INFO/WARN/ERROR) | packets to and from the base, plus link events | packets to and from the controller, plus link events |
+
+**Stops:** per-song organ stops (see "Stops tab and `stops.conf`"). It needs no status data, so it works before the first status poll succeeds; leaving or reloading the page with unsaved edits asks first.
 
 #### Counter attribution
 
@@ -145,7 +147,7 @@ Field names, which are the contract between `CommHandler`, `main` and the page:
 
 | Node | Fields | Counters |
 |---|---|---|
-| software | `version`, `build_date`, `started_ms`, `config_path`, `play_folder`, `song_count`, `song_problems`, `playback`, `song`, `section`, `last_song`, `last_sections`, `last_end`, `activity` | `songs_ended`, `songs_stopped`, `warnings`, `errors` |
+| software | `version`, `build_date`, `started_ms`, `config_path`, `play_folder`, `song_count`, `song_problems`, `playback`, `stops`, `song`, `section`, `last_song`, `last_sections`, `last_end`, `activity` | `songs_ended`, `songs_stopped`, `warnings`, `errors` |
 | base | `connected`, `alive`, `updating`, `device`, `vidpid`, `midi_port_found`, `midi_out`, `keepalive_ack_ms`, `connected_since_ms`, `reconnects`, `organ_power` (base SSR, null = unknown), `status_ms`, `status_ble`, `status_relay`, `status_display`, `status_pc`, `status_answered` (the `status_*` fields are null while not connected) | `tx`, `rx`, `retries`, `gave_up`, `nak_sent`, `nak_received`, `crc_errors`, `duplicates`, `warnings`, `errors` |
 | controller | `last_rx_ms`, `last_cmd`, `last_cmd_reply`, `last_cmd_ms`, `last_tx`, `last_tx_result`, `last_tx_ms` | the same packet counters, plus `cmd.<MSGTYPE>` per received command |
 | base, controller (INFO_RESP) | `info_ms`, `info_unsupported`, `fw_revision`, `fw_branch`, `fw_built`, `fw_dirty`, `uptime_ms`, `reset_cause`, `fault_count`, `ble_connected`, `ble_stream_open`, `ble_secured`, `ble_bonded`, `ble_module_up`, `ble_peer_alive`, `ble_pc_alive`, `ble_peer`, `ble_name`, `ble_pairing`; base `display`, `ssr`; controller `battery_mv`, `battery_level`, `charging`, `charge_done`, `vbus`, `battery_critical`, `vbus_mv` (all null when not reported) | |
@@ -163,9 +165,9 @@ Any other path returns 404 and any method other than GET (or PUT on `/api/stops/
 
 ### Stops tab and `stops.conf`
 
-Each song can have a saved set of organ stops (rejstriky). The Stops tab of the status page lists the songs of the play folder, shows the organ's stops for the selected song and saves the set; at song start the player puts the organ in that state. The `.mid` files are never modified. Unlike the rest of the page this is a write path: there is no login (trusted LAN, as before), and `Bind = 127.0.0.1` keeps it local.
+Each song can have a saved set of organ stops (rejstriky). The Stops tab of the status page lists the songs of the play folder, shows the organ's stops for the selected song and saves the set; at song start the player puts the organ in that state. The `.mid` files are never modified. Unlike the rest of the page this is a write path (`PUT /api/stops/<code>`): there is no login, so `Bind = 0.0.0.0` exposes it to the whole LAN (trusted LAN only), and `Bind = 127.0.0.1` keeps it local.
 
-**File:** `stops.conf` in the play folder, written only by the page (temp file, `fsync`, `rename`, so a crash or two phones saving at once cannot corrupt it) and fine to edit by hand:
+**File:** `stops.conf` in the play folder, written only by the page (temp file, `fsync`, `rename`, so a crash or two phones saving at once cannot corrupt it) and editable by hand only while the player is stopped (the next save rewrites the file, dropping comments and unreadable lines; `[songs]` in any case and a missing header are accepted):
 
 ```ini
 [SONGS]
@@ -200,7 +202,7 @@ The **Diagnostics** tab shows, per node (base, remote), the last fault (kind, de
 
 ## 3. Commands: terminal attached to the service
 
-The service listens on a Unix socket, `$XDG_RUNTIME_DIR/midicontrol.sock`, mode `0600` (owner only). The web page stays read-only; all control goes through the terminal.
+The service listens on a Unix socket, `$XDG_RUNTIME_DIR/midicontrol.sock`, mode `0600` (owner only). The web page cannot control the player (its one write is the per-song stops in `stops.conf`); all control goes through the terminal.
 
 ```bash
 midicontrol                                        # in a terminal
