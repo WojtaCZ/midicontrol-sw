@@ -161,6 +161,25 @@ PlaybackEngine::Result PlaybackEngine::run(Timebase& tb) {
     Result result = Result::Finished;
     const auto& events = _file.events;
 
+    // The preamble (organ setup) runs once, before the start display, so a
+    // stop during it ends the run without any song event having been sent.
+    if (!_opts.preamble.empty()) {
+        tb.startPass();
+        double t = 0.0;
+        for (const auto& step : _opts.preamble) {
+            if (_stop.load()) {
+                _running.store(false);
+                return Result::Stopped;
+            }
+            if (_cb.midi) _cb.midi(step.bytes);
+            t += step.delayAfterSeconds;
+            if (!tb.waitUntil(t)) {
+                _running.store(false);
+                return Result::Stopped;
+            }
+        }
+    }
+
     if (_cb.display) _cb.display(_base);
     announce();
     tb.startPass();
@@ -186,7 +205,8 @@ PlaybackEngine::Result PlaybackEngine::run(Timebase& tb) {
                 break;
             }
             if (ev.kind == mc::smf::EventKind::Channel) {
-                if (_cb.midi) _cb.midi(ev.bytes);
+                const bool programChange = !ev.bytes.empty() && (ev.bytes[0] & 0xF0) == 0xC0;
+                if (_cb.midi && !(programChange && _opts.dropProgramChanges)) _cb.midi(ev.bytes);
             } else if (ev.kind == mc::smf::EventKind::SysEx && !_isHeadAnchor[idx]) {
                 auto info = mc::sysex::parse(ev.bytes);
                 if (info && _cb.display) _cb.display(mc::display::fromSysEx(*info));

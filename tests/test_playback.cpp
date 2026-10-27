@@ -170,6 +170,53 @@ TEST(engine_plays_sections_as_authored) {
     CHECK_FALSE(engine.addVerse());  // finished
 }
 
+TEST(engine_sends_preamble_before_song) {
+    Capture cap;
+    PlaybackOptions o;
+    o.preamble = {{{0xF0, 0x00, 0x4A, 0x4F, 0x48, 0x41, 0x53, 0x7F, 0xF7}, 0.1}, {{0xCB, 0}, 0.02}};
+    PlaybackEngine engine(multiVerse(), "401", o, cap.callbacks());
+    FakeClock clock;
+    CHECK(engine.run(clock) == PlaybackEngine::Result::Finished);
+    CHECK(cap.midi[0] == o.preamble[0].bytes);
+    CHECK(cap.midi[1] == o.preamble[1].bytes);
+    CHECK_EQ(clock.passStarts, 2);  // preamble pass + song pass
+    CHECK(std::abs(clock.waits[0] - 0.1) < 1e-9);
+    CHECK(std::abs(clock.waits[1] - 0.12) < 1e-9);
+    CHECK_EQ(cap.noteOns(), 4);
+}
+
+TEST(engine_preamble_stop_aborts_before_song) {
+    Capture cap;
+    PlaybackOptions o;
+    o.preamble = {{{0xF0, 0xF7}, 0.1}, {{0xCB, 0}, 0.02}};
+    PlaybackEngine engine(multiVerse(), "401", o, cap.callbacks());
+    FakeClock clock;
+    clock.hook = [](int, double) { return false; };
+    CHECK(engine.run(clock) == PlaybackEngine::Result::Stopped);
+    CHECK_EQ(cap.noteOns(), 0);
+    CHECK(cap.anchors.empty());
+    CHECK(cap.display.empty());
+    CHECK_EQ(cap.allNotesOff(), 0);
+    CHECK_FALSE(engine.running());
+}
+
+TEST(engine_drops_program_changes_when_asked) {
+    auto countPc = [](bool drop) {
+        auto mf = multiVerse();
+        mf.events.insert(mf.events.begin(), ev(0, 0.0, smf::EventKind::Channel, {0xC0, 0}));
+        Capture cap;
+        PlaybackOptions o;
+        o.dropProgramChanges = drop;
+        PlaybackEngine engine(mf, "401", o, cap.callbacks());
+        FakeClock clock;
+        engine.run(clock);
+        return std::count_if(cap.midi.begin(), cap.midi.end(),
+                             [](const Bytes& b) { return (b[0] & 0xF0) == 0xC0; });
+    };
+    CHECK_EQ(countPc(false), 1);
+    CHECK_EQ(countPc(true), 0);
+}
+
 TEST(engine_add_verse_replays_section_and_keeps_number) {
     Capture cap;
     PlaybackEngine engine(multiVerse(), "401", PlaybackOptions{}, cap.callbacks());

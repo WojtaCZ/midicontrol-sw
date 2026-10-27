@@ -62,6 +62,8 @@ public:
 
 struct PlaybackOptions {
     double gapSeconds = 0.0;  // silence before a repeated section
+    std::vector<MidiStep> preamble;  // sent before the song, through the Timebase
+    bool dropProgramChanges = false;  // skip 0xCn channel events from the file
 };
 
 // Plays a parsed song file section by section on the calling thread.
@@ -75,7 +77,7 @@ struct PlaybackOptions {
 class PlaybackEngine {
 public:
     struct Callbacks {
-        std::function<void(const std::vector<uint8_t>&)> midi;        // channel message
+        std::function<void(const std::vector<uint8_t>&)> midi;        // MIDI message (channel or SysEx)
         std::function<void(const mc::display::Update&)> display;      // NOW_PLAYING_INFO
         std::function<void(const std::string&)> anchor;               // SIGNAL_ANCHOR label
     };
