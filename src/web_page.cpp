@@ -64,10 +64,11 @@ td{padding:2px 10px 2px 0;vertical-align:top}
 .sp-tab[aria-pressed="true"]{background:#fff4d0;color:#1d140b;box-shadow:inset 0 0 0 3px #e0a800,0 0 10px rgba(255,200,60,.55)}
 .sp-tab:focus-visible{outline:2px solid #f3d77a;outline-offset:2px}
 .sp-num{position:absolute;top:30%;left:0;right:0;transform:translateY(-50%);text-align:center;font-weight:700;font-size:17px}
-.sp-name{position:absolute;top:45%;left:2px;right:2px;text-align:center;font-weight:600;font-size:9px;line-height:1.15;opacity:.85;overflow-wrap:anywhere;hyphens:auto}
+.sp-name{position:absolute;top:45%;left:2px;right:2px;text-align:center;font-weight:600;font-size:9px;line-height:1.15;opacity:.85}  /* wraps at spaces; spFit shrinks long words */
 .sp-panel.notset .sp-tab{opacity:.45}
 .sp-actions{margin:12px 0 22px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;max-width:720px}
 .sp-actions button{font:inherit;font-size:15px;padding:8px 16px;cursor:pointer}
+.sp-actions button.sp-small{font-size:13px;padding:4px 10px}
 .sp-actions button:disabled{opacity:.4;cursor:default}
 .sp-msg{flex:1 1 12em}  /* also pushes "Not set" to the right */
 .sp-msg:empty{flex-basis:0}
@@ -440,7 +441,7 @@ function diag(){diagSection();drawDiag();if(!DG.timer)diagLoop();return DG.sec;}
 
 // --- Stops tab: built once and cached (the 1 s status poll must not rebuild it or lose edits).
 // /api/stops is loaded when the tab is first opened and after each save, never polled. ---
-const SP={sec:null,E:{},tabs:{},loaded:false,groups:[],names:{},codes:[],saved:{},total:0,
+const SP={sec:null,E:{},tabs:{},loaded:false,loadErr:false,layout:"",fitPending:false,groups:[],names:{},codes:[],saved:{},total:0,
   cur:null,draft:new Set(),dirty:false,edits:0,busy:false,sortK:"code",sortDir:1};
 function spSorted(set){return [...set].sort((a,b)=>a-b);}
 async function spFetch(url,opts){
@@ -460,11 +461,13 @@ async function spLoad(){
     SP.groups=j.groups;SP.names=j.names;SP.codes=j.songs.map(s=>s.code);SP.saved={};
     for(const s of j.songs)SP.saved[s.code]=s.stops;
     SP.total=Math.max(0,...SP.groups.map(g=>g.last));
-    SP.loaded=true;E.load.replaceChildren();
-    spBuildPanel();
+    SP.loaded=true;SP.loadErr=false;E.load.replaceChildren();
+    const layout=JSON.stringify([j.groups,j.names]);
+    if(layout!==SP.layout){SP.layout=layout;spBuildPanel();}  // keeps the tab buttons (and focus) across saves
     if(!SP.codes.includes(SP.cur)){SP.cur=SP.codes.length?SP.codes[0]:null;SP.dirty=false;}
     if(!SP.dirty)SP.draft=new Set(SP.cur!=null&&SP.saved[SP.cur]||[]);
   }catch(e){
+    SP.loadErr=true;
     const b=el("button",null,"Try again");b.onclick=spLoad;
     E.load.replaceChildren(el("span","sp-err","Could not load the stops: "+e.message+" "),b);
   }
@@ -484,19 +487,33 @@ function spBuildPanel(){
     }
     col.append(el("div","sp-glabel",g.label),row);p.append(col);
   }
+  spFit();
 }
+// A name too wide for its tab (one long word) gets a smaller font; only as a last resort it breaks mid-word.
+function spFit(){
+  if(!SP.E.panel||!SP.E.panel.isConnected){SP.fitPending=true;return;}
+  SP.fitPending=false;
+  for(const n of SP.E.panel.querySelectorAll(".sp-name")){
+    n.style.fontSize="";n.style.overflowWrap="";
+    if(!n.clientWidth)continue;  // names hidden (phone)
+    let fs=parseFloat(getComputedStyle(n).fontSize);
+    while(n.scrollWidth>n.clientWidth&&fs>6){fs-=.5;n.style.fontSize=fs+"px";}
+    if(n.scrollWidth>n.clientWidth)n.style.overflowWrap="anywhere";
+  }
+}
+window.addEventListener("resize",()=>{if(SP.sec)requestAnimationFrame(spFit);});
 function spChanged(){SP.dirty=true;SP.edits++;spMsg("");spDraw();}
 function spDraw(){
   const E=SP.E,cur=SP.cur,saved=cur!=null?SP.saved[cur]:undefined,has=cur!=null;
   E.panel.hidden=E.actions.hidden=!has;
-  E.cur.textContent=has?"Song "+cur:SP.loaded?"No songs in the play folder":"Loading the stops…";
+  E.cur.textContent=has?"Song "+cur:SP.loaded?"No songs in the play folder":SP.loadErr?"Stops not loaded":"Loading the stops…";
   E.count.textContent="";E.state.hidden=!has;
   if(has){
     if(SP.dirty){E.state.textContent="unsaved changes";E.state.className="sp-state dirty";}
     else if(saved===null)E.state.textContent="not set: organ stops are left as they are";
     else E.state.textContent=saved.length?"saved":"saved: all stops off";
     if(!SP.dirty)E.state.className="sp-state";
-    if(SP.dirty||saved!==null)E.count.textContent=SP.draft.size+" of "+SP.total+" on";
+    if(SP.dirty||saved!==null)E.count.textContent=" · "+SP.draft.size+" of "+SP.total+" on";
   }
   E.panel.classList.toggle("notset",saved===null&&!SP.dirty);
   for(const [n,t] of Object.entries(SP.tabs))t.setAttribute("aria-pressed",SP.draft.has(Number(n))?"true":"false");
@@ -516,17 +533,19 @@ function spCmp(a,b){
   return d*SP.sortDir||byCode;
 }
 function spDrawSongs(){
-  const E=SP.E;E.tbody.replaceChildren();
+  const E=SP.E,a=document.activeElement,focus=E.tbody.contains(a)?a.dataset.code:null;
+  E.tbody.replaceChildren();
   const rows=SP.codes.map(c=>{const v=SP.saved[c];return {code:c,v:v===null?null:spSorted(v),n:v===null?-1:v.length};});
   for(const r of rows.sort(spCmp)){
     const tr=el("tr","sp-row"+(r.code===SP.cur?" sel":"")),list=el("td","sp-list");
-    tr.tabIndex=0;
+    tr.tabIndex=0;tr.dataset.code=r.code;
     if(r.code===SP.cur)tr.setAttribute("aria-current","true");
     list.append(r.v===null?el("span","sp-none","not set"):r.v.length?document.createTextNode(r.v.join(" ")):el("span","sp-none","all off"));
     tr.append(el("td",null,r.code),el("td",null,r.n<0?"–":r.n),list);
     tr.onclick=()=>spPick(r.code);
     tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();spPick(r.code);}};
     E.tbody.append(tr);
+    if(r.code===focus)tr.focus();  // keyboard selection keeps its place
   }
   for(const th of E.ths)th.setAttribute("aria-sort",th.dataset.k!==SP.sortK?"none":SP.sortDir>0?"ascending":"descending");
 }
@@ -552,20 +571,22 @@ async function spPut(stops){
   return ok;
 }
 function stops(){
-  if(SP.sec)return SP.sec;
+  if(SP.sec){if(SP.fitPending)requestAnimationFrame(spFit);return SP.sec;}
   const s=el("section","sp"),E=SP.E;
   const head=el("div","sp-head");
   E.cur=el("span","sp-cur");E.count=el("span","sp-count");E.state=el("span","sp-state");
-  head.append(E.cur,E.count,E.state);
+  const title=el("span");title.append(E.cur,E.count);  // "Song 401 · 16 of 42 on"
+  head.append(title,E.state);
   E.load=el("div");E.panel=el("div","sp-panel");E.actions=el("div","sp-actions");
-  E.save=el("button",null,"Save");E.alloff=el("button",null,"All off");E.notset=el("button",null,"Not set");
+  E.save=el("button",null,"Save");E.alloff=el("button",null,"All off");E.notset=el("button","sp-small","Not set");
   E.msg=el("span","sp-msg");E.msg.setAttribute("role","status");
   E.save.onclick=async()=>{
     if(await spPut(spSorted(SP.draft))){E.save.textContent="Saved ✓";setTimeout(()=>{E.save.textContent="Save";},1200);}
   };
   E.alloff.onclick=()=>{if(SP.draft.size||SP.saved[SP.cur]===null){SP.draft.clear();spChanged();}};
   E.notset.onclick=()=>{
-    if(confirm("Forget the stops of song "+SP.cur+"? The organ will then be left as it is when this song starts."))spPut(null);
+    if(confirm("Forget the stops of song "+SP.cur+"?"+(SP.dirty?" Your unsaved changes are discarded too.":"")+
+               " The organ will then be left as it is when this song starts."))spPut(null);
   };
   E.actions.append(E.save,E.alloff,E.msg,E.notset);
   const t=el("table","sp-songs"),thead=el("thead"),hr=el("tr");E.ths=[];
