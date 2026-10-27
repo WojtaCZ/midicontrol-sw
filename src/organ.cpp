@@ -14,23 +14,26 @@ struct DefaultStop {
 };
 
 // Index = stop number - 1 (spec "Facts about the organ").
+// Czech organ terminology as in Czech parish dispositions (noun first: "Flétna trubicová",
+// mixtures by ranks: "Mixtura 3řadá"), mapped from the Opus 910 console, which is labelled in Dutch
+// (comment after each line). [ORGAN] NameN overrides any of them.
 const DefaultStop kDefaultStops[] = {
-    {"Swell to Great", "60"}, {"Great to Pedal", "61"}, {"Swell to Pedal", "62"},
-    {"Tremulant Great", "63"}, {"Tremulant Swell", "64"}, {"Chorus", "65"},
-    {"Manual Bass", "66"},
-    {"Double Bass 16'", "01"}, {"Subbass 16'", "02"}, {"Octave 8'", "03"},
-    {"Gedackt 8'", "04"}, {"Bass Flute 4'", "05"}, {"Mixture III", "06"},
-    {"Contra Trumpet 16'", "07"}, {"Trumpet 8'", "10"}, {"MIDI to Pedal", "11"},
-    {"Bourdon 16'", "14"}, {"Open Diapason 8'", "15"}, {"Rohrflute 8'", "16"},
-    {"Gamba 8'", "17"}, {"Octave 4'", "20"}, {"Open Flute 4'", "21"},
-    {"Twelfth 2 2/3'", "22"}, {"Superoctave 2'", "23"}, {"Conical Flute 2'", "24"},
-    {"Cornet IV", "25"}, {"Mixture IV-VI", "26"}, {"Trumpet 8'", "27"},
-    {"MIDI to Great", "30"},
-    {"Open Diapason 8'", "33"}, {"Stopped Flute 8'", "34"}, {"Viola 8'", "35"},
-    {"Celeste 8'", "36"}, {"Octave 4'", "37"}, {"Flute 4'", "40"},
-    {"Flute Twelfth 2 2/3'", "41"}, {"Waldflute 2'", "42"}, {"Tierce 1 3/5'", "43"},
-    {"Rauschpfeife II-IV", "44"}, {"Cromorne 8'", "45"}, {"Oboe 8'", "46"},
-    {"MIDI to Swell", "47"},
+    {"Spojka II/I", "60"}, {"Spojka I/P", "61"}, {"Spojka II/P", "62"},  // Zwelwerk-Hoofdwerk, Hoofdwerk-/Zwelwerk-Pedaal
+    {"Tremolo I", "63"}, {"Tremolo II", "64"}, {"Chorus", "65"},        // Tremulant Hoofdwerk/Zwelwerk, Chorus
+    {"Manuálový bas", "66"},                                            // Manuaal Bas
+    {"Kontrabas 16'", "01"}, {"Subbas 16'", "02"}, {"Principálbas 8'", "03"},     // Contrabas, Subbas, Prestant
+    {"Kryt 8'", "04"}, {"Basflétna 4'", "05"}, {"Mixtura 3řadá", "06"},           // Gedekt, Fluitbas, Mixtuur III
+    {"Pozoun 16'", "07"}, {"Trompeta 8'", "10"}, {"MIDI pedál", "11"},             // Bazuin, Trompet, MIDI Pedaal
+    {"Bordun 16'", "14"}, {"Principál 8'", "15"}, {"Flétna trubicová 8'", "16"},   // Bourdon, Prestant, Roerfluit
+    {"Gamba 8'", "17"}, {"Oktáva 4'", "20"}, {"Flétna otevřená 4'", "21"},         // Gamba, Octaaf, Open Fluit
+    {"Kvinta 2 2/3'", "22"}, {"Superoktáva 2'", "23"}, {"Flétna zobcová 2'", "24"},  // Quint, Superoctaaf, Blockfluit
+    {"Kornet 4řadý", "25"}, {"Mixtura 4-6řadá", "26"}, {"Trompeta 8'", "27"},      // Cornet IV, Mixtuur IV-VI, Trompet
+    {"MIDI I. manuál", "30"},                                                    // MIDI Hoofdwerk
+    {"Principál 8'", "33"}, {"Flétna dutá 8'", "34"}, {"Viola da gamba 8'", "35"},  // Prestant, Holpijp, Viola di Gamba
+    {"Vox coelestis 8'", "36"}, {"Oktáva 4'", "37"}, {"Flétna 4'", "40"},          // Vox Celeste, Octaaf, Fluit
+    {"Flétna kvintová 2 2/3'", "41"}, {"Flétna lesní 2'", "42"}, {"Tercie 1 3/5'", "43"},  // Quintfluit, Woudfluit, Terts
+    {"Rauschpfeife 2-4řadá", "44"}, {"Dulcián 8'", "45"}, {"Hoboj 8'", "46"},      // Ruispijp II-IV, Dulciaan, Hobo
+    {"MIDI II. manuál", "47"},                                                   // MIDI Zwelwerk
 };
 constexpr int kDefaultStopCount = static_cast<int>(sizeof(kDefaultStops) / sizeof(kDefaultStops[0]));
 
@@ -134,7 +137,8 @@ int numberedKey(const std::string& key, const std::string& prefix) {
 OrganConfig defaultOrgan() {
     OrganConfig o;
     o.allOffSysex = {0xF0, 0x00, 0x4A, 0x4F, 0x48, 0x41, 0x53, 0x7F, 0xF7};
-    o.groups = {{"ACCESSORIES", 1, 7}, {"PEDAL", 8, 16}, {"GREAT", 17, 29}, {"SWELL", 30, 42}};
+    o.groups = {{"Spojky a pomocná zařízení", 1, 7}, {"Pedál", 8, 16}, {"I. manuál – hlavní stroj", 17, 29},
+                {"II. manuál – žaluziový stroj", 30, 42}};
     for (int i = 0; i < kDefaultStopCount; ++i) {
         o.stops.push_back({i + 1, kDefaultStops[i].name, kDefaultStops[i].st, std::nullopt});
     }
@@ -172,7 +176,7 @@ OrganConfig parseOrgan(const std::map<std::string, std::string>& section) {
         int count = o.groups.back().last;
         o.stops.resize(static_cast<size_t>(count), Stop{0, "", "", std::nullopt});
         for (int i = kDefaultStopCount; i < count; ++i) {
-            o.stops[static_cast<size_t>(i)] = {i + 1, "Stop " + std::to_string(i + 1), "", std::nullopt};
+            o.stops[static_cast<size_t>(i)] = {i + 1, "Rejstřík " + std::to_string(i + 1), "", std::nullopt};
         }
     }
 

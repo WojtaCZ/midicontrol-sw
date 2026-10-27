@@ -9,11 +9,11 @@ TEST(organ_defaults_are_opus_910) {
     auto o = mc::organ::defaultOrgan();
     CHECK_EQ(o.stopCount(), 42);
     CHECK_EQ(o.groups.size(), 4u);
-    CHECK_EQ(o.groups[0].label, std::string("ACCESSORIES")); CHECK_EQ(o.groups[0].last, 7);
-    CHECK_EQ(o.groups[3].label, std::string("SWELL")); CHECK_EQ(o.groups[3].first, 30);
-    CHECK_EQ(o.stops[0].name, std::string("Swell to Great")); CHECK_EQ(o.stops[0].st, std::string("60"));
-    CHECK_EQ(o.stops[7].name, std::string("Double Bass 16'")); CHECK_EQ(o.stops[7].st, std::string("01"));
-    CHECK_EQ(o.stops[41].name, std::string("MIDI to Swell")); CHECK_EQ(o.stops[41].st, std::string("47"));
+    CHECK_EQ(o.groups[0].label, std::string("Spojky a pomocná zařízení")); CHECK_EQ(o.groups[0].last, 7);
+    CHECK_EQ(o.groups[3].label, std::string("II. manuál – žaluziový stroj")); CHECK_EQ(o.groups[3].first, 30);
+    CHECK_EQ(o.stops[0].name, std::string("Spojka II/I")); CHECK_EQ(o.stops[0].st, std::string("60"));
+    CHECK_EQ(o.stops[7].name, std::string("Kontrabas 16'")); CHECK_EQ(o.stops[7].st, std::string("01"));
+    CHECK_EQ(o.stops[41].name, std::string("MIDI II. manuál")); CHECK_EQ(o.stops[41].st, std::string("47"));
     CHECK(o.allOffSysex == (std::vector<uint8_t>{0xF0,0x00,0x4A,0x4F,0x48,0x41,0x53,0x7F,0xF7}));
 }
 TEST(organ_program_is_octal_st_plus_offset) {
@@ -46,7 +46,7 @@ TEST(organ_parse_groups_beyond_defaults) {
     CHECK_THROWS(parseOrgan({{"Groups","A:1-43"}}));  // stop 43 has no ST and no program
     auto o = parseOrgan({{"Groups","A:1-43"},{"Program43","5"}});
     CHECK_EQ(o.stopCount(), 43);
-    CHECK_EQ(o.stops[42].name, std::string("Stop 43"));
+    CHECK_EQ(o.stops[42].name, std::string("Rejstřík 43"));
     CHECK_EQ(mc::organ::programFor(o, 43), 5);
     CHECK_THROWS(parseOrgan({{"Name43","x"}}));  // beyond the stop count
 }

@@ -55,13 +55,23 @@ No libsystemd is needed: the datagrams go straight to `$NOTIFY_SOCKET`, and noth
 
 Open `http://<pc>:50118/` from any machine on the LAN. The page is one self-contained HTML document: inline CSS and JS, no CDN, fonts or external requests. It polls `GET /api/status` once a second and follows the browser's light or dark setting.
 
-The top bar shows **MIDIControl**, the host:port and "updated N s ago". If a request fails or takes longer than 3 s, the top bar shows a red dot and "no connection", and the last data stays on screen.
+The page has two views, switched in the top bar: **Přehled** (home, in Czech, for the organist) and **Pokročilé** (Advanced, in English, the full debug detail). The top bar also shows the live connection ("aktualizováno před N s"). If a request fails or takes longer than 3 s, it shows a red dot and "bez spojení s přehrávačem", a red notice appears on the home page, and the last data stays on screen greyed out.
 
-### Tabs
+Addresses: `#` home, `#stops` home scrolled to the stops editor, `#adv/overview|software|base|controller|diag` the Advanced pages (the old `#base`, `#diag`, ... still open the matching Advanced page).
+
+### Home (Přehled)
+
+- **Notices**, only when something needs attention, in plain Czech, each with a "Podrobnosti" link to the Advanced page that explains it: player not answering, base not connected / not answering / firmware update, an unseen firmware fault (base or remote), remote battery low or flat, song-file problems.
+- **Systém**: the three parts as a chain Počítač —USB— Základna —BLUETOOTH— Ovladač. Each has its health ring (the node's dot), a state line and one fact: the player's uptime and song count, the organ power (from the base's `STATUS_RESP`), the remote's battery. A wire is green and animated while the link is up, dashed while down or unknown, red when the base's keepalives are lost; the Bluetooth wire uses the base's report (fresh within 15 s), as on the Controller page. Below it: what is playing (song, section) or the last song and how it ended.
+- **Rejstříky písní**: the stops editor (see "Stops editor and `stops.conf`"). It needs no status data, so it works before the first status poll succeeds; leaving or reloading the page with unsaved edits asks first.
+
+### Advanced (Pokročilé)
+
+A side menu (a scrolling row on phones) with a health dot per page.
 
 **Overview:** one row per node (Software, Base, Controller), each with its dot and a one-line summary. Below that, **Problems** lists the most recent WARN/ERROR events from all nodes, newest first. Problems keeps the last 50, so routine traffic can't push a warning out.
 
-**Software, Base and Controller** all have the same four blocks in the same order:
+**Software, Base and Controller** all have the same four blocks (status chips, then panels) in the same order:
 
 | Block | Software | Base | Controller |
 |---|---|---|---|
@@ -70,7 +80,7 @@ The top bar shows **MIDIControl**, the host:port and "updated N s ago". If a req
 | **Counters** | songs played (ended / stopped), warnings / errors | packets tx / rx, retries / gave up, NAK sent / received, CRC errors / duplicates | packets tx / rx, retries / gave up, NAK sent / received, received commands by type |
 | **Recent events** | log lines (INFO/WARN/ERROR) | packets to and from the base, plus link events | packets to and from the controller, plus link events |
 
-**Stops:** per-song organ stops (see "Stops tab and `stops.conf`"). It needs no status data, so it works before the first status poll succeeds; leaving or reloading the page with unsaved edits asks first.
+Base and Controller also show an "Unseen fault (Diagnostics)" chip while their dot is amber for an unmarked fault.
 
 #### Counter attribution
 
@@ -163,9 +173,9 @@ Any other path returns 404 and any method other than GET (or PUT on `/api/stops/
 
 ---
 
-### Stops tab and `stops.conf`
+### Stops editor and `stops.conf`
 
-Each song can have a saved set of organ stops (rejstriky). The Stops tab of the status page lists the songs of the play folder, shows the organ's stops for the selected song and saves the set; at song start the player puts the organ in that state. The `.mid` files are never modified. Unlike the rest of the page this is a write path (`PUT /api/stops/<code>`): there is no login, so `Bind = 0.0.0.0` exposes it to the whole LAN (trusted LAN only), and `Bind = 127.0.0.1` keeps it local.
+Each song can have a saved set of organ stops (rejstriky). The stops editor on the home page lists the songs of the play folder in its own scrolling list, built for 100+ songs: search by song number (Enter opens the first match), filter all / set / not set, sort by number up or down or by stop count, and a footer with the count shown and how many are set; the list follows the editor while the page scrolls and keeps its position while stops are clicked. It shows the organ's stops for the selected song and saves the set (while there are unsaved changes the Save bar stays at the bottom of the screen); at song start the player puts the organ in that state. The `.mid` files are never modified. Unlike the rest of the page this is a write path (`PUT /api/stops/<code>`): there is no login, so `Bind = 0.0.0.0` exposes it to the whole LAN (trusted LAN only), and `Bind = 127.0.0.1` keeps it local.
 
 **File:** `stops.conf` in the play folder, written only by the page (temp file, `fsync`, `rename`, so a crash or two phones saving at once cannot corrupt it) and editable by hand only while the player is stopped (the next save rewrites the file, dropping comments and unreadable lines; `[songs]` in any case and a missing header are accepted):
 
@@ -177,9 +187,11 @@ Each song can have a saved set of organ stops (rejstriky). The Stops tab of the 
 
 One line per song, `CODE=numbers separated by spaces`, each in 1..stop count. A save changes only that song's line; lines of songs no longer in the folder are kept. A bad line or number is skipped with a warning in the log. An unreadable file (permissions) is an error for the page (500) and leaves the song "not set" at playback.
 
-**Not set vs all off:** a song with **no line** is "not set": nothing is sent and the organ stays as it is. A song with an **empty** line (`402=`) is "all off": the all-off SysEx and nothing else. The page only enables Save after a tab was changed, and its "Not set" button removes the line.
+**Not set vs all off:** a song with **no line** is "not set": nothing is sent and the organ stays as it is. A song with an **empty** line (`402=`) is "all off": the all-off SysEx and nothing else. The page only enables Uložit (Save) after a tab was changed, and its "Zrušit nastavení" button removes the line. A song shows "nenastaveno" (not set) or "vše vypnuto" (all off).
 
 **At song start** (`CommHandler::doPlay`), after the organ warm-up, if the song has a line and `[ORGAN] StopsEnabled` is true: the all-off SysEx, `AllOffDelayMs`, one Program Change per stop (ascending, on `Channel`, `StopDelayMs` apart and after the last), then the song, all on the same MIDI output port. A stop or a new song during the sequence ends it as during the warm-up. While such a song plays, its own Program Changes are dropped (`DropSongProgramChanges`). Add-verse and replays do not resend stops. The log gets `Stops for 401: 3 4 5 14` (or `not set`, `all off`, `disabled`), also shown as the Software status field `stops`. `stops.conf` is read at each song start, never through the web server's store, so a stops problem can never stop a song from playing.
+
+**Stop names** default to Czech organ terminology as used in Czech parish dispositions (divisions "Pedál", "I. manuál – hlavní stroj", "II. manuál – žaluziový stroj"; stops noun first, e.g. "Flétna trubicová 8'", mixtures by ranks, e.g. "Mixtura 3řadá"), mapped from the Opus 910 console's Dutch labels (the mapping is commented in `src/organ.cpp`). `NameN` and `Groups` override them.
 
 **`[ORGAN]` keys** (all optional, defaults are the Johannus Opus 910; see `config.conf`): `StopsEnabled`, `Channel`, `ProgramOffset` (program = octal ST number + offset), `ST1`..`ST42`, `Program1`..`Program42` (override), `DropSongProgramChanges`, `AllOffSysex`, `AllOffDelayMs`, `StopDelayMs`, `Groups`, `Name1`..`Name42`.
 
@@ -245,7 +257,7 @@ A new optional section in `config.conf`:
 | `Port` | `50118` | 1–65535, else the config fails to load |
 | `Bind` | `0.0.0.0` | non-empty; must be an IPv4 address. This is checked only when binding: an invalid value logs an ERROR and keeps retrying. |
 
-There is no login and no HTTPS, by design: the page is meant for a trusted LAN (its only write is the Stops tab). Use `Bind = 127.0.0.1` to keep it local.
+There is no login and no HTTPS, by design: the page is meant for a trusted LAN (its only write is the stops editor). Use `Bind = 127.0.0.1` to keep it local.
 
 **Port clash:** the superpowers brainstorm companion server also uses 50118. Don't run it while the service is running or being tested.
 

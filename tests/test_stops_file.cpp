@@ -100,8 +100,8 @@ TEST(stops_parse_body) {
 TEST(stops_json_shape) {
     std::string j = toJson(mc::organ::defaultOrgan(), {"401", "403"}, {{"401", {3}}});
     CHECK(has(j, "\"schema\":1"));
-    CHECK(has(j, "{\"label\":\"PEDAL\",\"first\":8,\"last\":16}"));
-    CHECK(has(j, "\"8\":\"Double Bass 16'\""));
+    CHECK(has(j, "{\"label\":\"Pedál\",\"first\":8,\"last\":16}"));
+    CHECK(has(j, "\"8\":\"Kontrabas 16'\""));
     CHECK(has(j, "{\"code\":\"401\",\"stops\":[3]}"));
     CHECK(has(j, "{\"code\":\"403\",\"stops\":null}"));
 }

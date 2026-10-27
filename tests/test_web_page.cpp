@@ -30,7 +30,8 @@ TEST(web_page_fetch_times_out) {
     // A frozen service must turn the page to "no connection", not just age it.
     const std::string& html = mc::web::statusPageHtml();
     CHECK(has(html, "AbortController"));
-    CHECK(has(html, "no connection"));
+    CHECK(has(html, "bez spojení"));
+    CHECK(has(html, "stale"));  // the last known state is greyed out
 }
 
 TEST(web_page_has_diagnostics_tab) {
@@ -47,15 +48,36 @@ TEST(web_page_has_diagnostics_tab) {
     CHECK(!has(html, "https://"));
 }
 
-TEST(web_page_has_stops_tab) {
+TEST(web_page_home_and_advanced) {
     const std::string& html = mc::web::statusPageHtml();
-    CHECK(has(html, "Stops"));
+    CHECK(has(html, "Přehled"));     // home: health, now playing, stops
+    CHECK(has(html, "Pokročilé"));   // Advanced: the debug pages
+    CHECK(has(html, "#adv/"));
+    CHECK(has(html, "Právě hraje"));
+    CHECK(has(html, "Vše v pořádku"));
+    CHECK(has(html, "unseen_faults"));
+}
+
+TEST(web_page_has_stops_editor) {
+    const std::string& html = mc::web::statusPageHtml();
+    CHECK(has(html, "Rejstříky písní"));
     CHECK(has(html, "/api/stops"));
     CHECK(has(html, "application/json"));  // the PUT is refused without it
     CHECK(has(html, "PUT"));
-    CHECK(has(html, "not set"));           // no entry: the organ is left as it is
-    CHECK(has(html, "all off"));           // saved with zero stops
-    CHECK(has(html, "unsaved changes"));
-    CHECK(has(html, "Not set"));           // the button that forgets a song's stops
+    CHECK(has(html, "nenastaveno"));       // no entry: the organ is left as it is
+    CHECK(has(html, "vše vypnuto"));       // saved with zero stops
+    CHECK(has(html, "neuložené změny"));
+    CHECK(has(html, "Zrušit nastavení"));  // the button that forgets a song's stops
+    CHECK(has(html, "beforeunload"));
     CHECK(!has(html, "innerHTML"));
+}
+
+TEST(web_page_song_list_scales) {
+    // 100+ songs: search, filter, sort, a count, and the list keeps its scroll position on redraw.
+    const std::string& html = mc::web::statusPageHtml();
+    CHECK(has(html, "Hledat píseň"));
+    CHECK(has(html, "Nenastavené"));
+    CHECK(has(html, "nejvíc rejstříků"));
+    CHECK(has(html, "Zobrazeno "));
+    CHECK(has(html, "E.list.scrollTop=top"));
 }
