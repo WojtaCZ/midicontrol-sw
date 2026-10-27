@@ -146,6 +146,29 @@ TEST(stops_file_line_without_valid_stop_is_not_set) {
     CHECK(s.at("404") == (std::vector<int>{5}));
     CHECK(w.size() >= 4u);
 }
+TEST(stops_file_section_header_is_forgiving) {
+    std::vector<std::string> w;
+    CHECK(parse("[songs]\n401=1 2\n", 42, &w).at("401") == (std::vector<int>{1, 2}));
+    CHECK(parse("[Songs]\n401=3\n", 42, &w).at("401") == (std::vector<int>{3}));
+    CHECK(parse(" [SONGS] # mine\n401=4\n", 42, &w).at("401") == (std::vector<int>{4}));
+    CHECK(w.empty());
+}
+TEST(stops_file_without_header_is_songs) {
+    std::vector<std::string> w;
+    SongStops s = parse("# hand written\n401=1 2\n402=\n", 42, &w);
+    CHECK(s.at("401") == (std::vector<int>{1, 2}));
+    CHECK(s.at("402").empty());
+    CHECK(w.empty());
+}
+TEST(stops_file_other_section_lines_are_warned_and_dropped) {
+    std::vector<std::string> w;
+    SongStops s = parse("[SONGS]\n401=1\n[OTHER]\n402=2\n[songs]\n403=3\n", 42, &w);
+    CHECK(s.count("401") == 1u);
+    CHECK(s.count("402") == 0u);
+    CHECK(s.count("403") == 1u);
+    CHECK(w.size() == 1u);
+    CHECK(has(w[0], "402=2"));
+}
 TEST(stops_put_handler_validates) {
     mc::organ::OrganConfig o = mc::organ::defaultOrgan();
     std::string dir = makeTempDir();

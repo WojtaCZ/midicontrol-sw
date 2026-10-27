@@ -85,7 +85,7 @@ SongStops parse(const std::string& text, int stopCount, std::vector<std::string>
     SongStops out;
     std::istringstream in(text);
     std::string raw;
-    bool inSongs = false;
+    bool inSongs = true;  // key=value lines before any header count as [SONGS]
     int lineNo = 0;
     while (std::getline(in, raw)) {
         ++lineNo;
@@ -93,10 +93,22 @@ SongStops parse(const std::string& text, int stopCount, std::vector<std::string>
         if (line.empty() || line[0] == '#' || line[0] == ';') continue;
         std::string where = std::string(kFileName) + ":" + std::to_string(lineNo) + ": ";
         if (line[0] == '[') {
-            inSongs = (line == "[SONGS]");
+            // Like config.conf: case-insensitive name, optional trailing comment.
+            size_t close = line.find(']');
+            std::string name = close == std::string::npos ? line.substr(1) : line.substr(1, close - 1);
+            std::string rest = close == std::string::npos ? "" : trim(line.substr(close + 1));
+            std::transform(name.begin(), name.end(), name.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            name = trim(name);
+            inSongs = (name == "SONGS");
+            if (inSongs && !rest.empty() && rest[0] != '#' && rest[0] != ';')
+                warn(warnings, where + "ignored text after the section name: " + rest);
             continue;
         }
-        if (!inSongs) continue;
+        if (!inSongs) {
+            if (line.find('=') != std::string::npos) warn(warnings, where + "ignored line outside [SONGS]: " + line);
+            continue;
+        }
         size_t eq = line.find('=');
         if (eq == std::string::npos) {
             warn(warnings, where + "ignored line without '=': " + line);

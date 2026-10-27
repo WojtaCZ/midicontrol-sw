@@ -1029,6 +1029,7 @@ void CommHandler::playbackEnded(const std::string& how, const char* counter) {
     _status.set(Node::Software, "playback", std::string("idle"));
     _status.set(Node::Software, "song", std::string());
     _status.set(Node::Software, "section", std::string());
+    _status.set(Node::Software, "stops", std::string());
     _status.set(Node::Software, "last_song", code);
     _status.set(Node::Software, "last_sections", joined(sections));
     _status.set(Node::Software, "last_end", how);

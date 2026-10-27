@@ -244,6 +244,7 @@ function software(){
     {label:"Config",value:f(n,"config_path"),mono:true},
     {label:"Play folder",value:f(n,"play_folder")!=null?f(n,"play_folder")+" · "+(f(n,"song_count")||0)+" songs":null,mono:true},
     {label:"Playback",value:playbackText()},
+    {label:"Stops",value:f(n,"stops")||null},
     data.songs.length?{label:"Songs",node:songs}:{label:"Songs",value:null}];
   for(const s of data.songs)if(s.problem)details.push({label:"Song "+s.code,value:s.problem});
   const ended=c(n,"songs_ended"),stopped=c(n,"songs_stopped");
@@ -606,7 +607,7 @@ function renderTabs(){
 }
 function render(){
   renderTabs();
-  if(!data)return;
+  if(!data&&current()!=="stops")return;  // the Stops tab needs no status data
   const builders={overview,software,base,controller,diag,stops};
   const sec=builders[current()]();sec.classList.add("on");
   const main=document.getElementById("main");
@@ -635,6 +636,8 @@ async function poll(){
   setTimeout(poll,1000);
 }
 window.addEventListener("hashchange",render);
+// Reloading or closing the page with unsaved stop edits asks first.
+window.addEventListener("beforeunload",e=>{if(SP.dirty){e.preventDefault();e.returnValue="";}});
 setInterval(renderTop,500);
 renderTabs();
 poll();
