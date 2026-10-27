@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "midicontrol/log.hpp"
 #include "midicontrol/songs.hpp"
 #include "midicontrol/status_json.hpp"
 
@@ -107,9 +108,11 @@ SongStops parse(const std::string& text, int stopCount, std::vector<std::string>
             continue;
         }
         std::set<int> nums;
+        size_t tokens = 0;
         std::istringstream vals(line.substr(eq + 1));
         std::string tok;
         while (vals >> tok) {
+            ++tokens;
             bool digits = tok.size() <= 4;
             for (unsigned char c : tok) digits = digits && std::isdigit(c);
             int n = digits ? std::stoi(tok) : 0;
@@ -118,6 +121,11 @@ SongStops parse(const std::string& text, int stopCount, std::vector<std::string>
                 continue;
             }
             nums.insert(n);
+        }
+        if (tokens > 0 && nums.empty()) {
+            // Nothing usable: fail safe to "not set", never to "all off".
+            warn(warnings, where + "ignored line with no valid stop for " + *code);
+            continue;
         }
         out[*code] = std::vector<int>(nums.begin(), nums.end());
     }
@@ -131,7 +139,8 @@ std::string serialize(const SongStops& s) {
         return mc::songs::naturalLess(a->first, b->first);
     });
     std::string out =
-        "# Organ stops per song. Written by the web page; edit by hand only while the player is stopped.\n"
+        "# Organ stops per song. This file is rewritten by the web page on every save:\n"
+        "# comments and unreadable lines are not kept. Edit by hand only while the player is stopped.\n"
         "# CODE=stop numbers (empty = all stops off). A song without a line is left as it is.\n"
         "[SONGS]\n";
     for (auto* kv : items) out += kv->first + "=" + numbersText(kv->second) + "\n";
@@ -140,7 +149,12 @@ std::string serialize(const SongStops& s) {
 
 SongStops load(const std::string& path, int stopCount, std::vector<std::string>* warnings) {
     std::ifstream f(path, std::ios::binary);
-    if (!f) return {};
+    if (!f) {
+        // Only a missing file means "nothing set"; anything else must not be mistaken for it.
+        int e = errno;
+        if (e == ENOENT) return {};
+        throw std::runtime_error("stops: cannot read " + path + ": " + std::strerror(e));
+    }
     std::stringstream ss;
     ss << f.rdbuf();
     return parse(ss.str(), stopCount, warnings);
@@ -268,14 +282,23 @@ SongPlan planFor(const mc::organ::OrganConfig& organ, const SongStops& s, const 
 
 Store::Store(std::string path, int stopCount) : path_(std::move(path)), stopCount_(stopCount) {}
 
+namespace {
+SongStops loadLogged(const std::string& path, int stopCount) {
+    std::vector<std::string> warnings;
+    SongStops s = load(path, stopCount, &warnings);
+    for (const auto& w : warnings) mc::log::warn(mc::status::Node::Software, w);
+    return s;
+}
+}  // namespace
+
 SongStops Store::get() const {
     std::lock_guard<std::mutex> lk(mu_);
-    return load(path_, stopCount_, nullptr);
+    return loadLogged(path_, stopCount_);
 }
 
 void Store::put(const std::string& code, const std::optional<std::vector<int>>& stops) {
     std::lock_guard<std::mutex> lk(mu_);
-    SongStops s = load(path_, stopCount_, nullptr);
+    SongStops s = loadLogged(path_, stopCount_);
     if (stops) s[code] = *stops;
     else s.erase(code);
     save(path_, s);

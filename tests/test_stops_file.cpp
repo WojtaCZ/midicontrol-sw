@@ -75,8 +75,10 @@ TEST(stops_store_save_failure_keeps_file) {
     writeFile(path, "[SONGS]\n999=2\n");
     chmod(dir.c_str(), 0555);
     Store st(path, 42);
-    CHECK_THROWS(st.put("401", std::vector<int>{1}));
+    bool threw = false;
+    try { st.put("401", std::vector<int>{1}); } catch (const std::exception&) { threw = true; }
     chmod(dir.c_str(), 0755);
+    CHECK(threw);
     CHECK_EQ(readFile(path), std::string("[SONGS]\n999=2\n"));
 }
 TEST(stops_parse_body) {
@@ -120,4 +122,27 @@ TEST(stops_plan_for_song) {
     p = planFor(o, {{"401", {8}}}, "401");
     CHECK(p.preamble.empty());
     CHECK_EQ(p.text, std::string("disabled"));
+}
+TEST(stops_unreadable_file_is_not_treated_as_missing) {
+    if (geteuid() == 0) return;
+    std::string dir = makeTempDir();
+    std::string path = filePath(dir);
+    writeFile(path, "[SONGS]\n999=2\n");
+    chmod(path.c_str(), 0000);
+    Store st(path, 42);
+    bool threw = false;
+    try { st.put("401", std::vector<int>{1}); } catch (const std::exception&) { threw = true; }
+    chmod(path.c_str(), 0644);
+    CHECK(threw);
+    CHECK_EQ(readFile(path), std::string("[SONGS]\n999=2\n"));
+}
+TEST(stops_file_line_without_valid_stop_is_not_set) {
+    std::vector<std::string> w;
+    SongStops s = parse("[SONGS]\n401=x\n402=99\n403=\n404=0 5\n", 42, &w);
+    CHECK(s.count("401") == 0u);
+    CHECK(s.count("402") == 0u);
+    CHECK(s.count("403") == 1u);
+    CHECK(s.at("403").empty());
+    CHECK(s.at("404") == (std::vector<int>{5}));
+    CHECK(w.size() >= 4u);
 }
