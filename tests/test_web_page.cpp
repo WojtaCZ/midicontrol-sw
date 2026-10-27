@@ -46,3 +46,16 @@ TEST(web_page_has_diagnostics_tab) {
     CHECK(!has(html, "http://"));
     CHECK(!has(html, "https://"));
 }
+
+TEST(web_page_has_stops_tab) {
+    const std::string& html = mc::web::statusPageHtml();
+    CHECK(has(html, "Stops"));
+    CHECK(has(html, "/api/stops"));
+    CHECK(has(html, "application/json"));  // the PUT is refused without it
+    CHECK(has(html, "PUT"));
+    CHECK(has(html, "not set"));           // no entry: the organ is left as it is
+    CHECK(has(html, "all off"));           // saved with zero stops
+    CHECK(has(html, "unsaved changes"));
+    CHECK(has(html, "Not set"));           // the button that forgets a song's stops
+    CHECK(!has(html, "innerHTML"));
+}

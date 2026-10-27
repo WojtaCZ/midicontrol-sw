@@ -46,6 +46,45 @@ td{padding:2px 10px 2px 0;vertical-align:top}
 .dg .fl td:first-child{opacity:var(--muted);width:160px;white-space:nowrap}
 .dg .E{color:var(--red)}.dg .W{color:var(--yellow)}.dg .D{opacity:var(--muted)}
 .dg .unseen{color:var(--yellow);font-weight:600}
+/* Stops tab: the panel keeps its own dark wooden colours in both themes */
+.sp [hidden]{display:none}
+.sp-head{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin:0 0 10px}
+.sp-cur{font-weight:700;font-size:20px}
+.sp-count{opacity:.7}
+.sp-state{font-size:13px;padding:2px 8px;border-radius:10px;background:rgba(128,128,128,.2)}
+.sp-state.dirty{background:#e0a800;color:#000}
+.sp-err{color:var(--red)}
+.sp-panel{display:flex;flex-wrap:wrap;gap:12px 40px;padding:18px;border-radius:10px;background:#3b2a1e}
+.sp-col{display:flex;flex-direction:column;gap:8px}
+.sp-glabel{background:linear-gradient(#f3d77a,#c99a2e);color:#000;font-weight:700;font-size:13px;letter-spacing:.04em;text-align:center;padding:4px 8px;border-radius:3px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 1px 2px rgba(0,0,0,.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-group{display:flex;gap:5px}
+.sp-tab{appearance:none;border:0;margin:0;padding:0;font:inherit;width:44px;height:132px;border-radius:5px;position:relative;cursor:pointer;user-select:none;
+  background:#cfc6b4;color:#5a4a3a;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3);transition:background .1s,color .1s}
+.sp-tab[aria-pressed="true"]{background:#fff4d0;color:#1d140b;box-shadow:inset 0 0 0 3px #e0a800,0 0 10px rgba(255,200,60,.55)}
+.sp-tab:focus-visible{outline:2px solid #f3d77a;outline-offset:2px}
+.sp-num{position:absolute;top:30%;left:0;right:0;transform:translateY(-50%);text-align:center;font-weight:700;font-size:17px}
+.sp-name{position:absolute;top:45%;left:2px;right:2px;text-align:center;font-weight:600;font-size:9px;line-height:1.15;opacity:.85;overflow-wrap:anywhere;hyphens:auto}
+.sp-panel.notset .sp-tab{opacity:.45}
+.sp-actions{margin:12px 0 22px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;max-width:720px}
+.sp-actions button{font:inherit;font-size:15px;padding:8px 16px;cursor:pointer}
+.sp-actions button:disabled{opacity:.4;cursor:default}
+.sp-msg{flex:1 1 12em}  /* also pushes "Not set" to the right */
+.sp-msg:empty{flex-basis:0}
+.sp-msg.err{color:var(--red)}
+table.sp-songs{max-width:720px}
+.sp-songs th,.sp-songs td{padding:8px 10px;text-align:left;vertical-align:baseline;border-bottom:1px solid var(--line)}
+.sp-songs th button{appearance:none;border:0;padding:0;background:none;color:inherit;font:inherit;font-size:13px;font-weight:600;text-transform:uppercase;opacity:.75;cursor:pointer}
+.sp-songs th[aria-sort="ascending"] button::after{content:" ▲"}
+.sp-songs th[aria-sort="descending"] button::after{content:" ▼"}
+.sp-row{cursor:pointer}
+.sp-row:hover{background:rgba(128,128,128,.12)}
+.sp-row.sel{background:rgba(224,168,0,.18)}
+.sp-list{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+.sp-none{opacity:.5;font-style:italic}
+@media (max-width:900px){.sp-tab{width:34px;height:102px}.sp-name{font-size:8px}}
+/* phone: a 13-stop group must fit next to the main and panel padding (16+16, 10+10) */
+@media (max-width:520px){.sp-panel{padding:10px}.sp-tab{width:min(24px,calc((100vw - 88px)/13));height:72px}.sp-num{top:50%;font-size:13px}.sp-name{display:none}.sp-group{gap:3px}.sp-list{font-size:11px}}
 </style>
 </head>
 <body>
@@ -54,7 +93,7 @@ td{padding:2px 10px 2px 0;vertical-align:top}
 <main id="main"></main>
 <script>
 "use strict";
-const TABS=[["overview","Overview"],["software","Software"],["base","Base"],["controller","Controller"],["diag","Diagnostics"]];
+const TABS=[["overview","Overview"],["software","Software"],["base","Base"],["controller","Controller"],["diag","Diagnostics"],["stops","Stops"]];
 let data=null, fetchedAt=0, failed=false;
 
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e;}
@@ -399,6 +438,148 @@ function diagLoop(){
 }
 function diag(){diagSection();drawDiag();if(!DG.timer)diagLoop();return DG.sec;}
 
+// --- Stops tab: built once and cached (the 1 s status poll must not rebuild it or lose edits).
+// /api/stops is loaded when the tab is first opened and after each save, never polled. ---
+const SP={sec:null,E:{},tabs:{},loaded:false,groups:[],names:{},codes:[],saved:{},total:0,
+  cur:null,draft:new Set(),dirty:false,edits:0,busy:false,sortK:"code",sortDir:1};
+function spSorted(set){return [...set].sort((a,b)=>a-b);}
+async function spFetch(url,opts){
+  const ac=new AbortController(),timer=setTimeout(()=>ac.abort(),5000);
+  try{
+    const r=await fetch(url,Object.assign({cache:"no-store",signal:ac.signal},opts));
+    if(!r.ok)throw new Error((await r.text()).trim()||"HTTP "+r.status);
+    return await r.json();
+  }catch(e){throw e.name==="AbortError"?new Error("no answer from the player"):e;}
+  finally{clearTimeout(timer);}
+}
+function spMsg(text,err){SP.E.msg.textContent=text;SP.E.msg.className="sp-msg"+(err?" err":"");}
+async function spLoad(){
+  const E=SP.E;
+  try{
+    const j=await spFetch("/api/stops");
+    SP.groups=j.groups;SP.names=j.names;SP.codes=j.songs.map(s=>s.code);SP.saved={};
+    for(const s of j.songs)SP.saved[s.code]=s.stops;
+    SP.total=Math.max(0,...SP.groups.map(g=>g.last));
+    SP.loaded=true;E.load.replaceChildren();
+    spBuildPanel();
+    if(!SP.codes.includes(SP.cur)){SP.cur=SP.codes.length?SP.codes[0]:null;SP.dirty=false;}
+    if(!SP.dirty)SP.draft=new Set(SP.cur!=null&&SP.saved[SP.cur]||[]);
+  }catch(e){
+    const b=el("button",null,"Try again");b.onclick=spLoad;
+    E.load.replaceChildren(el("span","sp-err","Could not load the stops: "+e.message+" "),b);
+  }
+  spDraw();
+}
+function spBuildPanel(){
+  const p=SP.E.panel;SP.tabs={};p.replaceChildren();
+  for(const g of SP.groups){
+    const col=el("div","sp-col"),row=el("div","sp-group");
+    row.setAttribute("role","group");row.setAttribute("aria-label",g.label);
+    for(let n=g.first;n<=g.last;n++){
+      const name=SP.names[n]||"",t=el("button","sp-tab");
+      t.type="button";t.title=name;t.setAttribute("aria-label",n+" "+name);
+      t.append(el("span","sp-num",n),el("span","sp-name",name));
+      t.onclick=()=>{if(SP.draft.has(n))SP.draft.delete(n);else SP.draft.add(n);spChanged();};
+      SP.tabs[n]=t;row.append(t);
+    }
+    col.append(el("div","sp-glabel",g.label),row);p.append(col);
+  }
+}
+function spChanged(){SP.dirty=true;SP.edits++;spMsg("");spDraw();}
+function spDraw(){
+  const E=SP.E,cur=SP.cur,saved=cur!=null?SP.saved[cur]:undefined,has=cur!=null;
+  E.panel.hidden=E.actions.hidden=!has;
+  E.cur.textContent=has?"Song "+cur:SP.loaded?"No songs in the play folder":"Loading the stops…";
+  E.count.textContent="";E.state.hidden=!has;
+  if(has){
+    if(SP.dirty){E.state.textContent="unsaved changes";E.state.className="sp-state dirty";}
+    else if(saved===null)E.state.textContent="not set: organ stops are left as they are";
+    else E.state.textContent=saved.length?"saved":"saved: all stops off";
+    if(!SP.dirty)E.state.className="sp-state";
+    if(SP.dirty||saved!==null)E.count.textContent=SP.draft.size+" of "+SP.total+" on";
+  }
+  E.panel.classList.toggle("notset",saved===null&&!SP.dirty);
+  for(const [n,t] of Object.entries(SP.tabs))t.setAttribute("aria-pressed",SP.draft.has(Number(n))?"true":"false");
+  E.save.disabled=!SP.dirty||SP.busy;
+  E.alloff.disabled=SP.busy;
+  E.notset.disabled=(saved===null&&!SP.dirty)||SP.busy;
+  spDrawSongs();
+}
+function spListCmp(a,b){
+  if(a===null||b===null)return (a!==null)-(b!==null);  // "not set" before everything
+  for(let i=0;i<a.length&&i<b.length;i++)if(a[i]!==b[i])return a[i]-b[i];
+  return a.length-b.length;
+}
+function spCmp(a,b){
+  const byCode=a.code.localeCompare(b.code,undefined,{numeric:true});
+  const d=SP.sortK==="code"?byCode:SP.sortK==="n"?a.n-b.n:spListCmp(a.v,b.v);
+  return d*SP.sortDir||byCode;
+}
+function spDrawSongs(){
+  const E=SP.E;E.tbody.replaceChildren();
+  const rows=SP.codes.map(c=>{const v=SP.saved[c];return {code:c,v:v===null?null:spSorted(v),n:v===null?-1:v.length};});
+  for(const r of rows.sort(spCmp)){
+    const tr=el("tr","sp-row"+(r.code===SP.cur?" sel":"")),list=el("td","sp-list");
+    tr.tabIndex=0;
+    if(r.code===SP.cur)tr.setAttribute("aria-current","true");
+    list.append(r.v===null?el("span","sp-none","not set"):r.v.length?document.createTextNode(r.v.join(" ")):el("span","sp-none","all off"));
+    tr.append(el("td",null,r.code),el("td",null,r.n<0?"–":r.n),list);
+    tr.onclick=()=>spPick(r.code);
+    tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();spPick(r.code);}};
+    E.tbody.append(tr);
+  }
+  for(const th of E.ths)th.setAttribute("aria-sort",th.dataset.k!==SP.sortK?"none":SP.sortDir>0?"ascending":"descending");
+}
+function spPick(code){
+  if(code===SP.cur)return;
+  if(SP.dirty&&!confirm("Discard unsaved changes to song "+SP.cur+"?"))return;
+  SP.cur=code;SP.draft=new Set(SP.saved[code]||[]);SP.dirty=false;spMsg("");spDraw();
+}
+// PUT one song (stops = array, or null = "Not set"). A failure keeps the edits and shows the reason.
+async function spPut(stops){
+  const code=SP.cur,edits=SP.edits;
+  SP.busy=true;spMsg("");spDraw();
+  let ok=false;
+  try{
+    const j=await spFetch("/api/stops/"+encodeURIComponent(code),
+      {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({stops})});
+    SP.saved[code]=j.stops;
+    if(SP.cur===code&&SP.edits===edits){SP.dirty=false;SP.draft=new Set(j.stops||[]);}
+    ok=true;
+  }catch(e){spMsg("Not saved: "+e.message,true);}
+  SP.busy=false;spDraw();
+  if(ok)spLoad();
+  return ok;
+}
+function stops(){
+  if(SP.sec)return SP.sec;
+  const s=el("section","sp"),E=SP.E;
+  const head=el("div","sp-head");
+  E.cur=el("span","sp-cur");E.count=el("span","sp-count");E.state=el("span","sp-state");
+  head.append(E.cur,E.count,E.state);
+  E.load=el("div");E.panel=el("div","sp-panel");E.actions=el("div","sp-actions");
+  E.save=el("button",null,"Save");E.alloff=el("button",null,"All off");E.notset=el("button",null,"Not set");
+  E.msg=el("span","sp-msg");E.msg.setAttribute("role","status");
+  E.save.onclick=async()=>{
+    if(await spPut(spSorted(SP.draft))){E.save.textContent="Saved ✓";setTimeout(()=>{E.save.textContent="Save";},1200);}
+  };
+  E.alloff.onclick=()=>{if(SP.draft.size||SP.saved[SP.cur]===null){SP.draft.clear();spChanged();}};
+  E.notset.onclick=()=>{
+    if(confirm("Forget the stops of song "+SP.cur+"? The organ will then be left as it is when this song starts."))spPut(null);
+  };
+  E.actions.append(E.save,E.alloff,E.msg,E.notset);
+  const t=el("table","sp-songs"),thead=el("thead"),hr=el("tr");E.ths=[];
+  for(const [k,name] of [["code","Song"],["n","Stops on"],["list","Stops"]]){
+    const th=el("th"),b=el("button",null,name);th.dataset.k=k;b.type="button";
+    b.onclick=()=>{if(SP.sortK===k)SP.sortDir=-SP.sortDir;else{SP.sortK=k;SP.sortDir=1;}spDrawSongs();};
+    th.append(b);hr.append(th);E.ths.push(th);
+  }
+  E.tbody=el("tbody");thead.append(hr);t.append(thead,E.tbody);
+  s.append(head,E.load,E.panel,E.actions,t);
+  SP.sec=s;spDraw();spLoad();
+  return s;
+}
+
 // --- page ---
 function current(){const h=location.hash.slice(1);return TABS.some(x=>x[0]===h)?h:"overview";}
 function renderTabs(){
@@ -412,10 +593,10 @@ function renderTabs(){
 function render(){
   renderTabs();
   if(!data)return;
-  const builders={overview,software,base,controller,diag};
+  const builders={overview,software,base,controller,diag,stops};
   const sec=builders[current()]();sec.classList.add("on");
   const main=document.getElementById("main");
-  if(main.firstChild!==sec)main.replaceChildren(sec);  // the cached Diagnostics section keeps its input focus
+  if(main.firstChild!==sec)main.replaceChildren(sec);  // the cached Diagnostics and Stops sections keep focus and edits
 }
 function renderTop(){
   const u=document.getElementById("upd");u.replaceChildren();
