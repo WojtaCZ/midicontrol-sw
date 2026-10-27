@@ -150,7 +150,7 @@ Field names, which are the contract between `CommHandler`, `main` and the page:
 | controller | `last_rx_ms`, `last_cmd`, `last_cmd_reply`, `last_cmd_ms`, `last_tx`, `last_tx_result`, `last_tx_ms` | the same packet counters, plus `cmd.<MSGTYPE>` per received command |
 | base, controller (INFO_RESP) | `info_ms`, `info_unsupported`, `fw_revision`, `fw_branch`, `fw_built`, `fw_dirty`, `uptime_ms`, `reset_cause`, `fault_count`, `ble_connected`, `ble_stream_open`, `ble_secured`, `ble_bonded`, `ble_module_up`, `ble_peer_alive`, `ble_pc_alive`, `ble_peer`, `ble_name`, `ble_pairing`; base `display`, `ssr`; controller `battery_mv`, `battery_level`, `charging`, `charge_done`, `vbus`, `battery_critical`, `vbus_mv` (all null when not reported) | |
 
-Any other path returns 404 and any method other than GET returns 405. Malformed requests get 400, oversized ones (> 8 KiB) 413, and incomplete ones 408 after 3 s.
+Any other path returns 404 and any method other than GET (or PUT on `/api/stops/<code>`, see below) returns 405. Malformed requests get 400, oversized ones (> 8 KiB) 413, and incomplete ones 408 after 3 s.
 
 ### Isolation from playback
 
@@ -158,6 +158,39 @@ Any other path returns 404 and any method other than GET returns 405. Malformed 
 - It serves up to 8 connections at once (`poll()`), so an idle browser connection can't hold up the others. Each request has a 3 s deadline and an 8 KiB limit.
 - Writes use `MSG_NOSIGNAL`, and every exception is caught and logged.
 - If the port can't be bound (in use, or an invalid `Bind`), the server logs **one** ERROR and retries every 10 s while playback runs normally.
+
+---
+
+### Stops tab and `stops.conf`
+
+Each song can have a saved set of organ stops (rejstriky). The Stops tab of the status page lists the songs of the play folder, shows the organ's stops for the selected song and saves the set; at song start the player puts the organ in that state. The `.mid` files are never modified. Unlike the rest of the page this is a write path: there is no login (trusted LAN, as before), and `Bind = 127.0.0.1` keeps it local.
+
+**File:** `stops.conf` in the play folder, written only by the page (temp file, `fsync`, `rename`, so a crash or two phones saving at once cannot corrupt it) and fine to edit by hand:
+
+```ini
+[SONGS]
+401=3 4 5 14
+402=
+```
+
+One line per song, `CODE=numbers separated by spaces`, each in 1..stop count. A save changes only that song's line; lines of songs no longer in the folder are kept. A bad line or number is skipped with a warning in the log. An unreadable file (permissions) is an error for the page (500) and leaves the song "not set" at playback.
+
+**Not set vs all off:** a song with **no line** is "not set": nothing is sent and the organ stays as it is. A song with an **empty** line (`402=`) is "all off": the all-off SysEx and nothing else. The page only enables Save after a tab was changed, and its "Not set" button removes the line.
+
+**At song start** (`CommHandler::doPlay`), after the organ warm-up, if the song has a line and `[ORGAN] StopsEnabled` is true: the all-off SysEx, `AllOffDelayMs`, one Program Change per stop (ascending, on `Channel`, `StopDelayMs` apart and after the last), then the song, all on the same MIDI output port. A stop or a new song during the sequence ends it as during the warm-up. While such a song plays, its own Program Changes are dropped (`DropSongProgramChanges`). Add-verse and replays do not resend stops. The log gets `Stops for 401: 3 4 5 14` (or `not set`, `all off`, `disabled`), also shown as the Software status field `stops`. `stops.conf` is read at each song start, never through the web server's store, so a stops problem can never stop a song from playing.
+
+**`[ORGAN]` keys** (all optional, defaults are the Johannus Opus 910; see `config.conf`): `StopsEnabled`, `Channel`, `ProgramOffset` (program = octal ST number + offset), `ST1`..`ST42`, `Program1`..`Program42` (override), `DropSongProgramChanges`, `AllOffSysex`, `AllOffDelayMs`, `StopDelayMs`, `Groups`, `Name1`..`Name42`.
+
+**API** (`Content-Type: application/json` required on PUT, else 415, so a plain cross-site form cannot post):
+
+- `GET /api/stops` -> `{"schema":1,"groups":[{"label":"PEDAL","first":8,"last":16},...],"names":{"1":"..."},"songs":[{"code":"401","stops":[3,4,5]},{"code":"403","stops":null}]}`; `null` = not set. 500 with the error text if the file is unreadable.
+- `PUT /api/stops/<CODE>` with `{"stops":[...]}` saves the set, `{"stops":null}` removes the entry. The code is upper-cased like song codes and must be a song in the folder; unknown code, bad body or numbers out of range -> 400; a failed write -> 500 with the error text. Success returns `{"code":"401","stops":[...]}`.
+
+**Open items (need someone at the organ):**
+
+1. Verify the program numbers: in a MIDI monitor on the organ's MIDI OUT press Double Bass 16' (ST01): program 0 = the default offset -1, program 1 = set `ProgramOffset=0`. Then Swell to Great (ST60): 47 (48 with offset 0) confirms the octal rule. A stop that doesn't fit gets its `ProgramN`.
+2. Verify that the all-off SysEx works on the Opus 910 and that `AllOffDelayMs = 100` is enough.
+3. `songs/rejstriky.mid` is a recording, not a song (its name is not a valid code, so the song check flags it); move it out of the play folder when no longer needed.
 
 ---
 
@@ -210,7 +243,7 @@ A new optional section in `config.conf`:
 | `Port` | `50118` | 1–65535, else the config fails to load |
 | `Bind` | `0.0.0.0` | non-empty; must be an IPv4 address. This is checked only when binding: an invalid value logs an ERROR and keeps retrying. |
 
-There is no login and no HTTPS, by design: the page is read-only and meant for a trusted LAN. Use `Bind = 127.0.0.1` to keep it local.
+There is no login and no HTTPS, by design: the page is meant for a trusted LAN (its only write is the Stops tab). Use `Bind = 127.0.0.1` to keep it local.
 
 **Port clash:** the superpowers brainstorm companion server also uses 50118. Don't run it while the service is running or being tested.
 
@@ -239,7 +272,9 @@ Core library (`midicontrol_core`, no external dependencies, unit-tested):
 |---|---|
 | `status.hpp/.cpp` | `StatusRegistry` (thread-safe; per-node fields, counters, 200-event rings, 50-entry problems list; injected clock), `nodesForPeer`, the dot rules (`evaluateDot`) |
 | `status_json.hpp/.cpp` | `/api/status` JSON, UTF-8-safe `jsonEscape` |
-| `http.hpp/.cpp` | request parsing, routing, response building (no sockets) |
+| `http.hpp/.cpp` | request parsing (with body), routing, response building (no sockets) |
+| `organ.hpp/.cpp` | `[ORGAN]` layout (`OrganConfig`, Opus 910 defaults) and the song-start preamble bytes |
+| `stops_file.hpp/.cpp` | `stops.conf` parse/save, `Store`, `/api/stops` JSON, `planFor`, `handlePut` |
 | `web_page.hpp/.cpp` | the embedded page |
 | `songcheck.hpp/.cpp` | per-file checks and the incremental `Scanner` |
 | `console.hpp/.cpp` | command-line parsing (shared by standalone and attached mode), path absolutizing, reply markers |

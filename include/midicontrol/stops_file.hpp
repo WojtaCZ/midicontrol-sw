@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "midicontrol/http.hpp"
 #include "midicontrol/organ.hpp"
 #include "midicontrol/playback.hpp"
 
@@ -62,6 +63,13 @@ private:
     int stopCount_;
     mutable std::mutex mu_;
 };
+
+// PUT /api/stops/<rawCode>: the code is sanitised and must be one of `songCodes`, the body parsed
+// with parseBody. 200 with entryJson, 400 for any invalid input, 500 (text/plain, the error
+// text) when the store cannot read or write the file.
+mc::http::Response handlePut(Store& store, const mc::organ::OrganConfig& organ,
+                             const std::vector<std::string>& songCodes, const std::string& rawCode,
+                             const std::string& body);
 
 }  // namespace mc::stops
 

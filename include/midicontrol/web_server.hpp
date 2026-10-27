@@ -8,13 +8,16 @@
 #include <vector>
 
 #include "midicontrol/http.hpp"
+#include "midicontrol/organ.hpp"
 #include "midicontrol/songcheck.hpp"
+#include "midicontrol/stops_file.hpp"
 #include "midicontrol/diag_store.hpp"
 #include "midicontrol/status.hpp"
 
 namespace mc {
 
-// Read-only status page on its own thread: GET / and GET /api/status.
+// Status page on its own thread: GET / and GET /api/status; the only write is the
+// organ-stops store (GET /api/stops, PUT /api/stops/<code>).
 //
 // Isolation from playback: it only reads StatusRegistry snapshots (never a
 // CommHandler or Player lock), multiplexes at most 8 connections with poll()
@@ -27,7 +30,8 @@ class WebServer {
 public:
     // `diag` (optional) serves GET /api/diag.
     WebServer(mc::status::StatusRegistry& status, std::string bind, int port,
-              std::string playFolder, mc::diag::DiagStore* diag = nullptr);
+              std::string playFolder, const mc::organ::OrganConfig& organ,
+              mc::diag::DiagStore* diag = nullptr);
     ~WebServer();
 
     WebServer(const WebServer&) = delete;
@@ -55,6 +59,8 @@ private:
     std::string _bind;
     int _port;
     std::string _playFolder;
+    mc::organ::OrganConfig _organ;
+    mc::stops::Store _stops;  // owned here; doPlay reads stops.conf itself, never through this
     mc::diag::DiagStore* _diag;
     mc::songcheck::Scanner _scanner;
     int _listenFd = -1;

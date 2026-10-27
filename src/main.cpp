@@ -224,7 +224,8 @@ int main(int argc, char** argv) {
 
     std::unique_ptr<WebServer> web;
     if (config.webEnabled) {
-        web = std::make_unique<WebServer>(status, config.webBind, config.webPort, config.playFolder, &diagStore);
+        web = std::make_unique<WebServer>(status, config.webBind, config.webPort, config.playFolder,
+                                              config.organ, &diagStore);
         web->start();
     }
     ControlServer control(

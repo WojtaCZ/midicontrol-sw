@@ -11,6 +11,7 @@
 #include "midicontrol/protocol/codec.hpp"
 #include "midicontrol/protocol/constants.hpp"
 #include "midicontrol/songs.hpp"
+#include "midicontrol/stops_file.hpp"
 
 namespace mc {
 
@@ -1064,6 +1065,24 @@ void CommHandler::doPlay(const Command& cmd) {
         if (!_config.keepPowerOn) organOff();
     };
 
+    // The song's stops (stops.conf is read here, never through the web server's store).
+    // Any trouble with the file leaves the song "not set": it must still play.
+    PlaybackOptions opts;
+    opts.gapSeconds = _config.verseGapMs / 1000.0;
+    mc::stops::SongStops songStops;
+    try {
+        std::vector<std::string> warnings;
+        songStops = mc::stops::load(mc::stops::filePath(_config.playFolder), _config.organ.stopCount(), &warnings);
+        for (const auto& w : warnings) mc::log::warn(Node::Software, w);
+    } catch (const std::exception& e) {
+        mc::log::warn(Node::Software, std::string("Stops not read, treating ") + cmd.code + " as not set: " + e.what());
+    }
+    mc::stops::SongPlan plan = mc::stops::planFor(_config.organ, songStops, cmd.code);
+    opts.preamble = std::move(plan.preamble);
+    opts.dropProgramChanges = plan.dropProgramChanges;
+    mc::log::info(Node::Software, "Stops for " + cmd.code + ": " + plan.text);
+    _status.set(Node::Software, "stops", plan.text);
+
     auto ports = _midiFinder ? _midiFinder() : std::nullopt;
     if (!ports) {
         fail("MIDIControl MIDI output port not found");
@@ -1089,9 +1108,6 @@ void CommHandler::doPlay(const Command& cmd) {
         sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_ANCHOR, payload);
     };
     player->onFinished = [this, gen]() { post({Command::Kind::Finished, {}, {}, gen}); };
-
-    PlaybackOptions opts;
-    opts.gapSeconds = _config.verseGapMs / 1000.0;
 
     // SIGNAL_PLAYING goes out before the first SIGNAL_ANCHOR.
     sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_PLAYING,

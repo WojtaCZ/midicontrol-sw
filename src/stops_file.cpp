@@ -304,4 +304,20 @@ void Store::put(const std::string& code, const std::optional<std::vector<int>>& 
     save(path_, s);
 }
 
+mc::http::Response handlePut(Store& store, const mc::organ::OrganConfig& organ,
+                             const std::vector<std::string>& songCodes, const std::string& rawCode,
+                             const std::string& body) {
+    auto code = mc::songs::sanitizeCode(rawCode);
+    if (!code || std::find(songCodes.begin(), songCodes.end(), *code) == songCodes.end())
+        return mc::http::errorResponse(400);
+    auto stops = parseBody(body, organ.stopCount());
+    if (!stops) return mc::http::errorResponse(400);
+    try {
+        store.put(*code, *stops);
+    } catch (const std::exception& e) {
+        return mc::http::Response{500, "text/plain; charset=utf-8", std::string(e.what()) + "\n"};
+    }
+    return mc::http::Response{200, "application/json", entryJson(*code, *stops)};
+}
+
 }  // namespace mc::stops

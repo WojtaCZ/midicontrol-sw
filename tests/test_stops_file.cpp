@@ -146,3 +146,37 @@ TEST(stops_file_line_without_valid_stop_is_not_set) {
     CHECK(s.at("404") == (std::vector<int>{5}));
     CHECK(w.size() >= 4u);
 }
+TEST(stops_put_handler_validates) {
+    mc::organ::OrganConfig o = mc::organ::defaultOrgan();
+    std::string dir = makeTempDir();
+    std::string path = filePath(dir);
+    Store st(path, o.stopCount());
+    std::vector<std::string> songs = {"401", "406A"};
+
+    CHECK_EQ(handlePut(st, o, songs, "999", "{\"stops\":[1]}").status, 400);   // not in the folder
+    CHECK_EQ(handlePut(st, o, songs, "../x", "{\"stops\":[1]}").status, 400);  // not a song code
+    CHECK_EQ(handlePut(st, o, songs, "401", "{\"stops\":[0]}").status, 400);   // bad body
+    CHECK_EQ(handlePut(st, o, songs, "401", "nonsense").status, 400);
+
+    auto r = handlePut(st, o, songs, "401", "{\"stops\":[2,1]}");
+    CHECK_EQ(r.status, 200);
+    CHECK_EQ(r.body, std::string("{\"code\":\"401\",\"stops\":[1,2]}"));
+    CHECK(st.get().at("401") == (std::vector<int>{1, 2}));
+
+    r = handlePut(st, o, songs, "406a", "{\"stops\":[3]}");  // normalised like song codes
+    CHECK_EQ(r.status, 200);
+    CHECK(st.get().count("406A") == 1u);
+
+    r = handlePut(st, o, songs, "401", "{\"stops\":null}");
+    CHECK_EQ(r.status, 200);
+    CHECK_EQ(r.body, std::string("{\"code\":\"401\",\"stops\":null}"));
+    CHECK(st.get().count("401") == 0u);
+
+    if (geteuid() != 0) {
+        chmod(dir.c_str(), 0500);  // the save cannot create its temp file
+        r = handlePut(st, o, songs, "401", "{\"stops\":[1]}");
+        chmod(dir.c_str(), 0700);
+        CHECK_EQ(r.status, 500);
+        CHECK(!r.body.empty());
+    }
+}

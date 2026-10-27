@@ -13,6 +13,7 @@
 #include "midicontrol/diag_api.hpp"
 #include "midicontrol/http.hpp"
 #include "midicontrol/log.hpp"
+#include "midicontrol/songs.hpp"
 #include "midicontrol/status_json.hpp"
 #include "midicontrol/web_page.hpp"
 
@@ -57,8 +58,15 @@ void sendAll(int fd, const std::string& data) {
 }  // namespace
 
 WebServer::WebServer(mc::status::StatusRegistry& status, std::string bind, int port,
-                     std::string playFolder, mc::diag::DiagStore* diag)
-    : _status(status), _bind(std::move(bind)), _port(port), _playFolder(std::move(playFolder)), _diag(diag) {}
+                     std::string playFolder, const mc::organ::OrganConfig& organ,
+                     mc::diag::DiagStore* diag)
+    : _status(status),
+      _bind(std::move(bind)),
+      _port(port),
+      _playFolder(std::move(playFolder)),
+      _organ(organ),
+      _stops(mc::stops::filePath(_playFolder), _organ.stopCount()),
+      _diag(diag) {}
 
 WebServer::~WebServer() { stop(); }
 
@@ -146,9 +154,21 @@ bool WebServer::readConn(Conn& c) {
                         return mc::diag::apiDiag(*_diag, query, [this] { mc::diag::publishFaultStatus(*_diag, _status); });
                     };
                 }
-                respond(c.fd, mc::http::route(req, mc::web::statusPageHtml(), [this] {
-                    return mc::status::toJson(_status.snapshot());
-                }, diag));
+                mc::http::StopsApi api;
+                api.get = [this] {  // throws when stops.conf is unreadable; caught below -> 500
+                    return mc::stops::toJson(_organ, mc::songs::listSongs(_playFolder), _stops.get());
+                };
+                api.put = [this](const std::string& code, const std::string& body) {
+                    return mc::stops::handlePut(_stops, _organ, mc::songs::listSongs(_playFolder), code, body);
+                };
+                try {
+                    respond(c.fd, mc::http::route(req, mc::web::statusPageHtml(), [this] {
+                        return mc::status::toJson(_status.snapshot());
+                    }, diag, &api));
+                } catch (const std::exception& e) {
+                    mc::log::warn(Node::Software, std::string("Stops: ") + e.what());
+                    respond(c.fd, mc::http::Response{500, "text/plain; charset=utf-8", std::string(e.what()) + "\n"});
+                }
                 return true;
             }
             case mc::http::ParseResult::TooLarge:

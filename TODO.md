@@ -1,24 +1,16 @@
 # TODO
 
-## Per-song organ stops (rejstříky)
+## Organ stops: verify at the organ
 
-At the start of a song the organ's stops (rejstříky, e.g. bass flutes) must be set.
+Per-song stops are implemented (Stops tab, `stops.conf`, set at song start). Still to check on the Opus 910, see the spec's open items (`docs/superpowers/specs/2026-10-27-organ-stops-design.md`) and `docs/status-web-and-service.md`:
 
-- Each stop is switched by one MIDI command; the set of stops differs per song.
-- The user needs a way to define this per song: a per-song stops file
-  (e.g. next to the song file), listing which stops are on.
-- The stop commands are **toggles** and their state **cannot be read back** from the organ.
-  So we must either:
-  - track the current state of every stop in memory (and send only the toggles
-    needed to get from the current state to the song's state), or
-  - when the state is unknown (after startup, lost link, manual change), power-cycle
-    the organ: all stops start **off** after power-on, so the state is known again.
-- Open: where the tracked state lives (PC software vs. base firmware) and whether
-  it must survive a restart.
-- **Waiting on the user:** the MIDI command values for each stop.
+- Program numbers: press ST01 and ST60 with a MIDI monitor on the organ's OUT; adjust `ProgramOffset` or `ProgramN`.
+- The all-off SysEx works and 100 ms after it is enough.
+- Bench: the stops arrive before the first note.
+- Move `songs/rejstriky.mid` out of the play folder.
 
 ## Organ power behaviour between songs
 
 - Decide how organ power behaves between songs and during a session: stay on, turn off
-  after a pause, power-cycle to reset the stops (see "Per-song organ stops" above),
+  after a pause, power-cycle to reset the stops (see "Organ stops" above),
   what happens at the start and end of a session.
