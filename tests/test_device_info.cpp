@@ -75,10 +75,12 @@ TEST(devinfo_base_fields) {
 TEST(devinfo_remote_battery_fields) {
     Bytes p = {0x30, 2, 0x8B, 0x0F,  // 3979 mV
                0x31, 1, 3, 0x32, 1, 0x01 | 0x04, 0x33, 2, 0x88, 0x13,  // 5000 mV
+               0x34, 1, 81,  // 81 %
                0x06, 1, 0x00};
     auto f = devinfo::decode(p.data(), p.size());
     CHECK_EQ(get<int64_t>(f, "battery_mv"), 3979);
     CHECK_EQ(get<int64_t>(f, "battery_level"), 3);
+    CHECK_EQ(get<int64_t>(f, "battery_percent"), 81);
     CHECK(get<bool>(f, "charging"));
     CHECK(!get<bool>(f, "charge_done"));
     CHECK(get<bool>(f, "vbus"));

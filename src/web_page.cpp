@@ -116,11 +116,10 @@ main{max-width:1440px;margin:0 auto;padding:24px}
   animation:flow 2.4s linear infinite}
 .wire.bad{background:var(--red)}
 @keyframes flow{from{background-position:110% 0}to{background-position:-110% 0}}
-.batt{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--fg-3);border-radius:3px}
-.batt i{width:4px;height:8px;border-radius:1px;background:var(--line)}
-.batt i.on{background:var(--fg-2)}
-.batt.low{border-color:var(--amber)}.batt.low i.on{background:var(--amber)}
-.batt.crit{border-color:var(--red)}.batt.crit i.on{background:var(--red)}
+.batt{display:inline-block;width:24px;height:12px;padding:2px;border:1px solid var(--fg-3);border-radius:3px;box-sizing:border-box}
+.batt i{display:block;height:100%;border-radius:1px;background:var(--fg-2)}
+.batt.low{border-color:var(--amber)}.batt.low i{background:var(--amber)}
+.batt.crit{border-color:var(--red)}.batt.crit i{background:var(--red)}
 .now{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 20px;border-top:1px solid var(--line);background:var(--surface-2);border-radius:0 0 12px 12px}
 .now .k{display:flex;align-items:center;gap:8px;color:var(--fg-2);font-size:13px}
 .now .v{font-weight:600;font-size:15px}
@@ -380,10 +379,24 @@ function bleChips(n,peerName,withStream){
   add("ble_pc_alive","PC alive","PC not seen");
   return parts.join(" · ");
 }
+// State of charge in %. A remote firmware older than BATTERY_PERCENT sends only the voltage (and a 0..4 level):
+// the same Li-ion curve as the remote's logic/battery_soc.cpp, without its filtering.
+const BATT_CURVE=[[4180,100],[4100,92],[4000,82],[3920,72],[3870,64],[3820,55],[3790,47],[3760,39],[3730,31],[3700,23],[3670,16],[3630,10],[3560,5],[3450,2],[3300,0]];
+function pctFromMv(mv){
+  if(mv>=BATT_CURVE[0][0])return 100;
+  for(let i=1;i<BATT_CURVE.length;i++){const [hm,hp]=BATT_CURVE[i-1],[lm,lp]=BATT_CURVE[i];if(mv>=lm)return Math.round(lp+(mv-lm)*(hp-lp)/(hm-lm));}
+  return 0;
+}
+function battPct(n){
+  const p=f(n,"battery_percent");if(p!=null)return p;
+  const mv=f(n,"battery_mv");if(mv)return pctFromMv(mv);
+  const lv=f(n,"battery_level");return lv!=null?lv*25:null;
+}
+function battLow(n){const p=battPct(n);return p!=null&&p<=15&&!f(n,"vbus");}
 function battText(n){
-  const mv=f(n,"battery_mv"),lv=f(n,"battery_level");
-  if(mv==null&&lv==null)return null;
-  let s=(mv?(mv/1000).toFixed(2)+" V":"not measured yet")+(lv!=null?" · level "+lv+"/4":"");
+  const mv=f(n,"battery_mv"),p=battPct(n);
+  if(mv==null&&p==null)return null;
+  let s=(mv?(mv/1000).toFixed(2)+" V":"not measured yet")+(p!=null?" · "+p+" %":"");
   if(f(n,"battery_critical"))s+=" · CRITICAL";
   return s;
 }
@@ -503,9 +516,9 @@ function controllerSummary(){
 function controller(){
   const n="controller",heard=ago(f(n,"last_rx_ms"));
   const items=[controllerStatus(),["grey",heard?"Last heard "+heard:"Never heard"]];
-  const lv=f(n,"battery_level");
+  const p=battPct(n);
   if(f(n,"battery_critical"))items.push(["red","Battery critical"]);
-  else if(lv!=null)items.push([lv<=1&&!f(n,"vbus")?"yellow":"green","Battery "+lv+"/4"+(f(n,"charging")?", charging":"")]);
+  else if(p!=null)items.push([battLow(n)?"yellow":"green","Battery "+p+" %"+(f(n,"charging")?", charging":"")]);
   if(f(n,"fw_dirty"))items.push(["yellow","Firmware with uncommitted changes"]);
   if(data.nodes[n].unseen_faults>0)items.push(["yellow","Unseen fault (Diagnostics)"]);
   const cmd=f(n,"last_cmd"),tx=f(n,"last_tx");
@@ -645,9 +658,8 @@ function notices(){
   // A firmware fault resets the device; it recovers by itself, so the organist only needs to pass it on.
   if(data.nodes.base.unseen_faults>0)add(false,"Základna se po poruše firmwaru sama restartovala. Pokud vše hraje, stačí to říct správci.","#adv/diag");
   if(data.nodes.controller.unseen_faults>0)add(false,"Ovladač se po poruše firmwaru sám restartoval. Pokud vše hraje, stačí to říct správci.","#adv/diag");
-  const lv=f("controller","battery_level");
   if(f("controller","battery_critical"))add(true,"Baterie ovladače je vybitá. Nabijte ho.","#adv/controller");
-  else if(lv!=null&&lv<=1&&!f("controller","vbus"))add(false,"Baterie ovladače je slabá. Nabijte ho.","#adv/controller");
+  else if(battLow("controller"))add(false,"Baterie ovladače je slabá. Nabijte ho.","#adv/controller");
   const bad=data.songs.filter(s=>s.problem).map(s=>s.code);
   if(bad.length)add(false,(bad.length===1?"Soubor písně "+bad[0]+" má chybu a nemusí hrát správně."
     :"Soubory písní "+bad.join(", ")+" mají chybu a nemusí hrát správně.")+" Dejte vědět správci.","#adv/software");
@@ -673,7 +685,7 @@ function node(ic,name,color,state,fact,href){
 }
 function link(label,state){const l=el("div","link");l.append(el("span","lb",label),el("div","wire "+state));return l;}
 function fact(ic,text){const x=el("div","fact");if(ic)x.append(typeof ic==="string"?icon(ic):ic);x.append(el("span",null,text));return x;}
-function battery(lv,cls){const b=el("span","batt "+cls);for(let i=1;i<=4;i++)b.append(el("i",i<=lv?"on":null));return b;}
+function battery(p,cls){const b=el("span","batt "+cls),i=el("i");i.style.width=Math.max(0,Math.min(100,p))+"%";b.append(i);return b;}
 function systemPanel(list){
   const sw=data.nodes.software,bs=data.nodes.base,ct=data.nodes.controller;
   // Počítač
@@ -697,17 +709,17 @@ function systemPanel(list){
   // Ovladač (seen through the base's report)
   const fresh=baseReportFresh(),ble=fresh&&f("base","status_ble");
   let cState=!conn||!fresh?"Stav neznámý":ble?"Připojen":"Nepřipojen";
-  const lv=f("controller","battery_level"),crit=f("controller","battery_critical");
+  const bp=battPct("controller"),crit=f("controller","battery_critical");
   let cf=null;
-  if(lv!=null){
-    const low=crit?"crit":lv<=1&&!f("controller","vbus")?"low":"";
-    cf=fact(battery(lv,low),"Baterie "+lv+"/4"+(f("controller","charging")?", nabíjí se":crit?", vybitá":""));
+  if(bp!=null){
+    const low=crit?"crit":battLow("controller")?"low":"";
+    cf=fact(battery(bp,low),"Baterie "+bp+" %"+(f("controller","charging")?", nabíjí se":crit?", vybitá":""));
   }
   const cColor=!conn||!fresh?"grey":ble?ct.dot:(ct.dot==="green"?"grey":ct.dot);
   if(cColor!=="grey"&&cColor!=="green"){
     const why=[];
     if(ct.unseen_faults>0)why.push("porucha firmwaru");
-    if(crit)why.push("vybitá baterie");else if(lv!=null&&lv<=1&&!f("controller","vbus"))why.push("slabá baterie");
+    if(crit)why.push("vybitá baterie");else if(battLow("controller"))why.push("slabá baterie");
     if(why.length)cState+=" · "+why.join(", ");
   }
   const rc=node("remote","Ovladač",cColor,cState,cf,"#adv/controller");
