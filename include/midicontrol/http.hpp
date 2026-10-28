@@ -8,12 +8,16 @@
 
 // Minimal HTTP/1.1 for the status page: request parsing, routing and response
 // building as pure functions (the socket loop lives in the app layer). GET
-// serves the page and APIs; the only write is PUT /api/stops/<code> with a JSON
-// body. Every response closes the connection.
+// serves the page and APIs; the writes are PUT /api/stops/<code> with a JSON
+// body and POST /api/firmware/<base|remote> with the update file as
+// application/octet-stream. Every response closes the connection.
 namespace mc::http {
 
 inline constexpr size_t kMaxRequest = 8192;  // head + body
 inline constexpr size_t kMaxBody = 4096;
+// POST /api/firmware/<target> only: a whole `<name>-update.bin` (the app regions are 112-128 KiB).
+inline constexpr size_t kMaxFirmwareBody = 512 * 1024;
+inline constexpr const char* kFirmwarePrefix = "/api/firmware/";
 
 struct Request {
     std::string method;
@@ -28,7 +32,8 @@ enum class ParseResult { Incomplete, Ok, Bad, TooLarge };
 // Parse the request in `buffer` (all bytes received so far). Complete once the
 // blank line ("\r\n\r\n") and then Content-Length body bytes have arrived;
 // TooLarge when head + body exceed `maxSize` or Content-Length exceeds
-// kMaxBody; Bad when the request line is not "METHOD SP /target SP HTTP/1.x"
+// kMaxBody (for POST /api/firmware/...: the head exceeds `maxSize` or the body
+// kMaxFirmwareBody); Bad when the request line is not "METHOD SP /target SP HTTP/1.x"
 // or Content-Length is not a number. Header names are case-insensitive.
 ParseResult parseRequest(const std::string& buffer, Request& out, size_t maxSize = kMaxRequest);
 
@@ -54,13 +59,20 @@ struct StopsApi {
     std::function<Response(const std::string& code, const std::string& body)> put;  // PUT /api/stops/<code>
 };
 
+// Handler for POST /api/firmware/<target>; `post` validates target and image.
+struct FirmwareApi {
+    std::function<Response(const std::string& target, const std::string& body)> post;
+};
+
 // GET / -> the page, GET /api/status -> statusJson(), GET /api/diag -> diagJson(query) (404 without a
 // handler), GET /api/stops -> stops->get(), PUT /api/stops/<code> -> stops->put(code, body) (415 unless
 // Content-Type is application/json, so a plain cross-site form cannot post; 404 without `stops`),
+// POST /api/firmware/<target> -> firmware->post(target, body) (415 unless Content-Type is
+// application/octet-stream, which a cross-site form cannot send; 404 without `firmware`),
 // other paths 404, other methods 405.
 Response route(const Request& req, const std::string& html,
                const std::function<std::string()>& statusJson, const DiagHandler& diagJson = nullptr,
-               const StopsApi* stops = nullptr);
+               const StopsApi* stops = nullptr, const FirmwareApi* firmware = nullptr);
 
 }  // namespace mc::http
 

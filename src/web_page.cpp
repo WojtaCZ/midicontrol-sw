@@ -218,6 +218,22 @@ table{border-collapse:collapse;width:100%}
 .dg-bar select,.dg-bar input{height:32px;font:inherit;font-size:13px;color:var(--fg);background:var(--surface);border:1px solid var(--line-2);border-radius:7px;padding:0 10px}
 .dg-bar input{width:12em}.dg-bar input.wide{width:18em;flex:0 1 auto}
 .unseen{color:var(--amber-fg);font-weight:600}
+.fw-drop{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:22px 16px;text-align:center;cursor:pointer;
+  border:1.5px dashed var(--line-2);border-radius:10px;color:var(--fg-2);transition:background .15s,border-color .15s}
+.fw-drop:hover,.fw-drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--fg)}
+.fw-drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.fw-drop .ic{width:26px;height:26px;color:var(--accent-text)}
+.fw-drop input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.fw-drop.off{cursor:default;opacity:.55}.fw-drop.off:hover{border-color:var(--line-2);background:none;color:var(--fg-2)}
+.fw-file{margin-top:14px}
+.fw-err{display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:10px 14px;border-radius:8px;background:var(--red-soft);color:var(--fg)}
+.fw-err .ic{color:var(--red-fg)}
+.fw-act{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px}
+.fw-why{font-size:13px;color:var(--fg-2)}
+.fw-run{margin-top:14px;display:grid;gap:6px}
+.fw-bar{height:8px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
+.fw-bar i{display:block;height:100%;background:var(--accent);transition:width .4s}
+.fw-msg{font-size:13px;color:var(--fg-2);overflow-wrap:anywhere}
 
 @media (max-width:1100px){.sp-body{grid-template-columns:1fr}.sp-side{position:static;max-height:none;border-right:0;border-bottom:1px solid var(--line)}.sp-songs{flex:none;max-height:260px}}
 @media (max-width:860px){
@@ -261,6 +277,7 @@ table{border-collapse:collapse;width:100%}
 <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 10v4M12 17.2v.1"/></symbol>
 <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.2 9.5"/></symbol>
 <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15.5V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 14.5v3a2.5 2.5 0 0 0 2.5 2.5h11a2.5 2.5 0 0 0 2.5-2.5v-3"/></symbol>
 <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
 </svg>
 <template id="ic"><svg class="ic" aria-hidden="true"><use href=""></use></svg></template>
@@ -272,7 +289,7 @@ table{border-collapse:collapse;width:100%}
 <main id="main"></main>
 <script>
 "use strict";
-const ADV=[["overview","Overview"],["software","Software"],["base","Base"],["controller","Controller"],["diag","Diagnostics"]];
+const ADV=[["overview","Overview"],["software","Software"],["base","Base"],["controller","Controller"],["diag","Diagnostics"],["firmware","Firmware"]];
 let data=null, fetchedAt=0, failed=false;
 
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e;}
@@ -646,6 +663,128 @@ function diagLoop(){
 }
 function diag(){diagSection();drawDiag();if(!DG.timer)diagLoop();return DG.sec;}
 
+// --- Firmware page: one card per unit; built once (the chosen file must survive the 1 s redraw) ---
+// The file is the <name>-update.bin of the firmware build. Its trailer is read here before anything is
+// sent, so the other unit's image is refused at once; the service (fwimage::check) and the device
+// (FW_UPDATE_START target, FW_UPDATE_END trailer) check it again.
+const FW_UNITS={2:"base",3:"controller"};
+const FW_MAX=512*1024;  // http::kMaxFirmwareBody
+const FW={sec:null,cards:{}};
+const CRC_T=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRC_T[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+// The trailer (24 B at the end): imageSize, imageCrc, version, boardId, format, reserved, trailerCrc, magic.
+function fwInspect(buf,board){
+  const b=new Uint8Array(buf),dv=new DataView(buf),use="Use the <name>-update.bin from the firmware's build folder.";
+  if(!b.length)return {error:"The file is empty."};
+  if(b[0]===0x7F&&b[1]===0x45&&b[2]===0x4C&&b[3]===0x46)return {error:"This is an ELF file. "+use};
+  if(b[0]===0x3A)return {error:"This looks like an Intel hex file. "+use};
+  if(b.length<24||dv.getUint32(b.length-4,true)!==0x4D43544C)return {error:"No update trailer: this looks like a plain .bin. "+use};
+  const t=b.length-24;
+  if(crc32(b.subarray(t,t+16))!==dv.getUint32(t+16,true)||b[t+13]!==1)return {error:"The update trailer is corrupt or of an unknown format."};
+  const id=b[t+12],size=dv.getUint32(t,true),v=dv.getUint32(t+8,true);
+  const r={board:id,size:b.length,version:(v>>>16)+"."+((v>>>8)&255)+"."+(v&255)};
+  if(id!==board)return Object.assign(r,{error:FW_UNITS[id]?"This is the "+FW_UNITS[id]+" firmware, not the "+FW_UNITS[board]+
+    " firmware. Drop it on the "+(FW_UNITS[id]==="base"?"Base":"Controller")+" card.":"Built for an unknown unit (board ID "+id+")."});
+  if(size!==t)return Object.assign(r,{error:"The image size in the trailer does not match the file."});
+  if(crc32(b.subarray(0,size))!==dv.getUint32(t+4,true))return Object.assign(r,{error:"The image CRC does not match: the file is damaged."});
+  return r;
+}
+async function fwPick(C,file){
+  C.file=file;C.check=null;C.sent=null;
+  if(!file){fwDraw();return;}
+  C.check=file.size>FW_MAX?{error:"The file is too large for an update file ("+file.size+" bytes)."}:fwInspect(await file.arrayBuffer(),C.board);
+  if(C.file===file)fwDraw();
+}
+// Why the Flash button is off right now ("" = it may be pressed).
+function fwBlocked(C){
+  if(f("software","fw_update_state")==="running")return "A firmware update is running.";
+  if((f("software","playback")||"idle")!=="idle")return "A song is playing; stop it first.";
+  if(!f("base","connected")||f("base","alive")===false)return "The base is not connected.";
+  if(C.node==="controller"&&!(baseReportFresh()&&f("base","status_ble")))return "The controller is not connected to the base.";
+  return "";
+}
+async function fwFlash(C){
+  const file=C.file,ck=C.check;
+  if(!file||!ck||ck.error||fwBlocked(C))return;
+  if(!confirm("Flash "+C.name+" firmware "+ck.version+" from "+file.name+"?"+(C.node==="base"?
+    " The base restarts; playback and the controller link stop for about a minute.":" The controller restarts when it is done.")))return;
+  C.busy=true;C.sent=null;fwDraw();
+  try{
+    const r=await fetch("/api/firmware/"+C.key,{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:await file.arrayBuffer()});
+    let j={};try{j=await r.json();}catch(e){}
+    C.sent=r.status===202?{ok:true}:{error:j.error||("Refused ("+r.status+").")};
+    if(r.status===202){C.file=null;C.check=null;C.E.input.value="";}
+  }catch(e){C.sent={error:"The upload did not reach the player."};}
+  C.busy=false;fwDraw();
+}
+function fwCard(key,node,name,board,fileName){
+  const C={key,node,name,board,file:null,check:null,sent:null,busy:false,E:{}},E=C.E;
+  E.cur=el("div");
+  E.drop=el("label","fw-drop");E.input=el("input");E.input.type="file";E.input.accept=".bin";
+  E.input.onchange=()=>fwPick(C,E.input.files[0]||null);
+  const hint=el("span");hint.append(document.createTextNode("Drop "),el("b","mono",fileName),document.createTextNode(" here or choose it"));
+  E.drop.append(E.input,icon("upload"),hint,el("span","fw-why","from build/ of the "+name+" firmware; .elf, .hex and plain .bin are refused"));
+  E.drop.addEventListener("dragover",e=>{e.preventDefault();E.drop.classList.add("over");});
+  E.drop.addEventListener("dragleave",()=>E.drop.classList.remove("over"));
+  E.drop.addEventListener("drop",e=>{e.preventDefault();E.drop.classList.remove("over");
+    if(!C.busy&&e.dataTransfer.files.length)fwPick(C,e.dataTransfer.files[0]);});
+  E.file=el("div","fw-file");E.run=el("div","fw-run");
+  E.flash=el("button","btn primary","Flash "+name);E.flash.onclick=()=>fwFlash(C);
+  E.clear=el("button","btn quiet","Clear");E.clear.onclick=()=>{E.input.value="";fwPick(C,null);};
+  E.why=el("span","fw-why");E.act=el("div","fw-act");E.act.append(E.flash,E.clear,E.why);
+  E.state=el("span","badge");
+  const body=el("div","pb");body.append(E.cur,E.drop,E.file,E.act,E.run);
+  C.panel=panel((name==="base"?"Base":"Controller")+" firmware",body,E.state);
+  FW.cards[key]=C;
+  return C.panel;
+}
+function fwDrawCard(C){
+  const E=C.E,n=C.node,rev=hasInfo(n)?f(n,"fw_revision"):null;
+  E.cur.replaceChildren(blockTable([{label:"Running now",value:rev?rev+(f(n,"fw_branch")?" ("+f(n,"fw_branch")+")":"")+(f(n,"fw_dirty")?" · uncommitted changes":""):"not reported",mono:true},
+    {label:"Built",value:hasInfo(n)?f(n,"fw_built"):null,mono:true}]));
+  // The file, once read: what the trailer says, or why it is refused.
+  E.file.replaceChildren();
+  const ck=C.check;
+  if(C.file&&ck){
+    const rows=[{label:"File",value:C.file.name,mono:true}];
+    if(ck.version)rows.push({label:"Built for",value:FW_UNITS[ck.board]||"unknown unit"},{label:"Version / size",value:ck.version+" · "+ck.size+" bytes"});
+    if(!ck.error)rows.push({label:"Check",value:"trailer, board ID and CRC OK"});
+    E.file.append(blockTable(rows));
+    if(ck.error){const x=el("div","fw-err");x.setAttribute("role","alert");x.append(icon("alert"),el("span",null,ck.error));E.file.append(x);}
+  }else if(C.file)E.file.append(el("div","empty","Reading "+C.file.name+"…"));
+  if(C.sent&&C.sent.error){const x=el("div","fw-err");x.setAttribute("role","alert");x.append(icon("alert"),el("span",null,"Not flashed: "+C.sent.error));E.file.append(x);}
+  // Progress of the update the service runs (also one started with `update` in the terminal).
+  const st=f("software","fw_update_state"),mine=f("software","fw_update_target")===C.key;
+  E.run.replaceChildren();
+  if(st&&mine){
+    const pct=f("software","fw_update_pct")||0,msg=f("software","fw_update_msg");
+    if(st==="running"){
+      const bar=el("div","fw-bar"),i=el("i");i.style.width=pct+"%";bar.append(i);
+      bar.setAttribute("role","progressbar");bar.setAttribute("aria-valuenow",pct);bar.setAttribute("aria-valuemin",0);bar.setAttribute("aria-valuemax",100);
+      E.run.append(bar,el("div","fw-msg","Flashing "+pct+" %"+(msg?" · "+msg:"")));
+    }else E.run.append(el("div","fw-msg",(st==="done"?"Last update finished ":"Last update FAILED ")+ago(f("software","fw_update_ms"))+(msg?" · "+msg:"")));
+  }
+  const busy=st==="running";
+  E.state.className="badge"+(busy&&mine?" warn":mine&&st==="failed"?" bad":mine&&st==="done"?" ok":"");
+  E.state.textContent=busy&&mine?"flashing":mine&&st==="done"?"updated":mine&&st==="failed"?"update failed":"";
+  E.state.hidden=!E.state.textContent;
+  const why=C.busy?"Uploading…":fwBlocked(C);
+  E.drop.classList.toggle("off",busy||C.busy);E.input.disabled=busy||C.busy;
+  E.flash.disabled=!C.file||!ck||!!ck.error||!!why;
+  E.clear.disabled=!C.file||C.busy;
+  E.why.textContent=C.file&&ck&&!ck.error?why:"";
+}
+function fwDraw(){if(FW.sec&&data)for(const C of Object.values(FW.cards))fwDrawCard(C);}
+function firmware(){
+  if(!FW.sec){
+    FW.sec=el("div","grid");
+    FW.sec.append(fwCard("base","base","base",2,"midicontrol-fw-update.bin"),
+                  fwCard("remote","controller","controller",3,"midicontroller-fw-update.bin"));
+  }
+  fwDraw();
+  return FW.sec;
+}
+
 // ================= Home (Czech) =================
 function notices(){
   const out=[],add=(red,text,href)=>out.push({red,text,href});
@@ -999,7 +1138,7 @@ function advanced(tab){
   }
   AV.title.textContent=ADV.find(x=>x[0]===tab)[1];
   if(!data){AV.slot.replaceChildren(el("div","empty","Loading…"));return AV.sec;}
-  const sec={overview,software,base,controller,diag}[tab]();
+  const sec={overview,software,base,controller,diag,firmware}[tab]();
   if(AV.slot.firstChild!==sec)AV.slot.replaceChildren(sec);  // the cached Diagnostics page keeps focus
   return AV.sec;
 }

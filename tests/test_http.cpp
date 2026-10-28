@@ -98,6 +98,48 @@ TEST(http_route_stops) {
     CHECK_EQ(call(Request{"POST", "/", "", "", ""}, &api).status, 405);
 }
 
+TEST(http_parse_firmware_upload_limit) {
+    // Only a firmware upload may carry a large body; everything else keeps the 4 KiB limit.
+    Request req;
+    const std::string body(100000, 'x');
+    auto head = [](const std::string& line, size_t n) {
+        return line + " HTTP/1.1\r\nContent-Type: application/octet-stream\r\nContent-Length: " +
+               std::to_string(n) + "\r\n\r\n";
+    };
+    CHECK(parseRequest(head("POST /api/firmware/base", body.size()) + body, req) == ParseResult::Ok);
+    CHECK_EQ(req.body.size(), body.size());
+    CHECK_EQ(req.contentType, "application/octet-stream");
+    CHECK(parseRequest(head("POST /api/firmware/base", body.size()) + "abc", req) == ParseResult::Incomplete);
+    CHECK(parseRequest(head("POST /api/firmware/base", kMaxFirmwareBody + 1), req) == ParseResult::TooLarge);
+    CHECK(parseRequest(head("PUT /api/firmware/base", body.size()), req) == ParseResult::TooLarge);
+    CHECK(parseRequest(head("POST /api/stops/401", body.size()), req) == ParseResult::TooLarge);
+}
+
+TEST(http_route_firmware) {
+    std::string gotTarget, gotBody;
+    FirmwareApi api;
+    api.post = [&](const std::string& target, const std::string& body) {
+        gotTarget = target;
+        gotBody = body;
+        return Response{202, "application/json", "{}"};
+    };
+    auto call = [&](const Request& r, const FirmwareApi* fw) {
+        return route(r, "<html>", [] { return std::string("{}"); }, nullptr, nullptr, fw);
+    };
+    auto r = call(Request{"POST", "/api/firmware/base", "", "application/octet-stream", "img"}, &api);
+    CHECK_EQ(r.status, 202);
+    CHECK_EQ(gotTarget, "base");
+    CHECK_EQ(gotBody, "img");
+    gotTarget.clear();
+    // A cross-site form can only send form/text types: refused before the handler runs.
+    CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "multipart/form-data; boundary=x", "img"}, &api).status, 415);
+    CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "text/plain", "img"}, &api).status, 415);
+    CHECK_EQ(gotTarget, "");
+    CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "application/octet-stream", "img"}, nullptr).status, 404);
+    CHECK_EQ(call(Request{"GET", "/api/firmware/base", "", "", ""}, &api).status, 404);
+    CHECK_EQ(call(Request{"POST", "/api/status", "", "application/octet-stream", ""}, &api).status, 405);
+}
+
 TEST(http_serialize) {
     auto s = serialize(Response{200, "text/plain", "hi"});
     CHECK(s.rfind("HTTP/1.1 200 OK\r\n", 0) == 0);

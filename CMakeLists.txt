@@ -31,6 +31,7 @@ add_library(midicontrol_core
     src/playback.cpp
     src/dispatch.cpp
     src/firmware_image.cpp
+    src/firmware_upload.cpp
     src/protocol/names.cpp
     src/status.cpp
     src/status_json.cpp
@@ -74,6 +75,7 @@ add_executable(midicontrol_tests
     tests/test_dispatch.cpp
     tests/test_device_info.cpp
     tests/test_firmware_image.cpp
+    tests/test_firmware_upload.cpp
     tests/test_names.cpp
     tests/test_status.cpp
     tests/test_status_json.cpp

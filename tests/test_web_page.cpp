@@ -81,3 +81,18 @@ TEST(web_page_song_list_scales) {
     CHECK(has(html, "Zobrazeno "));
     CHECK(has(html, "E.list.scrollTop=top"));
 }
+
+TEST(web_page_has_firmware_upload) {
+    // Advanced -> Firmware: one card per unit; the browser reads the trailer before anything is sent.
+    const std::string& html = mc::web::statusPageHtml();
+    CHECK(has(html, "\"firmware\",\"Firmware\""));
+    CHECK(has(html, "/api/firmware/"));
+    CHECK(has(html, "application/octet-stream"));
+    CHECK(has(html, "-update.bin"));
+    CHECK(has(html, "0x4D43544C"));     // trailer magic
+    CHECK(has(html, "0xEDB88320"));     // CRC-32, the same as fwimage::check
+    CHECK(has(html, "fw_update_state")); // progress comes from /api/status
+    CHECK(has(html, "dragover"));
+    CHECK(!has(html, "innerHTML"));
+    CHECK(!has(html, "http://"));
+}

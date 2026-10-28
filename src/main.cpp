@@ -225,7 +225,8 @@ int main(int argc, char** argv) {
     std::unique_ptr<WebServer> web;
     if (config.webEnabled) {
         web = std::make_unique<WebServer>(status, config.webBind, config.webPort, config.playFolder,
-                                              config.organ, &diagStore);
+                                              config.organ, &diagStore,
+                                              [&exec](mc::fwupload::Accepted a) { return exec.startUpload(std::move(a)); });
         web->start();
     }
     ControlServer control(
@@ -249,6 +250,7 @@ int main(int argc, char** argv) {
     watchdog.reset();
     control.stop();
     if (web) web->stop();
+    exec.waitForUpload();  // a status-page firmware update finishes before the link goes down
     logReader.stop();
     handler.shutdown();
     mc::log::setRegistry(nullptr);

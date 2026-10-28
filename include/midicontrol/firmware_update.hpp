@@ -28,10 +28,14 @@ public:
     bool updateRemote(const std::string& binPath, Progress cb = {});
     // Base: CommHandler is told an update runs (see CommHandler::setUpdating).
     bool updateBase(const std::string& binPath, Progress cb = {});
+    // Same with the file already in memory (the status page's upload); `name` labels it in the log.
+    bool updateRemote(const std::vector<uint8_t>& file, const std::string& name, Progress cb = {});
+    bool updateBase(const std::vector<uint8_t>& file, const std::string& name, Progress cb = {});
 
 private:
     bool streamImage(uint8_t target, const std::vector<uint8_t>& image, Progress cb);
-    std::vector<uint8_t> loadImage(const std::string& path, uint8_t board);
+    std::vector<uint8_t> loadImage(const std::string& path);
+    bool checkImage(const std::vector<uint8_t>& image, const std::string& name, uint8_t board);
     void info(const std::string& text);
     void error(const std::string& text);
 

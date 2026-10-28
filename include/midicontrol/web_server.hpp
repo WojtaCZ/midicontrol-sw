@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 
+#include "midicontrol/firmware_upload.hpp"
 #include "midicontrol/http.hpp"
 #include "midicontrol/organ.hpp"
 #include "midicontrol/songcheck.hpp"
@@ -16,22 +17,25 @@
 
 namespace mc {
 
-// Status page on its own thread: GET / and GET /api/status; the only write is the
-// organ-stops store (GET /api/stops, PUT /api/stops/<code>).
+// Status page on its own thread: GET / and GET /api/status; the writes are the
+// organ-stops store (GET /api/stops, PUT /api/stops/<code>) and, when a starter is
+// given, the firmware upload (POST /api/firmware/<base|remote>, which only
+// validates the file and hands it to the starter; the update runs elsewhere).
 //
 // Isolation from playback: it only reads StatusRegistry snapshots (never a
 // CommHandler or Player lock), multiplexes at most 8 connections with poll()
 // (an idle browser preconnect can't hold up the others), drops a request
-// that isn't complete within 3 s or exceeds 8 KiB, and never lets an
+// that isn't complete within 3 s (a firmware upload: 60 s) or exceeds 8 KiB
+// (a firmware upload: 512 KiB), and never lets an
 // exception escape. If the port
 // can't be bound it logs an ERROR and retries every 10 s. The same thread
 // rescans the play folder every 60 s for the song-file check.
 class WebServer {
 public:
-    // `diag` (optional) serves GET /api/diag.
+    // `diag` (optional) serves GET /api/diag; `firmware` (optional) enables POST /api/firmware/<target>.
     WebServer(mc::status::StatusRegistry& status, std::string bind, int port,
               std::string playFolder, const mc::organ::OrganConfig& organ,
-              mc::diag::DiagStore* diag = nullptr);
+              mc::diag::DiagStore* diag = nullptr, mc::fwupload::Start firmware = nullptr);
     ~WebServer();
 
     WebServer(const WebServer&) = delete;
@@ -62,6 +66,7 @@ private:
     mc::organ::OrganConfig _organ;
     mc::stops::Store _stops;  // owned here; doPlay reads the song's .conf itself, never through this
     mc::diag::DiagStore* _diag;
+    mc::fwupload::Start _firmware;
     mc::songcheck::Scanner _scanner;
     int _listenFd = -1;
     std::vector<Conn> _conns;

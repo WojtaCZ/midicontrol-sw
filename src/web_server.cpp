@@ -27,7 +27,8 @@ namespace {
 constexpr int kBindRetryMs = 10000;
 constexpr int kRescanMs = 60000;
 constexpr int kSendTimeoutMs = 2000;      // writing one response
-constexpr int kRequestDeadlineMs = 3000;  // whole request head
+constexpr int kRequestDeadlineMs = 3000;  // whole request
+constexpr int kUploadDeadlineMs = 60000;  // a firmware upload (up to 512 KiB from a phone)
 constexpr size_t kMaxConns = 8;
 
 using Clock = std::chrono::steady_clock;
@@ -60,14 +61,15 @@ void sendAll(int fd, const std::string& data) {
 
 WebServer::WebServer(mc::status::StatusRegistry& status, std::string bind, int port,
                      std::string playFolder, const mc::organ::OrganConfig& organ,
-                     mc::diag::DiagStore* diag)
+                     mc::diag::DiagStore* diag, mc::fwupload::Start firmware)
     : _status(status),
       _bind(std::move(bind)),
       _port(port),
       _playFolder(std::move(playFolder)),
       _organ(organ),
       _stops(_playFolder, _organ.stopCount()),
-      _diag(diag) {
+      _diag(diag),
+      _firmware(std::move(firmware)) {
     std::error_code ec;
     if (std::filesystem::exists(_playFolder + "/" + mc::stops::kLegacyFileName, ec))
         mc::log::warn(Node::Software, std::string(mc::stops::kLegacyFileName) +
@@ -143,7 +145,7 @@ void WebServer::acceptConn() {
 void WebServer::respond(int fd, const mc::http::Response& r) { sendAll(fd, mc::http::serialize(r)); }
 
 bool WebServer::readConn(Conn& c) {
-    char chunk[2048];
+    char chunk[16384];
     while (true) {
         ssize_t n = ::recv(c.fd, chunk, sizeof(chunk), 0);
         if (n < 0 && errno == EINTR) continue;
@@ -169,12 +171,18 @@ bool WebServer::readConn(Conn& c) {
                 api.put = [this](const std::string& code, const std::string& body) {
                     return mc::stops::handlePut(_stops, _organ, mc::songs::listSongs(_playFolder), code, body);
                 };
+                mc::http::FirmwareApi fw;
+                if (_firmware) {
+                    fw.post = [this](const std::string& target, const std::string& body) {
+                        return mc::fwupload::handlePost(target, body, _firmware);
+                    };
+                }
                 try {
                     respond(c.fd, mc::http::route(req, mc::web::statusPageHtml(), [this] {
                         return mc::status::toJson(_status.snapshot());
-                    }, diag, &api));
+                    }, diag, &api, &fw));
                 } catch (const std::exception& e) {
-                    mc::log::warn(Node::Software, std::string("Stops: ") + e.what());
+                    mc::log::warn(Node::Software, std::string("status page: ") + e.what());
                     respond(c.fd, mc::http::Response{500, "text/plain; charset=utf-8", std::string(e.what()) + "\n"});
                 }
                 return true;
@@ -244,7 +252,8 @@ void WebServer::loop() {
                 Conn& c = _conns[i];
                 bool done = false;
                 if (fds[i + 1].revents & (POLLIN | POLLHUP | POLLERR)) done = readConn(c);
-                if (!done && msSince(c.started) >= kRequestDeadlineMs) {
+                const bool upload = c.buf.rfind(std::string("POST ") + mc::http::kFirmwarePrefix, 0) == 0;
+                if (!done && msSince(c.started) >= (upload ? kUploadDeadlineMs : kRequestDeadlineMs)) {
                     if (!c.buf.empty()) respond(c.fd, mc::http::errorResponse(408));
                     done = true;  // an idle preconnect is just closed
                 }

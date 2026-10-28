@@ -211,9 +211,23 @@ Stops = 3 4 5 14
 
 The **Diagnostics** tab shows, per node (base, remote), the last fault (kind, decoded CFSR/HFSR bits, pc/lr, interrupted exception = `xpsr & 0x1FF`, BFAR/MMFAR only when valid, firmware revision, uptime), the reset-cause history (`?kind=reset`: the newest base `reset:` and remote `boot, reset:` lines, searched over the last 4000 info entries per node, refreshed every 10 s) and a filterable log table (node, level, tag, text search). It polls `GET /api/diag` every second while it is open; **Mark seen** calls `?ack=<id>` and acknowledges that node only. Until then the node's health dot is yellow (`unseen_faults > 0` in `/api/status`, schema 2). Data: the base's log CDC ("MIDIControl log", config `[DIAG] LogPort=` to override the auto-detection) and the remote's `DIAG_GET`/`DIAG_RESP` records, stored as JSONL in `[DIAG] Dir=`. The terminal command `diag` prints the last fault per node and the last 20 lines. Details: `CLAUDE.md`, section Diagnostics.
 
+### Firmware tab and `POST /api/firmware/<base|remote>`
+
+Advanced → Firmware (`#adv/firmware`) has one card per unit: the revision it runs now (GET_INFO), a drop zone and a **Flash** button. The file is the `<name>-update.bin` that every firmware build already writes next to the `.elf` (`midicontrol-fw/build/midicontrol-fw-update.bin` for the base, `midicontroller-fw/build/midicontroller-fw-update.bin` for the controller); `.elf`, `.hex` and a plain `.bin` are refused with a hint, because only the update file carries the trailer with the board ID and CRCs.
+
+The base and controller images can't be swapped. Each check stops it on its own:
+
+1. **Browser**, as soon as a file is dropped: it reads the 24-byte trailer (magic, trailer CRC, format, board ID, size, image CRC-32). If the board ID isn't the card's unit, it says "This is the controller firmware, not the base firmware. Drop it on the Controller card." and Flash stays off; nothing is sent.
+2. **Service**, `fwupload::handlePost`: the same check with `fwimage::check` against the unit in the URL (`base` = 0x02, `remote` = 0x03). 422 `{"error": ...}` for any failure; the update is never started.
+3. **Device**: `FW_UPDATE_START` carries the target and the firmware NAKs a foreign one; at `FW_UPDATE_END` the bootloader / remote app checks trailer, board ID and CRC again before committing (midicontrol-bootloader README).
+
+The POST needs `Content-Type: application/octet-stream` (415 otherwise, so a cross-site form can't post), may carry up to 512 KiB (only this route; everything else keeps the 4 KiB limit) and gets 60 s to arrive instead of 3 s. A valid file answers **202** `{"target","version","size"}` and the update runs on a worker thread of `ConsoleExecutor`. It answers **409** while a song is playing, while the base isn't connected, or while another update runs; a CLI `update` and a page upload share one busy flag. Progress is in `/api/status` as Software fields `fw_update_target`, `fw_update_state` (`running` / `done` / `failed`), `fw_update_pct`, `fw_update_msg` (last updater message) and `fw_update_ms`, also for a CLI `update`, so the card shows a bar however the update was started. The Flash button asks for confirmation and stays off while a song plays, the base is disconnected or (for the controller) the base reports no BLE link. Stopping the service waits for an upload to finish (`ConsoleExecutor::waitForUpload` before `CommHandler::shutdown`).
+
+There is no login: anyone who can open the page on the LAN can flash a valid image, just as they can edit stops. Set `[WEB] Bind=127.0.0.1` if that's too open.
+
 ## 3. Commands: terminal attached to the service
 
-The service listens on a Unix socket, `$XDG_RUNTIME_DIR/midicontrol.sock`, mode `0600` (owner only). The web page cannot control the player (its one write is the per-song stop files); all control goes through the terminal.
+The service listens on a Unix socket, `$XDG_RUNTIME_DIR/midicontrol.sock`, mode `0600` (owner only). The web page cannot control the player (its writes are the per-song stop files and the firmware upload); all other control goes through the terminal.
 
 ```bash
 midicontrol                                        # in a terminal
@@ -227,7 +241,7 @@ midicontrol --cmd "update base midicontrol-fw-update.bin"   # one-shot, for scri
 - **Firmware update:**
   - `update` streams its progress to the client until done.
   - The client turns a relative `.bin` path into an absolute one before sending. The service reads the file itself, so the service user needs permission to read it.
-  - Only one update runs at a time; a second gets `busy: a firmware update is already running`.
+  - Only one update runs at a time, including one started from the page's Firmware tab; a second gets `busy: a firmware update is already running`.
   - While it runs, the Software tab shows the activity ("firmware update to base in progress") and the Base dot is yellow "Firmware update in progress".
 - **Disconnects:** a client that drops mid-command never cancels it or blocks the service; its output is discarded. Stopping the service waits for a running firmware update to finish, so the base is never abandoned half-flashed.
 - **Limits:** at most 4 clients at a time; a 5th gets `busy: too many clients`.

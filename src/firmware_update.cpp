@@ -78,22 +78,24 @@ void FirmwareUpdater::error(const std::string& text) {
     if (_say) _say(text);
 }
 
-// Read and validate an update file for `board`; empty on error (reported).
-std::vector<uint8_t> FirmwareUpdater::loadImage(const std::string& path, uint8_t board) {
+// Read an update file; empty on error (reported).
+std::vector<uint8_t> FirmwareUpdater::loadImage(const std::string& path) {
     auto image = readFile(path);
-    if (image.empty()) {
-        error("firmware update: cannot read " + path);
-        return {};
-    }
+    if (image.empty()) error("firmware update: cannot read " + path);
+    return image;
+}
+
+// Validate an update file for `board`; false on error (reported).
+bool FirmwareUpdater::checkImage(const std::vector<uint8_t>& image, const std::string& name, uint8_t board) {
     fwimage::Info info;
     auto c = fwimage::check(image, board, &info);
     if (c != fwimage::Check::Ok) {
-        error("firmware update: refusing " + path + ": " + fwimage::describe(c));
-        return {};
+        error("firmware update: refusing " + name + ": " + fwimage::describe(c));
+        return false;
     }
-    this->info("Image " + path + ": " + std::to_string(info.imageSize) + " bytes, version " +
+    this->info("Image " + name + ": " + std::to_string(info.imageSize) + " bytes, version " +
                versionText(info.version));
-    return image;
+    return true;
 }
 
 bool FirmwareUpdater::streamImage(uint8_t target, const std::vector<uint8_t>& image, Progress cb) {
@@ -163,8 +165,17 @@ bool FirmwareUpdater::streamImage(uint8_t target, const std::vector<uint8_t>& im
 }
 
 bool FirmwareUpdater::updateRemote(const std::string& binPath, Progress cb) {
-    auto image = loadImage(binPath, protocol::ADDR_REMOTE);
-    if (image.empty()) return false;
+    auto image = loadImage(binPath);
+    return !image.empty() && updateRemote(image, binPath, cb);
+}
+
+bool FirmwareUpdater::updateBase(const std::string& binPath, Progress cb) {
+    auto image = loadImage(binPath);
+    return !image.empty() && updateBase(image, binPath, cb);
+}
+
+bool FirmwareUpdater::updateRemote(const std::vector<uint8_t>& image, const std::string& name, Progress cb) {
+    if (!checkImage(image, name, protocol::ADDR_REMOTE)) return false;
     info("Updating remote over BLE (" + std::to_string(image.size()) + " bytes)...");
 
     // No DIAG_GET while the image streams (spec: never during an OTA); base keepalive/status go on (not setUpdating).
@@ -181,9 +192,8 @@ bool FirmwareUpdater::updateRemote(const std::string& binPath, Progress cb) {
     return ok;
 }
 
-bool FirmwareUpdater::updateBase(const std::string& binPath, Progress cb) {
-    auto image = loadImage(binPath, protocol::ADDR_BASE);
-    if (image.empty()) return false;
+bool FirmwareUpdater::updateBase(const std::vector<uint8_t>& image, const std::string& name, Progress cb) {
+    if (!checkImage(image, name, protocol::ADDR_BASE)) return false;
     info("Updating base over USB (" + std::to_string(image.size()) + " bytes)...");
 
     struct UpdatingGuard {

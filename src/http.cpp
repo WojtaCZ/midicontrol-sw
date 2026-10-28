@@ -9,12 +9,15 @@ namespace {
 const char* reasonPhrase(int status) {
     switch (status) {
         case 200: return "OK";
+        case 202: return "Accepted";
         case 400: return "Bad Request";
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
+        case 409: return "Conflict";
         case 408: return "Request Timeout";
         case 415: return "Unsupported Media Type";
         case 413: return "Payload Too Large";
+        case 422: return "Unprocessable Content";
         case 500: return "Internal Server Error";
         default: return "Error";
     }
@@ -85,7 +88,11 @@ ParseResult parseRequest(const std::string& buffer, Request& out, size_t maxSize
             contentLength = std::stoul(value);
         }
     }
-    if (contentLength > kMaxBody || end + 4 + contentLength > maxSize) return ParseResult::TooLarge;
+    const bool firmware = method == "POST" && target.rfind(kFirmwarePrefix, 0) == 0;
+    if (firmware ? contentLength > kMaxFirmwareBody
+                 : contentLength > kMaxBody || end + 4 + contentLength > maxSize) {
+        return ParseResult::TooLarge;
+    }
     if (buffer.size() < end + 4 + contentLength) return ParseResult::Incomplete;
 
     out.method = method;
@@ -114,8 +121,13 @@ Response errorResponse(int status) {
 
 Response route(const Request& req, const std::string& html,
                const std::function<std::string()>& statusJson, const DiagHandler& diagJson,
-               const StopsApi* stops) {
+               const StopsApi* stops, const FirmwareApi* firmware) {
     constexpr const char* kStopsPrefix = "/api/stops/";
+    if (req.method == "POST" && req.path.rfind(kFirmwarePrefix, 0) == 0) {
+        if (!firmware || !firmware->post) return errorResponse(404);
+        if (req.contentType.rfind("application/octet-stream", 0) != 0) return errorResponse(415);
+        return firmware->post(req.path.substr(std::string(kFirmwarePrefix).size()), req.body);
+    }
     if (req.method == "PUT" && req.path.rfind(kStopsPrefix, 0) == 0) {
         if (!stops || !stops->put) return errorResponse(404);
         if (req.contentType.rfind("application/json", 0) != 0) return errorResponse(415);

@@ -3,8 +3,8 @@
 #include <sstream>
 
 #include "midicontrol/diag_api.hpp"
-#include "midicontrol/firmware_update.hpp"
 #include "midicontrol/log.hpp"
+#include "midicontrol/protocol/constants.hpp"
 
 namespace mc {
 
@@ -113,13 +113,49 @@ ExecResult ConsoleExecutor::execute(const std::string& line, const console::Repl
     return ExecResult::Ok;
 }
 
+void ConsoleExecutor::waitForUpload() {
+    std::lock_guard<std::mutex> lk(_workerMutex);
+    if (_worker.joinable()) _worker.join();
+}
+
+bool ConsoleExecutor::runUpdate(const std::string& target, const Run& run, const FirmwareUpdater::Say& say,
+                                const FirmwareUpdater::Progress& progress) {
+    const auto set = [this](const char* field, mc::status::Value v) { _status.set(Node::Software, field, std::move(v)); };
+    set("fw_update_target", target);
+    set("fw_update_state", std::string("running"));
+    set("fw_update_pct", int64_t{0});
+    set("fw_update_msg", std::string());
+    _status.setNow(Node::Software, "fw_update_ms");
+    _status.set(Node::Software, "activity", "firmware update to " + target + " in progress");
+    int lastPct = 0;
+    auto bar = [&](std::size_t done, std::size_t total) {
+        const int pct = total ? static_cast<int>(done * 100 / total) : 100;
+        if (pct != lastPct) set("fw_update_pct", static_cast<int64_t>(lastPct = pct));
+        if (progress) progress(done, total);
+    };
+    auto tell = [&](const std::string& text) {
+        set("fw_update_msg", text);
+        if (say) say(text);
+    };
+    FirmwareUpdater updater(_handler, tell);
+    bool ok = false;
+    try {
+        ok = run(updater, bar);
+    } catch (const std::exception& e) {
+        tell(std::string("firmware update: ") + e.what());
+        mc::log::error(Node::Software, std::string("firmware update: ") + e.what());
+    }
+    set("fw_update_state", std::string(ok ? "done" : "failed"));
+    _status.setNow(Node::Software, "fw_update_ms");
+    _status.set(Node::Software, "activity", std::string());
+    return ok;
+}
+
 ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, bool remote) {
-    std::unique_lock<std::mutex> lk(_updateMutex, std::try_to_lock);
-    if (!lk.owns_lock()) {
+    if (_updating.exchange(true)) {
         out("busy: a firmware update is already running\n");
         return ExecResult::Failed;
     }
-    _status.set(Node::Software, "activity", "firmware update to " + c.target + " in progress");
     auto progress = [&out](std::size_t done, std::size_t total) {
         int pct = total ? static_cast<int>(done * 100 / total) : 100;
         int bars = pct / 5;
@@ -130,17 +166,37 @@ ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, 
     // The bar is drawn with "\r"; a message starts on a fresh line.
     FirmwareUpdater::Say say;
     if (remote) say = [&out](const std::string& text) { out("\n" + text + "\n"); };
-    FirmwareUpdater updater(_handler, say);
-    bool ok = false;
-    try {
-        ok = c.target == "base" ? updater.updateBase(c.arg, progress)
-                                : updater.updateRemote(c.arg, progress);
-    } catch (const std::exception& e) {
-        mc::log::error(Node::Software, std::string("firmware update: ") + e.what());
-    }
-    _status.set(Node::Software, "activity", std::string());
+    const bool ok = runUpdate(c.target, [&c](FirmwareUpdater& u, FirmwareUpdater::Progress p) {
+        return c.target == "base" ? u.updateBase(c.arg, p) : u.updateRemote(c.arg, p);
+    }, say, progress);
+    _updating.store(false);
     out(std::string("\n") + (ok ? "Firmware update complete." : "Firmware update FAILED.") + "\n");
     return ok ? ExecResult::Ok : ExecResult::Failed;
+}
+
+std::string ConsoleExecutor::startUpload(mc::fwupload::Accepted upload) {
+    // Both units are reached through the base; a base update would cut a playing song off.
+    if (_handler.isPlaying()) return "a song is playing; stop it first";
+    if (!_handler.isBaseAlive()) return "the base is not connected";
+    if (_updating.exchange(true)) return "a firmware update is already running";
+    std::lock_guard<std::mutex> lk(_workerMutex);
+    if (_worker.joinable()) _worker.join();  // the previous upload has finished: _updating was clear
+    const bool base = upload.board == mc::protocol::ADDR_BASE;
+    const std::string target = base ? "base" : "remote";
+    mc::log::info(Node::Software, "status page: firmware update to " + target + " requested");
+    try {
+        _worker = std::thread([this, base, target, image = std::move(upload.image)] {
+            const std::string name = "uploaded " + target + " image";
+            runUpdate(target, [&](FirmwareUpdater& u, FirmwareUpdater::Progress p) {
+                return base ? u.updateBase(image, name, p) : u.updateRemote(image, name, p);
+            }, {}, {});
+            _updating.store(false);
+        });
+    } catch (const std::exception& e) {
+        _updating.store(false);
+        return std::string("cannot start the update: ") + e.what();
+    }
+    return {};
 }
 
 }  // namespace mc
