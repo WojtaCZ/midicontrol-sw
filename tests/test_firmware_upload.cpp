@@ -87,6 +87,17 @@ TEST(fwupload_refuses_the_other_units_image) {
     CHECK_EQ(rec.calls, 0);
 }
 
+TEST(fwupload_names_an_unknown_board_id_as_the_page_does) {
+    // Neither base nor controller: the page says "unknown unit", so the service must not say "the other unit".
+    Recorder rec;
+    auto r = handlePost("base", makeUpdateFile(0x07), rec.fn());
+    CHECK_EQ(r.status, 422);
+    CHECK_EQ(r.body, "{\"error\":\"this is built for an unknown unit (board ID 7); nothing was sent\"}");
+    CHECK_EQ(handlePost("remote", makeUpdateFile(0xFF), rec.fn()).body,
+             "{\"error\":\"this is built for an unknown unit (board ID 255); nothing was sent\"}");
+    CHECK_EQ(rec.calls, 0);
+}
+
 TEST(fwupload_refuses_other_file_kinds) {
     Recorder rec;
     auto r = handlePost("base", std::string("\x7f" "ELF\x01\x01\x01", 7) + std::string(200, '\0'), rec.fn());

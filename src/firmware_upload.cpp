@@ -28,6 +28,9 @@ std::string problem(const std::vector<uint8_t>& file, uint8_t board, fwimage::Ch
         return "this is an ELF file; use the <name>-update.bin next to it in the firmware's build folder";
     if (file[0] == ':') return "this looks like an Intel hex file; use the <name>-update.bin from the firmware build";
     if (c == fwimage::Check::WrongBoard) {
+        const uint8_t id = file[file.size() - fwimage::kTrailerSize + 12];  // trailer boardId
+        if (id != protocol::ADDR_BASE && id != protocol::ADDR_REMOTE)
+            return "this is built for an unknown unit (board ID " + std::to_string(id) + "); nothing was sent";
         const uint8_t other = board == protocol::ADDR_BASE ? protocol::ADDR_REMOTE : protocol::ADDR_BASE;
         if (fwimage::check(file, other) == fwimage::Check::Ok)
             return std::string("this is the ") + unitName(other) + " firmware, not the " + unitName(board) +

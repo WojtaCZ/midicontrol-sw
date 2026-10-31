@@ -113,6 +113,22 @@ TEST(http_parse_firmware_upload_limit) {
     CHECK(parseRequest(head("POST /api/firmware/base", kMaxFirmwareBody + 1), req) == ParseResult::TooLarge);
     CHECK(parseRequest(head("PUT /api/firmware/base", body.size()), req) == ParseResult::TooLarge);
     CHECK(parseRequest(head("POST /api/stops/401", body.size()), req) == ParseResult::TooLarge);
+    // No target in the URL: read the image anyway so the answer is 404 (route), not 413.
+    CHECK(parseRequest(head("POST /api/firmware", body.size()) + body, req) == ParseResult::Ok);
+    CHECK(parseRequest(head("POST /api/firmwares", body.size()), req) == ParseResult::TooLarge);
+}
+
+TEST(http_parse_chunked_body_needs_length) {
+    // A chunked upload has no Content-Length; reading it as an empty body said "the file is empty".
+    Request req;
+    const std::string chunked = "POST /api/firmware/base HTTP/1.1\r\nContent-Type: application/octet-stream\r\n"
+                                "Transfer-Encoding: chunked\r\n\r\n4\r\nabcd\r\n0\r\n\r\n";
+    CHECK(parseRequest(chunked, req) == ParseResult::LengthRequired);
+    CHECK(parseRequest("PUT /api/stops/401 HTTP/1.1\r\nTransfer-Encoding: Chunked\r\n\r\n", req) ==
+          ParseResult::LengthRequired);
+    CHECK(parseRequest("POST /api/firmware/base HTTP/1.1\r\nTransfer-Encoding: identity\r\n"
+                       "Content-Length: 3\r\n\r\nabc", req) == ParseResult::Ok);
+    CHECK_EQ(errorResponse(411).body, "411 Length Required\n");
 }
 
 TEST(http_route_firmware) {
@@ -136,7 +152,10 @@ TEST(http_route_firmware) {
     CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "text/plain", "img"}, &api).status, 415);
     CHECK_EQ(gotTarget, "");
     CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "application/octet-stream", "img"}, nullptr).status, 404);
-    CHECK_EQ(call(Request{"GET", "/api/firmware/base", "", "", ""}, &api).status, 404);
+    CHECK_EQ(call(Request{"GET", "/api/firmware/base", "", "", ""}, &api).status, 405);
+    CHECK_EQ(call(Request{"PUT", "/api/firmware/remote", "", "application/octet-stream", "img"}, &api).status, 405);
+    CHECK_EQ(call(Request{"POST", "/api/firmware", "", "application/octet-stream", "img"}, &api).status, 404);
+    CHECK_EQ(call(Request{"GET", "/api/firmware", "", "", ""}, &api).status, 404);
     CHECK_EQ(call(Request{"POST", "/api/status", "", "application/octet-stream", ""}, &api).status, 405);
 }
 

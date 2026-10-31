@@ -27,14 +27,15 @@ struct Request {
     std::string body;         // exactly Content-Length bytes
 };
 
-enum class ParseResult { Incomplete, Ok, Bad, TooLarge };
+enum class ParseResult { Incomplete, Ok, Bad, TooLarge, LengthRequired };
 
 // Parse the request in `buffer` (all bytes received so far). Complete once the
 // blank line ("\r\n\r\n") and then Content-Length body bytes have arrived;
 // TooLarge when head + body exceed `maxSize` or Content-Length exceeds
 // kMaxBody (for POST /api/firmware/...: the head exceeds `maxSize` or the body
 // kMaxFirmwareBody); Bad when the request line is not "METHOD SP /target SP HTTP/1.x"
-// or Content-Length is not a number. Header names are case-insensitive.
+// or Content-Length is not a number; LengthRequired for a Transfer-Encoding other than
+// identity (chunked bodies are not read; answered 411). Header names are case-insensitive.
 ParseResult parseRequest(const std::string& buffer, Request& out, size_t maxSize = kMaxRequest);
 
 struct Response {
@@ -68,8 +69,9 @@ struct FirmwareApi {
 // handler), GET /api/stops -> stops->get(), PUT /api/stops/<code> -> stops->put(code, body) (415 unless
 // Content-Type is application/json, so a plain cross-site form cannot post; 404 without `stops`),
 // POST /api/firmware/<target> -> firmware->post(target, body) (415 unless Content-Type is
-// application/octet-stream, which a cross-site form cannot send; 404 without `firmware`),
-// other paths 404, other methods 405.
+// application/octet-stream, which a cross-site form cannot send; 404 without `firmware`; other
+// methods on /api/firmware/<target> 405, /api/firmware without a target 404), other paths 404,
+// other methods 405.
 Response route(const Request& req, const std::string& html,
                const std::function<std::string()>& statusJson, const DiagHandler& diagJson = nullptr,
                const StopsApi* stops = nullptr, const FirmwareApi* firmware = nullptr);

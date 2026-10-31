@@ -233,6 +233,7 @@ bool FirmwareUpdater::updateBase(const std::vector<uint8_t>& image, const std::s
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
+    info("Sending the image to the base bootloader...");
     bool ok = streamImage(protocol::ADDR_BASE, image, cb);
     if (!ok) return false;
 

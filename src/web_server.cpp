@@ -193,6 +193,9 @@ bool WebServer::readConn(Conn& c) {
             case mc::http::ParseResult::Bad:
                 respond(c.fd, mc::http::errorResponse(400));
                 return true;
+            case mc::http::ParseResult::LengthRequired:
+                respond(c.fd, mc::http::errorResponse(411));
+                return true;
         }
     }
 }

@@ -15,6 +15,7 @@ const char* reasonPhrase(int status) {
         case 405: return "Method Not Allowed";
         case 409: return "Conflict";
         case 408: return "Request Timeout";
+        case 411: return "Length Required";
         case 415: return "Unsupported Media Type";
         case 413: return "Payload Too Large";
         case 422: return "Unprocessable Content";
@@ -69,6 +70,7 @@ ParseResult parseRequest(const std::string& buffer, Request& out, size_t maxSize
     // Header lines between the request line and the blank line.
     std::string contentType;
     size_t contentLength = 0;
+    bool chunked = false;
     size_t pos = line.size() + 2;
     while (pos < end + 2) {
         const size_t eol = buffer.find("\r\n", pos);
@@ -86,9 +88,16 @@ ParseResult parseRequest(const std::string& buffer, Request& out, size_t maxSize
             }
             if (value.size() > 9) return ParseResult::TooLarge;  // would overflow; far above kMaxBody
             contentLength = std::stoul(value);
+        } else if (name == "transfer-encoding") {
+            chunked = lower(value) != "identity";
         }
     }
-    const bool firmware = method == "POST" && target.rfind(kFirmwarePrefix, 0) == 0;
+    // Only Content-Length bodies are read; a chunked one would otherwise arrive as an empty body.
+    if (chunked) return ParseResult::LengthRequired;
+    // "/api/firmware" without a target too, so a whole image gets the route's 404 rather than 413.
+    const std::string targetPath = target.substr(0, target.find('?'));
+    const bool firmware = method == "POST" && (targetPath.rfind(kFirmwarePrefix, 0) == 0 ||
+                                               targetPath + "/" == kFirmwarePrefix);
     if (firmware ? contentLength > kMaxFirmwareBody
                  : contentLength > kMaxBody || end + 4 + contentLength > maxSize) {
         return ParseResult::TooLarge;
@@ -123,11 +132,13 @@ Response route(const Request& req, const std::string& html,
                const std::function<std::string()>& statusJson, const DiagHandler& diagJson,
                const StopsApi* stops, const FirmwareApi* firmware) {
     constexpr const char* kStopsPrefix = "/api/stops/";
-    if (req.method == "POST" && req.path.rfind(kFirmwarePrefix, 0) == 0) {
+    if (req.path.rfind(kFirmwarePrefix, 0) == 0) {
+        if (req.method != "POST") return errorResponse(405);
         if (!firmware || !firmware->post) return errorResponse(404);
         if (req.contentType.rfind("application/octet-stream", 0) != 0) return errorResponse(415);
         return firmware->post(req.path.substr(std::string(kFirmwarePrefix).size()), req.body);
     }
+    if (req.path + "/" == kFirmwarePrefix) return errorResponse(404);  // no target given
     if (req.method == "PUT" && req.path.rfind(kStopsPrefix, 0) == 0) {
         if (!stops || !stops->put) return errorResponse(404);
         if (req.contentType.rfind("application/json", 0) != 0) return errorResponse(415);

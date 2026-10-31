@@ -175,6 +175,8 @@ ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, 
 }
 
 std::string ConsoleExecutor::startUpload(mc::fwupload::Accepted upload) {
+    // Busy first: a running base update takes the base off USB, which would read as "not connected".
+    if (_updating.load()) return "a firmware update is already running";
     // Both units are reached through the base; a base update would cut a playing song off.
     if (_handler.isPlaying()) return "a song is playing; stop it first";
     if (!_handler.isBaseAlive()) return "the base is not connected";
