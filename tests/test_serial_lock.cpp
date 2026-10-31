@@ -1,9 +1,13 @@
 #include <fcntl.h>
 #include <pty.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
+#include <chrono>
+#include <cstdio>
 #include <string>
+#include <thread>
 
 #include "midicontrol/serial_port.hpp"
 #include "test_framework.hpp"
@@ -57,4 +61,53 @@ TEST(serial_hangup_before_any_data_fails_the_port) {
     CHECK(port.read(16).empty());
     CHECK(!port.healthy());
     port.close();
+}
+
+// A freshly enumerated CDC: the sysfs entry exists before the /dev node, which is root-only for a moment
+// (bench 2026-10-24 and 2026-10-28). The open is tried only once the node is accessible, and again until it works.
+static std::string tempNodePath() {
+    char tmpl[] = "/tmp/mc-node-XXXXXX";
+    int fd = mkstemp(tmpl);
+    ::close(fd);
+    ::unlink(tmpl);
+    return tmpl;
+}
+
+TEST(open_when_ready_waits_for_the_node_to_appear) {
+    const std::string path = tempNodePath();
+    std::thread udev([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        int fd = ::open(path.c_str(), O_CREAT | O_WRONLY, 0600);
+        ::close(fd);
+    });
+    int calls = 0;
+    CHECK(mc::openWhenReady(path, [&] { ++calls; return true; }, std::chrono::milliseconds(2000)));
+    CHECK(calls == 1);  // never called while the node was missing
+    udev.join();
+    ::unlink(path.c_str());
+}
+
+TEST(open_when_ready_skips_a_root_only_node_and_retries_a_failed_open) {
+    const std::string path = tempNodePath();
+    int fd = ::open(path.c_str(), O_CREAT | O_WRONLY, 0000);
+    ::close(fd);
+    std::thread udev([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        chmod(path.c_str(), 0660);
+    });
+    int calls = 0;
+    CHECK(mc::openWhenReady(path, [&] { return ++calls >= 3; }, std::chrono::milliseconds(2000)));
+    CHECK(calls == 3);
+    udev.join();
+    ::unlink(path.c_str());
+}
+
+TEST(open_when_ready_gives_up_after_the_timeout) {
+    const std::string path = tempNodePath();  // never created
+    int calls = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    CHECK(!mc::openWhenReady(path, [&] { ++calls; return true; }, std::chrono::milliseconds(300)));
+    const auto took = std::chrono::steady_clock::now() - t0;
+    CHECK(calls == 0);
+    CHECK(took >= std::chrono::milliseconds(300) && took < std::chrono::milliseconds(1000));
 }

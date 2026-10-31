@@ -2,7 +2,9 @@
 #define MIDICONTROL_SERIAL_PORT_HPP
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -54,6 +56,12 @@ std::optional<std::string> findMidiControlPort(const std::string& vid = "abcd", 
 // The base's "MIDIControl log" CDC: the interface whose string is "MIDIControl log", else interface 04.
 std::optional<std::string> findMidiControlLogPort(const std::string& vid = "abcd", const std::string& pid = "1234",
                                                   const std::string& sysRoot = "/sys");
+
+// Call `tryOpen` whenever `path` is readable and writable, until it returns true or `timeout` passes.
+// A freshly enumerated CDC shows in sysfs before its /dev node exists, and the node is root-only for a
+// moment (bench: ~185 ms + ~10 ms), so a single open right after re-enumeration fails.
+bool openWhenReady(const std::string& path, const std::function<bool()>& tryOpen,
+                   std::chrono::milliseconds timeout);
 
 // "ABCD:1234" for a USB serial device path ("/dev/ttyACM0"), empty if unknown.
 std::string usbIdOf(const std::string& devicePath);

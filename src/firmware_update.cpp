@@ -223,7 +223,11 @@ bool FirmwareUpdater::updateBase(const std::vector<uint8_t>& image, const std::s
         error("firmware update: bootloader did not appear on USB");
         return false;
     }
-    if (!_comm.reconnect(blPort)) {
+    // The port is found through sysfs before its /dev node is usable: retry the open for a while.
+    auto openPort = [this](const std::string& port) {
+        return openWhenReady(port, [&] { return _comm.reconnect(port); }, std::chrono::seconds(5));
+    };
+    if (!openPort(blPort)) {
         error("firmware update: cannot open bootloader port " + blPort);
         return false;
     }
@@ -236,7 +240,7 @@ bool FirmwareUpdater::updateBase(const std::vector<uint8_t>& image, const std::s
 
     // Reconnect to the application once it re-enumerates.
     std::string appPort = waitForPort(kAppPid, 1500);
-    if (!appPort.empty() && _comm.reconnect(appPort)) {
+    if (!appPort.empty() && openPort(appPort)) {
         info("Reconnected to the base on " + appPort + ".");
     } else {
         // The image is programmed; the reader keeps looking for the base.

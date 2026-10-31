@@ -14,6 +14,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <fstream>
+#include <thread>
 
 namespace mc {
 
@@ -232,6 +233,16 @@ std::string usbIdOf(const std::string& devicePath) {
     std::string id = t.vid + ":" + t.pid;
     for (char& ch : id) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     return id;
+}
+
+bool openWhenReady(const std::string& path, const std::function<bool()>& tryOpen,
+                   std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    for (;;) {
+        if (::access(path.c_str(), R_OK | W_OK) == 0 && tryOpen()) return true;
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
 }
 
 }  // namespace mc
