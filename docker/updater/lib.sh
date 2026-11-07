@@ -164,7 +164,7 @@ mc_compose() {
 
 # "IMAGE_ID|RUNNING|RESTARTS" of the app container, empty if there is none.
 app_state() {
-    docker inspect --format '{{.Image}}|{{.State.Running}}|{{.RestartCount}}' "$MC_APP" 2>/dev/null || true
+    docker inspect --type container --format '{{.Image}}|{{.State.Running}}|{{.RestartCount}}' "$MC_APP" 2>/dev/null || true
 }
 
 status_file() { echo "${MC_DATA_DIR:-/opt/midicontrol/data}/diag/update-status.json"; }

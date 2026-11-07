@@ -19,6 +19,8 @@ services:
   updater:
     image: ${IMAGE:-ghcr.io/wojtacz/midicontrol-sw-py}:${IMAGE_TAG:-stable}
     container_name: updater
+    # Host network: the updater reaches the player's status endpoint at 127.0.0.1:50118.
+    network_mode: host
     restart: always
     command: ["midicontrol-updater"]
     working_dir: /opt/midicontrol
