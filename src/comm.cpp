@@ -117,6 +117,7 @@ CommHandler::CommHandler(const Config& config, MidiPortFinder midiFinder,
     _status.set(Node::Base, "reconnects", int64_t{0});
     _status.set(Node::Base, "organ_power", false);
     _status.set(Node::Software, "playback", std::string("idle"));
+    _status.set(Node::Software, "recording", false);
     _hbControl.store(steadyMs());
     _controlThread = std::thread(&CommHandler::controlLoop, this);
 }
@@ -914,8 +915,10 @@ void CommHandler::recordSong() {
     if (pid > 0) {
         std::lock_guard<std::mutex> lk(_recorderMutex);
         _recorderPid = pid;
+        _status.set(Node::Software, "recording", true);
         mc::log::info(Node::Software, "Recording to " + fullPath);
     } else {
+        _status.set(Node::Software, "recording", false);
         mc::log::error(Node::Software, "Failed to start arecordmidi (rc=" + std::to_string(-pid) + ")");
     }
 }
@@ -929,6 +932,7 @@ void CommHandler::stopRecorder() {
         }
         _recorderPid = -1;
     }
+    _status.set(Node::Software, "recording", false);
 }
 
 // ---------------------------------------------------------------------------

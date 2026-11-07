@@ -62,3 +62,11 @@ TEST(json_events_newest_first) {
     CHECK(j.find("second") < j.find("first"));
     CHECK(contains(j, "\"songs\":[{\"code\":\"523\",\"problem\":\"empty display anchor\"}]"));
 }
+
+TEST(status_json_renders_recording_bool) {
+    StatusRegistry r([] { return int64_t(1); });
+    r.set(Node::Software, "recording", true);
+    CHECK(contains(toJson(r.snapshot()), "\"recording\":true"));
+    r.set(Node::Software, "recording", false);
+    CHECK(contains(toJson(r.snapshot()), "\"recording\":false"));
+}
