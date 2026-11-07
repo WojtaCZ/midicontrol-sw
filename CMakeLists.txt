@@ -94,6 +94,7 @@ add_executable(midicontrol_tests
     tests/test_log_reader.cpp
     tests/test_diag_poller.cpp
     tests/test_diag_api.cpp
+    tests/test_stall_monitor.cpp
 )
 target_link_libraries(midicontrol_tests PRIVATE midicontrol_core)
 target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
