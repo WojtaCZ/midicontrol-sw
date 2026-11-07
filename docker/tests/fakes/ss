@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fake ss: prints $FAKE_DIR/ss_out (listening sockets) after a header line.
+d=${FAKE_DIR:?FAKE_DIR not set}
+echo "State  Recv-Q Send-Q Local Address:Port Peer Address:Port"
+[ -f "$d/ss_out" ] && cat "$d/ss_out"
+exit 0

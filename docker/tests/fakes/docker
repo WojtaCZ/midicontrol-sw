@@ -41,6 +41,11 @@ case "$1" in
         case "$3" in *:previous) echo "$2" > "$d/previous_id" ;; esac
         exit 0
         ;;
+    ps)
+        # install tests: $FAKE_DIR/ps_out is what "docker ps" prints (absent = nothing running)
+        [ -f "$d/ps_out" ] && cat "$d/ps_out"
+        exit 0
+        ;;
     compose)
         case "$*" in
             *"up -d midicontrol")

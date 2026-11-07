@@ -1,0 +1,11 @@
+#!/bin/sh
+# Fake systemctl for docker/tests/test_install.sh. Only "--user" is supported.
+# Every call is logged to $FAKE_DIR/systemctl_calls; "is-active" succeeds when
+# $FAKE_DIR/unit_active exists.
+d=${FAKE_DIR:?FAKE_DIR not set}
+echo "$*" >> "$d/systemctl_calls"
+case "$*" in
+    *is-active*) [ -f "$d/unit_active" ] && { echo active; exit 0; }; echo inactive; exit 3 ;;
+esac
+case "$*" in *" stop "*) rm -f "$d/ss_out" ;; esac  # a stopped unit releases its port
+exit 0
