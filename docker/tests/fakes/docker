@@ -1,0 +1,66 @@
+#!/bin/sh
+# Fake docker CLI for docker/tests/test_updater.sh.
+# State lives in files under $FAKE_DIR; every call is appended to $FAKE_DIR/calls
+# as "IMAGE_TAG=<env value> <arguments>".
+#   container      "IMAGE_ID|RUNNING|RESTARTS" of the app container (absent = no container)
+#   registry_id    id the configured tag points to in the registry (copied to tag_id on pull)
+#   pull_fail      present = pull fails (no network)
+#   new_running    "true"/"false": app state after a recreate with the new image (default true)
+#   new_restarts   restart count after a recreate with the new image (default 0)
+#   phase          set to "after" / "rollback" on recreate; the fake curl serves status_<phase>
+d=${FAKE_DIR:?FAKE_DIR not set}
+echo "IMAGE_TAG=${IMAGE_TAG:-} $*" >> "$d/calls"
+
+last_arg() { for a in "$@"; do :; done; echo "$a"; }
+
+case "$1" in
+    inspect)
+        if [ -f "$d/container" ]; then cat "$d/container"; exit 0; fi
+        echo "Error: No such object: $(last_arg "$@")" >&2
+        exit 1
+        ;;
+    pull)
+        if [ -f "$d/pull_fail" ]; then
+            echo "Error response from daemon: Get \"https://ghcr.io/v2/\": dial tcp: lookup ghcr.io: no such host" >&2
+            exit 1
+        fi
+        cp "$d/registry_id" "$d/tag_id"
+        exit 0
+        ;;
+    image)
+        ref=$(last_arg "$@")
+        case "$ref" in
+            *:previous) f="$d/previous_id" ;;
+            *) f="$d/tag_id" ;;
+        esac
+        if [ -f "$f" ]; then cat "$f"; exit 0; fi
+        echo "Error: No such image: $ref" >&2
+        exit 1
+        ;;
+    tag)
+        case "$3" in *:previous) echo "$2" > "$d/previous_id" ;; esac
+        exit 0
+        ;;
+    compose)
+        case "$*" in
+            *"up -d midicontrol")
+                if [ "${IMAGE_TAG:-}" = previous ]; then
+                    echo "$(cat "$d/previous_id")|true|0" > "$d/container"
+                    echo rollback > "$d/phase"
+                else
+                    echo "$(cat "$d/tag_id")|$(cat "$d/new_running" 2>/dev/null || echo true)|$(cat "$d/new_restarts" 2>/dev/null || echo 0)" > "$d/container"
+                    echo after > "$d/phase"
+                fi
+                ;;
+        esac
+        exit 0
+        ;;
+    run)
+        # Self-update helper: snapshot the status file to prove it was written first.
+        if [ -n "${MC_DATA_DIR:-}" ] && [ -f "$MC_DATA_DIR/diag/update-status.json" ]; then
+            cp "$MC_DATA_DIR/diag/update-status.json" "$d/status_at_selfupdate"
+        fi
+        exit 0
+        ;;
+esac
+exit 0

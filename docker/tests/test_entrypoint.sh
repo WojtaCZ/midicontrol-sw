@@ -9,6 +9,7 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 # Stub binary: prints its arguments and the umask it runs under.
 stub="$tmp/stub.sh"
+# shellcheck disable=SC2016 # expanded by the stub
 printf '#!/bin/sh\necho "ARGS:$*"\necho "UMASK:$(umask)"\n' > "$stub"
 chmod +x "$stub"
 

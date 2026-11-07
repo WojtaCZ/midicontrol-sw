@@ -1,0 +1,12 @@
+#!/bin/sh
+# Fake curl for docker/tests/test_updater.sh: serves $FAKE_DIR/status_<phase>
+# (phase "before" until the fake docker recreates the app); a missing file means
+# "connection refused" (curl exit code 7).
+d=${FAKE_DIR:?FAKE_DIR not set}
+echo "$*" >> "$d/curl_calls"
+phase=$(cat "$d/phase" 2>/dev/null || echo before)
+if [ -f "$d/status_$phase" ]; then
+    cat "$d/status_$phase"
+    exit 0
+fi
+exit 7
