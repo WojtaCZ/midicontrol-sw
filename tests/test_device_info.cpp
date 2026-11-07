@@ -180,11 +180,9 @@ TEST(infopoller_unreachable_retries_sooner_foreign_nak_ignored) {
 }
 
 TEST(devinfo_link_quality_fields) {
-    Bytes p = {0x14, 1, 0xD3,                          // -45 dBm
-               0x18, 1, 0xD0,                          // -48 dBm
-               0x15, 6, 16, 0, 0, 0, 250, 0,           // 20 ms, latency 0, 2500 ms
-               0x16, 2, 3, 3,                          // Coded both ways
-               0x17, 10, 2, 0, 1, 0, 3, 0, 4, 0, 0x07, 0x10};  // losses 2, err 1, reboots 3, retries 4, reconnect 4103 ms
+    Bytes p = {0x14, 2, 0xD3, 0xD0,                    // own -45 dBm, peer -48 dBm
+               0x15, 6, 16, 0, 250, 0, 0, 0x33,        // 20 ms, timeout 2500 ms, latency 0, Coded both ways
+               0x17, 6, 2, 1, 3, 4, 0x07, 0x10};       // losses 2, err 1, reboots 3, retries 4, reconnect 4103 ms
     auto f = devinfo::decode(p.data(), p.size());
     CHECK_EQ(get<int64_t>(f, "link_rssi"), -45);
     CHECK_EQ(get<int64_t>(f, "link_peer_rssi"), -48);
@@ -204,8 +202,8 @@ TEST(devinfo_link_quality_fields) {
     }
 }
 
-TEST(devinfo_unknown_rssi_is_left_out) {
-    Bytes p = {0x14, 1, 0x80, 0x18, 1, 0x80, 0x16, 2, 0, 0, 0x15, 6, 0, 0, 0, 0, 0, 0};
+TEST(devinfo_unknown_link_values_are_left_out) {
+    Bytes p = {0x14, 2, 0x80, 0x80, 0x15, 6, 0, 0, 0, 0, 0, 0};
     auto f = devinfo::decode(p.data(), p.size());
     CHECK(f.empty());
 }
