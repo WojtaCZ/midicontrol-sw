@@ -33,6 +33,15 @@ const char* pairingName(uint8_t state) {
     return "unknown";
 }
 
+static std::string phyName(uint8_t v) {
+	switch (v) {
+		case 1: return "1M";
+		case 2: return "2M";
+		case 3: return "Coded";
+	}
+	return "?";
+}
+
 std::string formatMac(const std::string& hex12) {
     if (hex12.size() != 12) return hex12;
     std::string s;
@@ -45,7 +54,9 @@ const std::vector<std::string>& fieldKeys() {
         "fw_revision", "fw_branch", "fw_built", "fw_dirty", "uptime_ms", "reset_cause", "fault_count",
         "ble_connected", "ble_stream_open", "ble_secured", "ble_bonded", "ble_module_up", "ble_peer_alive",
         "ble_pc_alive", "ble_peer", "ble_name", "ble_pairing", "display", "ssr", "battery_mv", "battery_level", "battery_percent",
-        "charging", "charge_done", "vbus", "battery_critical", "vbus_mv"};
+		"charging", "charge_done", "vbus", "battery_critical", "vbus_mv",
+		"link_rssi", "link_peer_rssi", "link_interval_ms", "link_latency", "link_timeout_ms", "link_phy",
+		"link_losses", "link_err_conn", "link_module_reboots", "link_secure_retries", "link_reconnect_ms"};
     return keys;
 }
 
@@ -89,7 +100,31 @@ std::vector<std::pair<std::string, mc::status::Value>> decode(const uint8_t* pay
             case tag::BLE_PEER: str("ble_peer", formatMac(ascii(v, n))); break;
             case tag::BLE_NAME: str("ble_name", ascii(v, n)); break;
             case tag::BLE_PAIRING: if (n == 1) str("ble_pairing", pairingName(v[0])); break;
-            case tag::DISPLAY: if (n == 1) flag("display", v[0] != 0); break;
+			case tag::LINK_RSSI:
+			case tag::LINK_PEER_RSSI:
+				// i8 dBm; -128 = not measured (no link, or no reading in the last ~25 s): the field is left out
+				if (n == 1 && static_cast<int8_t>(v[0]) != -128) num(t == tag::LINK_RSSI ? "link_rssi" : "link_peer_rssi", static_cast<int8_t>(v[0]));
+				break;
+			case tag::LINK_PARAMS:
+				if (n == 6 && le(v, 2) != 0) {
+					num("link_interval_ms", le(v, 2) * 125 / 100);  // unit 1.25 ms, whole ms
+					num("link_latency", le(v + 2, 2));
+					num("link_timeout_ms", le(v + 4, 2) * 10);
+				}
+				break;
+			case tag::LINK_PHY:
+				if (n == 2 && v[0] != 0) str("link_phy", phyName(v[0]) + (v[0] == v[1] ? "" : " / " + phyName(v[1])));
+				break;
+			case tag::LINK_COUNTERS:
+				if (n == 10) {
+					num("link_losses", le(v, 2));
+					num("link_err_conn", le(v + 2, 2));
+					num("link_module_reboots", le(v + 4, 2));
+					num("link_secure_retries", le(v + 6, 2));
+					num("link_reconnect_ms", le(v + 8, 2));
+				}
+				break;
+			case tag::DISPLAY: if (n == 1) flag("display", v[0] != 0); break;
             case tag::SSR: if (n == 1) flag("ssr", v[0] != 0); break;
             case tag::BATTERY_MV: if (n == 2) num("battery_mv", le(v, 2)); break;
             case tag::BATTERY_LEVEL: if (n == 1) num("battery_level", v[0]); break;

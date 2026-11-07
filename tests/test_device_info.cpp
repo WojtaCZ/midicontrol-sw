@@ -178,3 +178,34 @@ TEST(infopoller_unreachable_retries_sooner_foreign_nak_ignored) {
     r.poller.tick(devinfo::InfoPoller::kRetryMs + 100, false, true);
     CHECK_EQ(r.gets.size(), 2u);
 }
+
+TEST(devinfo_link_quality_fields) {
+    Bytes p = {0x14, 1, 0xD3,                          // -45 dBm
+               0x18, 1, 0xD0,                          // -48 dBm
+               0x15, 6, 16, 0, 0, 0, 250, 0,           // 20 ms, latency 0, 2500 ms
+               0x16, 2, 3, 3,                          // Coded both ways
+               0x17, 10, 2, 0, 1, 0, 3, 0, 4, 0, 0x07, 0x10};  // losses 2, err 1, reboots 3, retries 4, reconnect 4103 ms
+    auto f = devinfo::decode(p.data(), p.size());
+    CHECK_EQ(get<int64_t>(f, "link_rssi"), -45);
+    CHECK_EQ(get<int64_t>(f, "link_peer_rssi"), -48);
+    CHECK_EQ(get<int64_t>(f, "link_interval_ms"), 20);
+    CHECK_EQ(get<int64_t>(f, "link_latency"), 0);
+    CHECK_EQ(get<int64_t>(f, "link_timeout_ms"), 2500);
+    CHECK_EQ(get<std::string>(f, "link_phy"), std::string("Coded"));
+    CHECK_EQ(get<int64_t>(f, "link_losses"), 2);
+    CHECK_EQ(get<int64_t>(f, "link_err_conn"), 1);
+    CHECK_EQ(get<int64_t>(f, "link_module_reboots"), 3);
+    CHECK_EQ(get<int64_t>(f, "link_secure_retries"), 4);
+    CHECK_EQ(get<int64_t>(f, "link_reconnect_ms"), 4103);
+    for (const auto& [k, v] : f) {
+        bool known = false;
+        for (const auto& key : devinfo::fieldKeys()) known |= key == k;
+        CHECK(known);
+    }
+}
+
+TEST(devinfo_unknown_rssi_is_left_out) {
+    Bytes p = {0x14, 1, 0x80, 0x18, 1, 0x80, 0x16, 2, 0, 0, 0x15, 6, 0, 0, 0, 0, 0, 0};
+    auto f = devinfo::decode(p.data(), p.size());
+    CHECK(f.empty());
+}

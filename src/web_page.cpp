@@ -514,7 +514,11 @@ function base(){
     {label:"State",value:bleChips(n,"remote",true)},
     {label:"Name",value:f(n,"ble_name"),mono:true},
     {label:"Paired remote",value:f(n,"ble_peer")||"none stored (pair from Nastaveni)",mono:true},
-    {label:"Pairing",value:f(n,"ble_pairing")}]:infoNote(n,"Bluetooth");
+	{label:"Pairing",value:f(n,"ble_pairing")},
+	{label:"Signal (this unit)",value:f(n,"link_rssi")!=null?f(n,"link_rssi")+" dBm":null},
+	{label:"Signal (peer measured)",value:f(n,"link_peer_rssi")!=null?f(n,"link_peer_rssi")+" dBm":null},
+	{label:"Link parameters",value:f(n,"link_interval_ms")!=null?"interval "+f(n,"link_interval_ms")+" ms · latency "+f(n,"link_latency")+" · timeout "+f(n,"link_timeout_ms")+" ms · PHY "+(f(n,"link_phy")||"?"):null},
+	{label:"Link losses",value:f(n,"link_losses")!=null?f(n,"link_losses")+" (ERR_CONN "+f(n,"link_err_conn")+") · module reboots "+f(n,"link_module_reboots")+" · secure retries "+f(n,"link_secure_retries")+" · last reconnect "+f(n,"link_reconnect_ms")+" ms":null}]:infoNote(n,"Bluetooth");
   const counters=packetCounters(n);
   counters.push({label:"CRC errors / duplicates",value:c(n,"crc_errors")+" / "+c(n,"duplicates")});
   return nodePage(items,details,counters,data.nodes[n].events.slice(),[["Firmware",firmwareRows(n)],["Bluetooth",ble]]);

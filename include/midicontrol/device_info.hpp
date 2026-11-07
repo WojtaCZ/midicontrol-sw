@@ -20,6 +20,8 @@ namespace tag {
 constexpr uint8_t REVISION = 0x01, BRANCH = 0x02, BUILT = 0x03, DIRTY = 0x04, UPTIME_MS = 0x05, RESET_CAUSE = 0x06,
                   FAULT_COUNT = 0x07;
 constexpr uint8_t BLE_FLAGS = 0x10, BLE_PEER = 0x11, BLE_NAME = 0x12, BLE_PAIRING = 0x13;
+// Link quality: i8 dBm (-128 unknown), u16 interval(1.25 ms)/latency/timeout(10 ms), u8 tx/rx PHY, 5 x u16 counters
+constexpr uint8_t LINK_RSSI = 0x14, LINK_PARAMS = 0x15, LINK_PHY = 0x16, LINK_COUNTERS = 0x17, LINK_PEER_RSSI = 0x18;
 constexpr uint8_t DISPLAY = 0x20, SSR = 0x21;
 constexpr uint8_t BATTERY_MV = 0x30, BATTERY_LEVEL = 0x31, CHARGER = 0x32, VBUS_MV = 0x33,
                   BATTERY_PERCENT = 0x34;
