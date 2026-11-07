@@ -1,0 +1,32 @@
+# Installed as /opt/midicontrol/compose.yaml; variables come from .env next to it.
+name: midicontrol
+
+services:
+  midicontrol:
+    image: ${IMAGE:-ghcr.io/wojtacz/midicontrol-sw-py}:${IMAGE_TAG:-stable}
+    container_name: midicontrol
+    network_mode: host
+    restart: always
+    volumes:
+      - /opt/midicontrol/data:/data
+      - /dev:/dev
+      - /etc/localtime:/etc/localtime:ro
+    device_cgroup_rules:
+      - "c 166:* rwm"   # ttyACM
+      - "c 188:* rwm"   # ttyUSB
+      - "c 116:* rwm"   # ALSA
+
+  updater:
+    image: ${IMAGE:-ghcr.io/wojtacz/midicontrol-sw-py}:${IMAGE_TAG:-stable}
+    container_name: updater
+    restart: always
+    command: ["midicontrol-updater"]
+    working_dir: /opt/midicontrol
+    env_file: .env
+    environment:
+      COMPOSE_PROJECT_NAME: midicontrol
+      MC_DATA_DIR: /opt/midicontrol/data
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/midicontrol:/opt/midicontrol
+      - /etc/localtime:/etc/localtime:ro

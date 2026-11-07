@@ -1,0 +1,8 @@
+build/
+build-scratch/
+.git
+docs/*.pdf
+.trail
+.claude*
+.superpowers
+graft
