@@ -133,4 +133,76 @@ if [ "$rc" = 0 ] && [ ! -e "$MC_PREFIX/compose.yaml" ] && [ ! -e "$MC_PREFIX/.en
 run; run --uninstall --purge
 if [ ! -e "$MC_PREFIX/data" ]; then check uninstall_purge_removes_data ok; else check uninstall_purge_removes_data bad; fi
 
+# --no-updates on an existing .env: file untouched, note printed
+world
+run
+printf 'IMAGE_TAG=stable\nUPDATE_WINDOW=02:00-04:00\nUPDATE_ENABLED=1\n# M\n' > "$MC_PREFIX/.env"
+cp "$MC_PREFIX/.env" "$w/env.before"
+run --no-updates
+if cmp -s "$w/env.before" "$MC_PREFIX/.env" && has "ignored" "$w/out" && has "UPDATE_ENABLED" "$w/out"; then
+    check no_updates_on_existing_env_untouched ok; else check no_updates_on_existing_env_untouched bad; fi
+
+# bad tags and a missing value are rejected before anything is written
+world
+bad=ok
+# shellcheck disable=SC2016 # '$(x)' must stay literal
+for t in 'a b' '.x' '-x' 'a;b' '$(x)'; do
+    run --tag "$t"; rc=$?
+    { [ "$rc" != 0 ] && [ ! -e "$MC_PREFIX/.env" ]; } || bad=bad
+done
+if run --tag --no-updates; then bad=bad; fi
+if run --tag; then bad=bad; fi
+check bad_tag_rejected "$bad"
+world
+run --tag v1.2.3-rc_1
+if has '^IMAGE_TAG=v1.2.3-rc_1$' "$MC_PREFIX/.env"; then check good_tag_accepted ok; else check good_tag_accepted bad; fi
+
+# unsafe prefixes never reach rm -rf
+world
+bad=ok
+mkdir -p "$w/cwd/relative/dir/data"
+for p in / relative/dir // /tmp/../x; do
+    ( cd "$w/cwd" && MC_PREFIX=$p sh "$root/install.sh" --uninstall --purge > "$w/out" 2>&1 ); rc=$?
+    { [ "$rc" != 0 ] && [ -d "$w/cwd/relative/dir/data" ]; } || bad=bad
+done
+check unsafe_prefix_refused "$bad"
+
+# daemon down / no compose plugin / unsupported arch: one line, exit 1, nothing written
+world
+touch "$FAKE_DIR/info_fail"
+run; rc=$?
+if [ "$rc" = 1 ] && has "daemon" "$w/out" && [ ! -e "$MC_PREFIX/compose.yaml" ]; then
+    check fails_when_daemon_down ok; else check fails_when_daemon_down bad; fi
+world
+touch "$FAKE_DIR/compose_missing"
+run; rc=$?
+if [ "$rc" = 1 ] && has "Compose" "$w/out" && [ ! -e "$MC_PREFIX/compose.yaml" ]; then
+    check fails_without_compose_plugin ok; else check fails_without_compose_plugin bad; fi
+world
+mkdir "$w/fb"
+realuname=$(command -v uname)
+# shellcheck disable=SC2016 # script text, expanded when the fake runs
+printf '#!/bin/sh\n[ "$1" = -m ] && { echo armv7l; exit 0; }\nexec %s "$@"\n' "$realuname" > "$w/fb/uname"
+chmod +x "$w/fb/uname"
+PATH="$w/fb:$PATH" run; rc=$?
+if [ "$rc" = 1 ] && has "armv7l" "$w/out" && [ ! -e "$MC_PREFIX/compose.yaml" ]; then
+    check fails_on_unsupported_arch ok; else check fails_on_unsupported_arch bad; fi
+
+# version comes from the software node of a realistic multi-node /api/status
+world
+mkdir "$w/fb"
+realcurl=$(command -v curl)
+cat > "$w/fb/curl" <<CURLEOF
+#!/bin/sh
+case "\$*" in
+    *localhost:50118/api/status*) [ -f "$FAKE_DIR/status_json" ] && { cat "$FAKE_DIR/status_json"; exit 0; }; exit 7 ;;
+esac
+exec $realcurl "\$@"
+CURLEOF
+chmod +x "$w/fb/curl"
+printf '%s\n' '{"schema":2,"now_ms":1,"nodes":{"base":{"dot":"green","fields":{"fw_version":"1.2.0","version":"BASE-9.9"},"counters":{},"events":[],"last_fault":null,"unseen_faults":0},"controller":{"dot":"grey","fields":{"version":"CTRL-8.8"},"counters":{},"events":[],"last_fault":null,"unseen_faults":0},"software":{"dot":"green","fields":{"activity":"idle","version":"abc1234"},"counters":{"rx":5},"events":[{"t":1,"level":"info","text":"\"version\":\"EVIL\""}],"last_fault":null,"unseen_faults":0}},"problems":[],"songs":[]}' > "$FAKE_DIR/status_json"
+MC_WAIT_SECONDS=3 PATH="$w/fb:$PATH" run; rc=$?
+if [ "$rc" = 0 ] && has "Version: *abc1234$" "$w/out"; then
+    check version_from_software_node ok; else check version_from_software_node bad; fi
+
 exit "$fail"

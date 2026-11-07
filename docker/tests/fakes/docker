@@ -41,6 +41,11 @@ case "$1" in
         case "$3" in *:previous) echo "$2" > "$d/previous_id" ;; esac
         exit 0
         ;;
+    info)
+        # install tests: info_fail present = daemon unreachable
+        [ -f "$d/info_fail" ] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
+        exit 0
+        ;;
     ps)
         # install tests: $FAKE_DIR/ps_out is what "docker ps" prints (absent = nothing running)
         [ -f "$d/ps_out" ] && cat "$d/ps_out"
@@ -48,6 +53,10 @@ case "$1" in
         ;;
     compose)
         case "$*" in
+            *" version")
+                # install tests: compose_missing present = no compose plugin
+                [ -f "$d/compose_missing" ] && { echo "docker: 'compose' is not a docker command." >&2; exit 1; }
+                ;;
             *"up -d midicontrol")
                 if [ "${IMAGE_TAG:-}" = previous ]; then
                     echo "$(cat "$d/previous_id")|true|0" > "$d/container"

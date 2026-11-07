@@ -33,6 +33,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --tag)
             [ "$#" -ge 2 ] || die "--tag needs a value"
+            case "$2" in -*) die "--tag needs a value, got the option $2" ;; esac
             TAG=$2
             shift
             ;;
@@ -44,6 +45,10 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
+if [ -n "$TAG" ]; then
+    printf '%s' "$TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]*$' \
+        || die "invalid --tag '$TAG': use letters, digits, '_', '.' and '-' (not starting with '.' or '-')."
+fi
 [ "$PURGE" = 0 ] || [ "$UNINSTALL" = 1 ] || die "--purge only makes sense with --uninstall"
 
 DOCKER=${MC_DOCKER:-docker}
@@ -51,6 +56,12 @@ PREFIX=${MC_PREFIX:-/opt/midicontrol}
 BINDIR=${MC_BINDIR:-/usr/local/bin}
 RAW_URL=${MC_RAW_URL:-https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-py/main/docker}
 WAIT=${MC_WAIT_SECONDS:-60}
+# Everything below may run rm -rf under PREFIX: it must be an absolute path below /.
+case "$PREFIX" in
+    */..|*/../*|*/.) die "MC_PREFIX must not contain . or .. components, got '$PREFIX'." ;;
+    /*[!/]*) ;;
+    *) die "MC_PREFIX must be an absolute path other than /, got '$PREFIX'." ;;
+esac
 PORT=50118
 # URL of install.sh itself (it lives one level above docker/).
 INSTALL_URL="${RAW_URL%/docker}/install.sh"
@@ -67,7 +78,9 @@ OWNER=${SUDO_USER:-$(id -un)}
 OWNER_GROUP=$(id -gn "$OWNER" 2>/dev/null || id -gn)
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # systemctl --user for the invoking user, also when this script runs under sudo.
 user_systemctl() {
@@ -128,6 +141,9 @@ port_busy() {
         return 1
     fi
 }
+if ! command -v ss >/dev/null 2>&1 && ! command -v netstat >/dev/null 2>&1; then
+    echo "Warning: neither ss nor netstat found, port $PORT check skipped."
+fi
 if port_busy; then
     ours=$("$DOCKER" ps --filter name='^/?midicontrol$' --format '{{.Names}}' 2>/dev/null || true)
     [ -n "$ours" ] || die "port $PORT is already in use by something other than the midicontrol container. Stop that program first (find it with: ss -ltnp | grep $PORT)."
@@ -141,9 +157,17 @@ curl -fsSL "$RAW_URL/midicontrol-wrapper.sh" -o "$tmp/midicontrol" \
 
 # ---- layout -----------------------------------------------------------------------
 $SUDO mkdir -p "$PREFIX" "$BINDIR"
+data_new=0
+[ -d "$PREFIX/data" ] || data_new=1
 $SUDO mkdir -p "$PREFIX/data/songs" "$PREFIX/data/recordings" "$PREFIX/data/diag" "$PREFIX/data/firmware"
 # Group-writable and setgid, so songs can be copied in over SSH without sudo.
-$SUDO chown -R "$OWNER:$OWNER_GROUP" "$PREFIX/data"
+# Only a fresh data/ is re-owned recursively; on a re-run files written by the
+# container (root) stay as they are.
+if [ "$data_new" = 1 ]; then
+    $SUDO chown -R "$OWNER:$OWNER_GROUP" "$PREFIX/data"
+else
+    $SUDO chown "$OWNER:$OWNER_GROUP" "$PREFIX/data" "$PREFIX/data/songs" "$PREFIX/data/recordings" "$PREFIX/data/diag" "$PREFIX/data/firmware"
+fi
 $SUDO chmod 2775 "$PREFIX/data" "$PREFIX/data/songs" "$PREFIX/data/recordings" "$PREFIX/data/diag" "$PREFIX/data/firmware"
 
 $SUDO cp "$tmp/compose.yaml" "$PREFIX/compose.yaml"
@@ -158,9 +182,9 @@ if [ -e "$PREFIX/.env" ]; then
     fi
 else
     {
-        echo "IMAGE_TAG=${TAG:-stable}"
-        echo "UPDATE_WINDOW=02:00-04:00"
-        if [ "$NO_UPDATES" = 1 ]; then echo "UPDATE_ENABLED=0"; else echo "UPDATE_ENABLED=1"; fi
+        printf 'IMAGE_TAG=%s\n' "${TAG:-stable}"
+        printf 'UPDATE_WINDOW=02:00-04:00\n'
+        if [ "$NO_UPDATES" = 1 ]; then printf 'UPDATE_ENABLED=0\n'; else printf 'UPDATE_ENABLED=1\n'; fi
     } > "$tmp/env"
     $SUDO cp "$tmp/env" "$PREFIX/.env"
     $SUDO chmod 644 "$PREFIX/.env"
@@ -184,7 +208,9 @@ while [ "$waited" -lt "$WAIT" ]; do
     waited=$((waited + 1))
 done
 
-version=$(printf '%s' "$status" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+# The software node's "version" field only (the base node has other version-like fields).
+version=$(printf '%s' "$status" | sed -n 's/.*"software":{//p' | sed 's/"counters".*//' \
+    | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
 if [ -z "$version" ]; then
     version=$(sed -n 's/^IMAGE_TAG=//p' "$PREFIX/.env")
     version="${version:-stable} (tag; the status page did not answer yet)"
