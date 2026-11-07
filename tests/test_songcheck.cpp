@@ -47,6 +47,10 @@ TEST(songcheck_real_files) {
         if (name == "523.mid") {
             if (!hasProblem(c, "empty display anchor")) FAIL_AT("523.mid: no empty-anchor problem");
             CHECK_EQ(c.code, "523");
+        } else if (name == "rejstriky.mid") {
+            // Organ stop-list reference file, not a song: its name is not a song code.
+            if (!hasProblem(c, "file name is not a valid song code"))
+                FAIL_AT("rejstriky.mid: no bad-name problem");
         } else if (!c.problems.empty()) {
             closedir(dir);
             FAIL_AT(name + ": unexpected problem: " + c.problems[0]);

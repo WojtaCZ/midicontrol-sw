@@ -3,6 +3,7 @@ FROM debian:stable AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake pkg-config librtmidi-dev libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
+ARG GIT_SHA=unknown
 WORKDIR /src
 COPY CMakeLists.txt ./
 COPY include include
@@ -10,7 +11,7 @@ COPY src src
 COPY tests tests
 COPY songs songs
 COPY packaging packaging
-RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DMC_GIT_HASH="${GIT_SHA}" \
     && cmake --build build -j"$(nproc)" \
     && ctest --test-dir build --output-on-failure
 

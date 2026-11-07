@@ -131,12 +131,15 @@ if(RTMIDI_FOUND)
         src/sd_notify.cpp
     )
     # Version shown on the status page: git hash and build date at configure time.
+    # MC_GIT_HASH can be given on the command line (-DMC_GIT_HASH=..., used by the Docker build, no .git there).
+    if(NOT MC_GIT_HASH)
     execute_process(COMMAND git rev-parse --short HEAD
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                     OUTPUT_VARIABLE MC_GIT_HASH OUTPUT_STRIP_TRAILING_WHITESPACE
                     ERROR_QUIET RESULT_VARIABLE MC_GIT_RESULT)
     if(NOT MC_GIT_RESULT EQUAL 0 OR MC_GIT_HASH STREQUAL "")
         set(MC_GIT_HASH "unknown")
+    endif()
     endif()
     string(TIMESTAMP MC_BUILD_DATE "%Y-%m-%d")
     target_compile_definitions(midicontrol PRIVATE
