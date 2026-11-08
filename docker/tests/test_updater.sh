@@ -343,4 +343,69 @@ r=ok; out=$(loop '2026-06-11 02:30' '2026-06-11 12:00' 02:00-04:00 0)
 [ "$out" = "ATTEMPT 2026-06-11 02:30" ] || { r=bad; echo "$out"; }
 check loop_started_inside_window_attempts_once $r
 
+# ---------------------------------------------------------------- final review fixes
+# Item 9: a non-2xx answer (curl -f exits 22) is not "the status endpoint answers".
+world; touch "$FAKE_DIR/http_error_after"
+r=ok; rc=$(run_update)
+[ "$rc" = 13 ] || { r=bad; echo "  rc=$rc"; cat "$FAKE_DIR/log"; }
+check health_gate_non_2xx_is_not_an_answer $r
+
+# Item 10: no app container existed and the new image fails the gate: nothing to roll
+# back to; result "failed" (return code stays 13), no :previous compose call.
+world; rm "$FAKE_DIR/container" "$FAKE_DIR/status_before"; echo false > "$FAKE_DIR/new_running"
+r=ok; rc=$(run_update)
+[ "$rc" = 13 ] || r=bad
+no_calls 'IMAGE_TAG=previous' || r=bad
+[ "$(ustat .result)" = failed ] || r=bad
+[ "$(ustat .failed_digest)" = null ] || r=bad
+grep -q rolling "$FAKE_DIR/log" && r=bad
+[ "$(lib result_name 13)" = failed ] || r=bad
+[ "$r" = ok ] || { echo "  rc=$rc"; cat "$FAKE_DIR/calls"; cat "$FAKE_DIR/log"; }
+check update_failed_without_previous_container_does_not_roll_back $r
+# ... and with a container the old behaviour is unchanged
+world; rm "$FAKE_DIR/status_after"
+rc=$(run_update)
+r=ok; [ "$rc" = 13 ] && [ "$(lib result_name 13)" = rolled_back ] || r=bad
+check rolled_back_result_name $r
+
+# Item 5: a second update_once while one runs is "busy" (11) and touches nothing.
+world; mkdir -p "$MC_DATA_DIR/diag"
+lockf=$(lib lock_file)
+( flock 9 && touch "$FAKE_DIR/lock_held" && sleep 20 ) 9> "$lockf" &
+holder=$!
+i=0; while [ ! -f "$FAKE_DIR/lock_held" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+r=ok; rc=$(run_update)
+[ "$rc" = 11 ] || r=bad
+[ ! -s "$FAKE_DIR/calls" ] || r=bad
+grep -qi "already running" "$FAKE_DIR/log" || r=bad
+kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+rc=$(run_update)   # lock released: runs normally
+[ "$rc" = 0 ] || r=bad
+[ "$r" = ok ] || { echo "  rc=$rc"; cat "$FAKE_DIR/log"; }
+check update_once_is_mutually_exclusive $r
+
+# Item 7: TERM/INT end the updater at once (exit 0), also while it sleeps, and the
+# sleeping child does not outlive it.
+term_test() { # NAME, env assignments...
+    tt_name=$1; shift
+    world
+    env -u MC_SLEEP "$@" sh "$MC_LIB_DIR/updater.sh" > "$FAKE_DIR/upd.out" 2>&1 &
+    tt_pid=$!
+    sleep 0.5
+    tt_child=$(pgrep -P "$tt_pid" sleep | head -n 1)
+    kill -TERM "$tt_pid"
+    tt_i=0; while kill -0 "$tt_pid" 2>/dev/null && [ "$tt_i" -lt 30 ]; do sleep 0.1; tt_i=$((tt_i + 1)); done
+    tt_r=ok
+    if kill -0 "$tt_pid" 2>/dev/null; then tt_r=bad; kill -KILL "$tt_pid"; fi
+    wait "$tt_pid" 2>/dev/null; tt_rc=$?
+    [ "$tt_rc" = 0 ] || tt_r=bad
+    [ -n "$tt_child" ] || tt_r=bad
+    if [ -n "$tt_child" ] && kill -0 "$tt_child" 2>/dev/null; then tt_r=bad; kill "$tt_child"; fi
+    [ "$tt_r" = ok ] || { echo "  rc=$tt_rc child=$tt_child"; cat "$FAKE_DIR/upd.out"; }
+    check "$tt_name" "$tt_r"
+}
+term_test updater_disabled_exits_fast_on_term UPDATE_ENABLED=0
+far=$(date -d '+12 hours' +%H:%M); far2=$(date -d '+13 hours' +%H:%M)
+term_test updater_loop_exits_fast_on_term UPDATE_ENABLED=1 UPDATE_WINDOW="$far-$far2"
+
 exit $fail

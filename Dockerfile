@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM debian:stable AS build
+FROM debian:trixie AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake pkg-config librtmidi-dev libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -15,8 +15,9 @@ RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DMC_GIT_HASH="${GIT_SHA}" \
     && cmake --build build -j"$(nproc)" \
     && ctest --test-dir build --output-on-failure
 
-FROM debian:stable-slim
-# librtmidi7 is the runtime package on Debian 13 (trixie); adjust if "stable" moves to a new soname.
+FROM debian:trixie-slim
+LABEL org.opencontainers.image.source="https://github.com/WojtaCZ/midicontrol-sw-py"
+# librtmidi7 is the runtime package on Debian 13 (trixie); bump the base images and this name together.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         librtmidi7 alsa-utils curl jq docker-cli docker-compose ca-certificates \
     && rm -rf /var/lib/apt/lists/*

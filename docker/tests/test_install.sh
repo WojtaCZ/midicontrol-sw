@@ -29,6 +29,8 @@ world() {
 }
 run() { sh "$root/install.sh" "$@" > "$w/out" 2>&1; }
 has() { grep -q -- "$1" "$2"; }
+# The template with the default prefix replaced by this world's MC_PREFIX.
+expected_compose() { sed "s|/opt/midicontrol|$MC_PREFIX|g" "$root/docker/compose.template.yaml" > "$w/expected.yaml"; echo "$w/expected.yaml"; }
 
 # fails_without_docker
 world
@@ -41,7 +43,7 @@ world
 run; rc=$?
 ok=bad
 if [ "$rc" = 0 ] && [ -f "$MC_PREFIX/compose.yaml" ] \
-   && cmp -s "$MC_PREFIX/compose.yaml" "$root/docker/compose.template.yaml" \
+   && cmp -s "$MC_PREFIX/compose.yaml" "$(expected_compose)" \
    && [ "$(cat "$MC_PREFIX/.env")" = "IMAGE_TAG=stable
 UPDATE_WINDOW=02:00-04:00
 UPDATE_ENABLED=1" ] \
@@ -59,6 +61,30 @@ if has "http://.*:50118/" "$w/out" && has "midicontrol-updater --once" "$w/out" 
    && has "install.sh | sh -s -- --uninstall" "$w/out" && has "midicontrol" "$w/out"; then ok=ok; fi
 check prints_url_and_commands "$ok"
 
+# custom_prefix_is_honoured_everywhere (final review I1): bind mounts and the updater's
+# MC_PREFIX/MC_DATA_DIR all follow MC_PREFIX, no hard-coded default path is left.
+world
+run; rc=$?
+c="$MC_PREFIX/compose.yaml"
+ok=bad
+if [ "$rc" = 0 ] && ! grep -q '/opt/midicontrol' "$c" \
+   && has "^      - $MC_PREFIX/data:/data\$" "$c" \
+   && has "^      - $MC_PREFIX:$MC_PREFIX\$" "$c" \
+   && has "^      MC_PREFIX: $MC_PREFIX\$" "$c" \
+   && has "^      MC_DATA_DIR: $MC_PREFIX/data\$" "$c" \
+   && has "^    working_dir: $MC_PREFIX\$" "$c"; then ok=ok; fi
+[ "$ok" = ok ] || cat "$c"
+check custom_prefix_is_honoured_everywhere "$ok"
+
+# prefix characters that could break the YAML or the sed expression are refused
+bad=ok
+for p in "$tmp/a b" "$tmp/a|b" "$tmp/a&b" "$tmp/a:b"; do
+    world
+    MC_PREFIX=$p run; rc=$?
+    [ "$rc" = 1 ] && has "MC_PREFIX" "$w/out" && [ ! -e "$p/compose.yaml" ] || { bad=bad; echo "  prefix '$p' rc=$rc"; }
+done
+check prefix_with_unsafe_characters_refused "$bad"
+
 # rerun_keeps_customised_env_and_config (Review Focus 4)
 world
 run
@@ -69,7 +95,7 @@ echo "# stale" > "$MC_PREFIX/compose.yaml"
 run --tag foo; rc=$?
 if [ "$rc" = 0 ] && cmp -s "$w/env.before" "$MC_PREFIX/.env" \
    && cmp -s "$w/conf.before" "$MC_PREFIX/data/config.conf" \
-   && cmp -s "$MC_PREFIX/compose.yaml" "$root/docker/compose.template.yaml" \
+   && cmp -s "$MC_PREFIX/compose.yaml" "$(expected_compose)" \
    && has "ignored" "$w/out" && has "IMAGE_TAG" "$w/out"; then
     check rerun_keeps_customised_env_and_config ok; else check rerun_keeps_customised_env_and_config bad; fi
 
@@ -188,6 +214,29 @@ PATH="$w/fb:$PATH" run; rc=$?
 if [ "$rc" = 1 ] && has "armv7l" "$w/out" && [ ! -e "$MC_PREFIX/compose.yaml" ]; then
     check fails_on_unsupported_arch ok; else check fails_on_unsupported_arch bad; fi
 
+# status page never answers: an honest message, no "is running" claim (exit stays 0:
+# the containers were started, only the check timed out)
+world
+mkdir "$w/fb"
+realcurl=$(command -v curl)
+cat > "$w/fb/curl" <<CURLEOF
+#!/bin/sh
+case "\$*" in
+    *localhost:50118/api/status*) exit 7 ;;
+esac
+exec $realcurl "\$@"
+CURLEOF
+chmod +x "$w/fb/curl"
+MC_WAIT_SECONDS=2 PATH="$w/fb:$PATH" run; rc=$?
+if [ "$rc" = 0 ] && ! has "MIDIControl is running" "$w/out" && has "did not answer within 2 s" "$w/out" \
+   && has "docker logs midicontrol" "$w/out" && has "midicontrol-updater --once" "$w/out"; then
+    check status_timeout_is_reported_honestly ok; else cat "$w/out"; check status_timeout_is_reported_honestly bad; fi
+# MC_WAIT_SECONDS=0 (not waiting) also makes no running claim
+world
+run
+if ! has "MIDIControl is running" "$w/out" && has "not waiting" "$w/out"; then
+    check no_wait_makes_no_running_claim ok; else check no_wait_makes_no_running_claim bad; fi
+
 # version comes from the software node of a realistic multi-node /api/status
 world
 mkdir "$w/fb"
@@ -202,7 +251,7 @@ CURLEOF
 chmod +x "$w/fb/curl"
 printf '%s\n' '{"schema":2,"now_ms":1,"nodes":{"base":{"dot":"green","fields":{"fw_version":"1.2.0","version":"BASE-9.9"},"counters":{},"events":[],"last_fault":null,"unseen_faults":0},"controller":{"dot":"grey","fields":{"version":"CTRL-8.8"},"counters":{},"events":[],"last_fault":null,"unseen_faults":0},"software":{"dot":"green","fields":{"activity":"idle","version":"abc1234"},"counters":{"rx":5},"events":[{"t":1,"level":"info","text":"\"version\":\"EVIL\""}],"last_fault":null,"unseen_faults":0}},"problems":[],"songs":[]}' > "$FAKE_DIR/status_json"
 MC_WAIT_SECONDS=3 PATH="$w/fb:$PATH" run; rc=$?
-if [ "$rc" = 0 ] && has "Version: *abc1234$" "$w/out"; then
+if [ "$rc" = 0 ] && has "MIDIControl is running" "$w/out" && has "Version: *abc1234$" "$w/out"; then
     check version_from_software_node ok; else check version_from_software_node bad; fi
 
 exit "$fail"

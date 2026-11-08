@@ -24,9 +24,9 @@ Options (put them after `sh -s --` when piping):
 | `--no-updates` | writes `UPDATE_ENABLED=0` (the updater stays idle) |
 | `--uninstall [--purge]` | see [Uninstall](#uninstall) |
 
-Environment overrides: `MC_PREFIX` (install directory, default `/opt/midicontrol`), `MC_BINDIR` (wrapper location, default `/usr/local/bin`), `MC_DOCKER` (docker command), `MC_RAW_URL` (where `compose.template.yaml` and `midicontrol-wrapper.sh` are fetched), `MC_WAIT_SECONDS` (how long to wait for the status page, default 60, 0 = do not wait).
+Environment overrides: `MC_PREFIX` (install directory, default `/opt/midicontrol`; written into `compose.yaml`, the bind mounts and the updater follow it; only letters, digits and `_ . / + -` are accepted), `MC_BINDIR` (wrapper location, default `/usr/local/bin`), `MC_DOCKER` (docker command), `MC_RAW_URL` (where `compose.template.yaml` and `midicontrol-wrapper.sh` are fetched), `MC_WAIT_SECONDS` (how long to wait for the status page, default 60, 0 = do not wait). If the status page does not answer in time the installer says so and points to `docker logs midicontrol` (exit code 0: the containers are started).
 
-Re-running the installer is safe: an existing `.env` and `data/config.conf` are never overwritten (so `--tag` and `--no-updates` are ignored then; edit `.env`).
+Re-running the installer is safe for your files: an existing `.env` and `data/config.conf` are never overwritten (so `--tag` and `--no-updates` are ignored then; edit `.env`). It does, however, pull and recreate the containers **without the updater's idle guard or health gate**, so run it at night or when the organ is idle. See also the rollback warning below.
 
 ### What gets installed
 
@@ -70,7 +70,7 @@ For each attempt it:
 3. tags the running image `:previous`, recreates the player with the new image, and runs a **health gate** (60 s): the container stays up without restarts, `/api/status` answers, and the base reconnects if it was connected before;
 4. on success, recreates itself last through a one-shot helper container; on failure, **rolls back** to `:previous` and records the failed image id.
 
-The result of the last attempt is in `/opt/midicontrol/data/diag/update-status.json` (`result`: `updated`, `nothing_new`, `busy`, `pull_failed`, `rolled_back`; plus `time`, `tag`, `digest`, `failed_digest`, `detail`).
+The result of the last attempt is in `/opt/midicontrol/data/diag/update-status.json` (`result`: `updated`, `nothing_new`, `busy`, `pull_failed`, `rolled_back`, `failed`; plus `time`, `tag`, `digest`, `failed_digest`, `detail`).
 
 ### Idle guard
 
@@ -84,7 +84,7 @@ An update only starts when `GET /api/status` says all of this: `nodes.software.f
 docker exec updater midicontrol-updater --once
 ```
 
-This runs one attempt immediately and prints `result: <name> (<code>)` (codes: 0 updated, 10 nothing new, 11 busy, 12 pull failed, 13 rolled back). The idle guard still applies. It works with `UPDATE_ENABLED=0` too.
+This runs one attempt immediately and prints `result: <name> (<code>)` (codes: 0 updated, 10 nothing new, 11 busy, 12 pull failed, 13 rolled back; 11 is also returned when another attempt is already running; code 13 with result `failed` means the new image failed the health gate and there was no earlier app container to roll back to). The idle guard still applies. It works with `UPDATE_ENABLED=0` too.
 
 ### Switch updates off, pin a version
 
@@ -106,6 +106,8 @@ cd /opt/midicontrol
 sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=1.2.2/' .env
 docker compose up -d
 ```
+
+**After a `rolled_back` result:** the app now runs `:previous`, but `IMAGE_TAG` still says `stable`, which resolves to the bad image again. A later `docker compose up -d` or an installer re-run recreates the app from that bad image, with no health gate, and the box can sit in a crash loop until the next release. Before running `compose up` or the installer, pin `IMAGE_TAG` in `.env` to a known good version (for example `IMAGE_TAG=1.2.2`), or wait for the next `stable` release to be pulled by the updater (which skips the known bad image).
 
 Setting `UPDATE_ENABLED=0` only matters while `IMAGE_TAG` stays `stable` or `edge`; a pinned numeric tag such as `1.2.2` already stops forward movement (the updater then only re-pulls that same tag).
 
@@ -136,7 +138,7 @@ This runs `docker compose down` and removes `compose.yaml`, `.env` and the wrapp
 
 ### Notes and known caveats
 
-- **GHCR visibility (one time, by hand):** the first push creates the package as private. In GitHub (package settings, Change visibility) set `midicontrol-sw-py` to public, otherwise `docker pull` on the mini PC fails. Linking the package to the repository uses the `org.opencontainers.image.source` label; check that the package page shows the repository link after the first publish.
+- **GHCR visibility (one time, by hand):** the first push creates the package as private. In GitHub (package settings, Change visibility) set `midicontrol-sw-py` to public, otherwise `docker pull` on the mini PC fails. The image carries the `org.opencontainers.image.source` label (set in the `Dockerfile`), which links the package to the repository; check that the package page shows the repository link after the first publish.
 - **Image tags** (CI, `.github/workflows/ci.yml`): pull request builds push nothing; push to `main` publishes `edge`; a tag `v1.2.3` publishes `stable`, `1.2.3` and `sha-<short>`.
 - **Known limitation:** `--exit-on-stall` detects a stalled or deadlocked worker thread, NOT a frozen or SIGSTOPped whole process (the watchdog runs inside the process). The image HEALTHCHECK is informational; nothing restarts a frozen process. Spec section 6's `kill -STOP` test therefore does not apply to this design.
 - If `arecordmidi` dies by itself, `recording` stays true until a Stop; the updater then stays busy (the safe direction).

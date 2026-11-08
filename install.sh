@@ -58,6 +58,9 @@ RAW_URL=${MC_RAW_URL:-https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-p
 WAIT=${MC_WAIT_SECONDS:-60}
 # Everything below may run rm -rf under PREFIX: it must be an absolute path below /.
 case "$PREFIX" in
+    *[!A-Za-z0-9_./+-]*) die "MC_PREFIX may only contain letters, digits and _ . / + - (it is written into compose.yaml), got '$PREFIX'." ;;
+esac
+case "$PREFIX" in
     */..|*/../*|*/.) die "MC_PREFIX must not contain . or .. components, got '$PREFIX'." ;;
     /*[!/]*) ;;
     *) die "MC_PREFIX must be an absolute path other than /, got '$PREFIX'." ;;
@@ -170,7 +173,10 @@ else
 fi
 $SUDO chmod 2775 "$PREFIX/data" "$PREFIX/data/songs" "$PREFIX/data/recordings" "$PREFIX/data/diag" "$PREFIX/data/firmware"
 
-$SUDO cp "$tmp/compose.yaml" "$PREFIX/compose.yaml"
+# Every default path in the template follows MC_PREFIX (bind mounts, working_dir, updater env).
+# PREFIX is restricted to characters that are safe in a sed replacement and in YAML.
+sed "s|/opt/midicontrol|$PREFIX|g" "$tmp/compose.yaml" > "$tmp/compose.out"
+$SUDO cp "$tmp/compose.out" "$PREFIX/compose.yaml"
 $SUDO chmod 644 "$PREFIX/compose.yaml"
 
 if [ -e "$PREFIX/.env" ]; then
@@ -199,8 +205,10 @@ compose up -d || die "docker compose up -d failed."
 
 status=""
 waited=0
+answered=0
 while [ "$waited" -lt "$WAIT" ]; do
     if status=$(curl -fsS --max-time 2 "http://localhost:$PORT/api/status" 2>/dev/null); then
+        answered=1
         break
     fi
     status=""
@@ -218,9 +226,19 @@ fi
 host=$(hostname 2>/dev/null || true)
 [ -n "$host" ] || host=localhost
 
+if [ "$answered" = 1 ]; then
+    headline="MIDIControl is running."
+elif [ "$WAIT" -gt 0 ]; then
+    # Exit code stays 0: the containers were started; only the readiness check timed out.
+    headline="MIDIControl is installed, but the status page did not answer within $WAIT s.
+Check the container: docker logs midicontrol"
+else
+    headline="MIDIControl is installed and started (not waiting for the status page)."
+fi
+
 cat <<DONE
 
-MIDIControl is running.
+$headline
   Status page: http://$host:$PORT/
   Version:     $version
 

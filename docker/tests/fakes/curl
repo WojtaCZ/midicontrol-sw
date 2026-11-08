@@ -6,6 +6,11 @@ d=${FAKE_DIR:?FAKE_DIR not set}
 echo "$*" >> "$d/curl_calls"
 phase=$(cat "$d/phase" 2>/dev/null || echo before)
 if [ -f "$d/status_$phase" ]; then
+    # http_error_<phase> present = the endpoint answers 500: with -f (first arg, e.g. -fs) curl
+    # exits 22 without a body, without it the body is printed and the exit code is 0.
+    if [ -f "$d/http_error_$phase" ]; then
+        case "$1" in -*f*) exit 22 ;; esac
+    fi
     cat "$d/status_$phase"
     exit 0
 fi

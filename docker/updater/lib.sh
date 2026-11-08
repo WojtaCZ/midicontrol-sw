@@ -36,7 +36,8 @@ result_name() {
         10) echo nothing_new ;;
         11) echo busy ;;
         12) echo pull_failed ;;
-        13) echo rolled_back ;;
+        13) # rollback impossible (no previous container) is recorded as "failed"
+            if [ "$(jq -r '.result // ""' "$(status_file)" 2>/dev/null)" = failed ]; then echo failed; else echo rolled_back; fi ;;
         *) echo "error" ;;
     esac
 }
@@ -150,7 +151,7 @@ base_connected() {
 }
 
 fetch_status() {
-    curl -s --max-time 5 "${MC_STATUS_URL:-http://127.0.0.1:50118/api/status}"
+    curl -fs --max-time 5 "${MC_STATUS_URL:-http://127.0.0.1:50118/api/status}"
 }
 
 # ------------------------------------------------------------------ docker
@@ -241,9 +242,23 @@ self_update() {
 
 # ------------------------------------------------------------------ update
 
-# update_once: one update attempt (spec 5.5 steps 2-5). Returns 0 updated,
-# 10 nothing new, 11 busy, 12 pull failed, 13 rolled back.
+# Lock file serialising update attempts (the loop and "--once" run in different processes).
+lock_file() { echo "${MC_DATA_DIR:-/opt/midicontrol/data}/diag/update.lock"; }
+
+# update_once: one update attempt, run under an exclusive flock; a concurrent
+# attempt returns 11 (busy) without touching anything.
 update_once() {
+    uol_f=$(lock_file)
+    mkdir -p "$(dirname "$uol_f")" 2>/dev/null || uol_f=/tmp/midicontrol-update.lock
+    (
+        flock -n 9 || { log "another update attempt is already running; skipping"; exit "$UPD_BUSY"; }
+        update_locked
+    ) 9> "$uol_f"
+}
+
+# update_locked: one update attempt (spec 5.5 steps 2-5). Returns 0 updated,
+# 10 nothing new, 11 busy, 12 pull failed, 13 rolled back.
+update_locked() {
     uo_image=${IMAGE:-ghcr.io/wojtacz/midicontrol-sw-py}
     uo_tag=${IMAGE_TAG:-stable}
     uo_ref="$uo_image:$uo_tag"
@@ -310,6 +325,12 @@ update_once() {
         return $UPD_OK
     fi
 
+    if [ -z "$uo_cur" ]; then
+        # First install through the updater: there is no :previous to go back to.
+        log "update to $uo_new failed and there was no app container before; leaving it as it is"
+        write_status failed "$uo_new" "health gate failed, no previous container"
+        return $UPD_ROLLED_BACK
+    fi
     log "update to $uo_new failed; rolling back to :previous"
     mc_compose previous up -d "$MC_APP" || log "rollback compose call failed"
     write_status rolled_back "$uo_new" "health gate failed"

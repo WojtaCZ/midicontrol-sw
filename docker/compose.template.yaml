@@ -1,4 +1,5 @@
-# Installed as /opt/midicontrol/compose.yaml; variables come from .env next to it.
+# Installed as <prefix>/compose.yaml; variables come from .env next to it.
+# install.sh rewrites every /opt/midicontrol below to the chosen MC_PREFIX.
 name: midicontrol
 
 services:
@@ -22,11 +23,13 @@ services:
     # Host network: the updater reaches the player's status endpoint at 127.0.0.1:50118.
     network_mode: host
     restart: always
+    init: true   # PID 1 forwards TERM, so "docker stop" is fast
     command: ["midicontrol-updater"]
     working_dir: /opt/midicontrol
     env_file: .env
     environment:
       COMPOSE_PROJECT_NAME: midicontrol
+      MC_PREFIX: /opt/midicontrol
       MC_DATA_DIR: /opt/midicontrol/data
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

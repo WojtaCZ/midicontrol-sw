@@ -6,6 +6,22 @@
 # shellcheck source=docker/updater/lib.sh
 . "${MC_LIB_DIR:-/usr/local/lib/midicontrol}/lib.sh"
 
+# PID 1 in the container: end promptly on TERM/INT (docker stop) and take the
+# sleeping child along. Sleeping is "sleep & wait" so the trap runs at once.
+sleep_pid=""
+interruptible_sleep() {
+    sleep "$1" &
+    sleep_pid=$!
+    wait "$sleep_pid"
+    sleep_pid=""
+}
+stop_now() {
+    [ -z "$sleep_pid" ] || kill "$sleep_pid" 2>/dev/null
+    exit 0
+}
+trap stop_now TERM INT
+[ "$MC_SLEEP" != sleep ] || MC_SLEEP=interruptible_sleep
+
 usage() {
     echo "usage: midicontrol-updater [--once]"
     echo "  --once  update now (skipped while the organ is busy) and print the result"
