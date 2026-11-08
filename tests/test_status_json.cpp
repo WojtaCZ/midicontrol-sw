@@ -51,6 +51,14 @@ TEST(json_schema_keys) {
     CHECK(j.back() == '}');
 }
 
+TEST(status_json_unset_organ_power_renders_null) {
+    StatusRegistry r([] { return int64_t(1); });
+    r.set(Node::Base, "organ_power", std::monostate{});
+    CHECK(contains(toJson(r.snapshot()), "\"organ_power\":null"));
+    r.set(Node::Base, "organ_power", true);
+    CHECK(contains(toJson(r.snapshot()), "\"organ_power\":true"));
+}
+
 TEST(json_events_newest_first) {
     int64_t t = 1;
     StatusRegistry r([&] { return t; });

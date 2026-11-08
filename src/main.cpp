@@ -106,7 +106,10 @@ private:
         while (!_cv.wait_for(lk, std::chrono::seconds(5), [&] { return _stop; })) {
             const bool alive = _handler.threadsAlive(std::chrono::seconds(10)) && (!_extraAlive || _extraAlive());
             if (_exitOnStall && monitor.shouldExit(alive, std::chrono::steady_clock::now())) {
-                mc::log::error(Node::Software, "a worker thread stalled for 30 s; exiting for a restart");
+                // Raw write(2): the logger takes locks a stalled thread may hold.
+                static const char msg[] = "midicontrol: a worker thread stalled for 30 s; exiting for a restart\n";
+                const ssize_t wr = ::write(STDERR_FILENO, msg, sizeof msg - 1);
+                (void)wr;
                 std::_Exit(70);
             }
             if (alive) {
@@ -114,7 +117,9 @@ private:
                 sdNotify("WATCHDOG=1");
             } else if (!stalled) {
                 stalled = true;
-                mc::log::warn(Node::Software, "a worker thread stalled; withholding the watchdog ping");
+                static const char msg[] = "midicontrol: a worker thread stalled; withholding the watchdog ping\n";
+                const ssize_t wr = ::write(STDERR_FILENO, msg, sizeof msg - 1);  // not the logger: its locks may be held
+                (void)wr;
             }
         }
     }

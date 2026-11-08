@@ -115,7 +115,7 @@ CommHandler::CommHandler(const Config& config, MidiPortFinder midiFinder,
 
     _status.set(Node::Base, "connected", false);
     _status.set(Node::Base, "reconnects", int64_t{0});
-    _status.set(Node::Base, "organ_power", false);
+    _status.set(Node::Base, "organ_power", std::monostate{});  // unknown until the base reports (the updater guard reads null as unknown)
     _status.set(Node::Software, "playback", std::string("idle"));
     _status.set(Node::Software, "recording", false);
     _hbControl.store(steadyMs());
