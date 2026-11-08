@@ -74,7 +74,7 @@ The result of the last attempt is in `/opt/midicontrol/data/diag/update-status.j
 
 ### Idle guard
 
-An update only starts when `GET /api/status` says all of this: `nodes.software.fields.playback` is `idle`, `recording` is not true, `fw_update_state` is not `running`, and the organ is off (`nodes.base.fields.organ_power` false; if it is unknown, the base must not be connected). An unreachable or unreadable status counts as busy.
+An update only starts when `GET /api/status` says all of this: `nodes.software.fields.playback` is `idle`, `recording` is not true, `fw_update_state` is not `running`, and the organ is off (`nodes.base.fields.organ_power` false; if it is unknown, the base must not be connected). An unreachable or unreadable status counts as busy while the app container is running (if it is not running, the updater proceeds).
 
 **`KeepPowerOn=true` consequence:** with `KeepPowerOn = true` in `config.conf` the organ stays switched on between songs, so the guard never sees it off and the nightly update never runs. Switch the organ off (or leave `KeepPowerOn = false`, the container default), or update by hand.
 
@@ -107,7 +107,7 @@ sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=1.2.2/' .env
 docker compose up -d
 ```
 
-and set `UPDATE_ENABLED=0` if the updater should not move forward again.
+Setting `UPDATE_ENABLED=0` only matters while `IMAGE_TAG` stays `stable` or `edge`; a pinned numeric tag such as `1.2.2` already stops forward movement (the updater then only re-pulls that same tag).
 
 ## Stall detection
 
@@ -138,6 +138,7 @@ This runs `docker compose down` and removes `compose.yaml`, `.env` and the wrapp
 
 - **GHCR visibility (one time, by hand):** the first push creates the package as private. In GitHub (package settings, Change visibility) set `midicontrol-sw-py` to public, otherwise `docker pull` on the mini PC fails. Linking the package to the repository uses the `org.opencontainers.image.source` label; check that the package page shows the repository link after the first publish.
 - **Image tags** (CI, `.github/workflows/ci.yml`): pull request builds push nothing; push to `main` publishes `edge`; a tag `v1.2.3` publishes `stable`, `1.2.3` and `sha-<short>`.
+- **Known limitation:** `--exit-on-stall` detects a stalled or deadlocked worker thread, NOT a frozen or SIGSTOPped whole process (the watchdog runs inside the process). The image HEALTHCHECK is informational; nothing restarts a frozen process. Spec section 6's `kill -STOP` test therefore does not apply to this design.
 - If `arecordmidi` dies by itself, `recording` stays true until a Stop; the updater then stays busy (the safe direction).
 - `recording` and `fw_update_state` are in the status JSON under `nodes.software.fields` (`recording` is the player's recording state, `fw_update_state` is `running`, `done` or `failed`).
 - The image installs the Debian `docker-compose` package for the updater's `docker compose` calls; that this provides a working `docker compose` plugin is assumed and still to be verified on the bench.

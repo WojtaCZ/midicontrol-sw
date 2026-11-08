@@ -10,10 +10,25 @@ Run on the real mini PC with the real MIDIControl device, in this order (the fir
 | 2 | USB replug | Unplug and replug the USB cable. Device recovered without a container restart (`docker ps` uptime unchanged, `reconnects` +1). | |
 | 3 | Base firmware update | Update the base from the status page. It re-enumerates as `ABCD:1235` and the update completes inside the container; device returns as `ABCD:1234`. | |
 | 4 | Recording | `midicontrol --cmd record`, play, `stop`. `arecordmidi` writes a complete file to `/opt/midicontrol/data/recordings` (`/data/recordings`). | |
-| 5 | Stall restart | `docker exec midicontrol sh -c 'kill -STOP 1'` (or the player pid). The container restarts within the stall limit (about 45 s plus restart); `docker logs midicontrol` shows the stall and exit 70. | |
+| 5 | Stall restart (one worker thread) | Stall ONE worker thread while the process keeps running; see the method below. The container restarts within about 45 s (10 s heartbeat age + 5 s watchdog tick + 30 s limit); `docker inspect -f '{{.State.ExitCode}}' midicontrol` or `docker logs midicontrol` shows exit 70 and "a worker thread stalled for 30 s; exiting for a restart". | |
 | 6 | Reboot | Reboot the PC without logging in. Both containers start, status page reachable. | |
 | 7 | Update guard and window | Publish a `stable` image while a song plays: nothing restarts. After playback ends, the organ is off and the window opens (or `docker exec updater midicontrol-updater --once`): it updates once. Check `update-status.json`. | |
 | 8 | Rollback | Publish a broken image. The health gate fails, the player returns to `:previous`, `update-status.json` shows `rolled_back` and the bad digest is not retried. | |
+
+### Check 5 method (stall one thread, not the process)
+
+The stall watchdog is a thread inside the player (`Watchdog::loop` in `src/main.cpp`, ends in `std::_Exit(70)`). A whole-process `kill -STOP` freezes that thread too, and PID 1 in a container ignores signals sent from inside its own namespace, so `kill -STOP` cannot test it. Instead freeze one other thread (reader, keepalive or control) and let the rest run. gdb is not in the image: run it on the host (needs gdb installed there) against the host-visible PID:
+
+```sh
+PID=$(docker top midicontrol -eo pid,comm | awk '/midicontrol/ {print $1; exit}')   # host PID
+echo "PID=$PID"; sudo gdb        # then at the (gdb) prompt follow the steps below
+```
+
+Attach in non-stop mode so only the chosen thread is stopped: start `sudo gdb`, then `set non-stop on`, `attach $PID`, `info threads` (pick a reader/keepalive/control thread; `ps -T -p $PID` helps), `thread <n>`, `interrupt`. Leave gdb attached. The other threads keep running, so the watchdog thread notices the missing heartbeat and exits after about 45 s. (These gdb steps are a suggestion, not yet tried; if non-stop is not available, any method that blocks a single worker thread, such as `thread apply <n> call (void)pause()`, is equivalent.) Afterwards check the exit code and the restart as in the table.
+
+### Known limitation
+
+`--exit-on-stall` detects a stalled or deadlocked worker thread. It does NOT detect a frozen or SIGSTOPped whole process: the watchdog lives inside the process and stops with it. The image HEALTHCHECK is informational; nothing restarts a frozen process. Spec section 6's `kill -STOP` wording therefore does not apply to this in-process design.
 
 ## Open builder decisions (spec section 7), decide on the bench and write the decision here
 
