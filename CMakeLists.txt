@@ -152,6 +152,7 @@ if(RTMIDI_FOUND)
     endif()
 
     # ---- Install: binary, example config, systemd user unit ----
+    # Developer use only: production runs from the Docker image (docs/deployment.md).
     include(GNUInstallDirs)
     install(TARGETS midicontrol RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(FILES config.conf

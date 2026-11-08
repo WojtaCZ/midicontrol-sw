@@ -1,6 +1,6 @@
 # Status web page and always-on service
 
-The PC player (`midicontrol`) runs as an unattended systemd user service, serves a status page with a Stops editor on port **50118**, and accepts terminal commands through a local control socket. This document covers how to install and use it and how it behaves. It also records how it was built and tested, the decisions taken, and what is still open.
+The PC player (`midicontrol`) runs unattended, serves a status page with a Stops editor on port **50118**, and accepts terminal commands through a local control socket. This document covers how to install and use it and how it behaves. It also records how it was built and tested, the decisions taken, and what is still open.
 
 - Design (the binding spec): [`superpowers/specs/2026-10-19-status-web-design.md`](superpowers/specs/2026-10-19-status-web-design.md)
 - Implementation plan: [`superpowers/plans/2026-10-19-status-web.md`](superpowers/plans/2026-10-19-status-web.md)
@@ -10,6 +10,8 @@ The PC player (`midicontrol`) runs as an unattended systemd user service, serves
 ---
 
 ## 1. Install and run as a service
+
+> **Production is the Docker container**: install, updates, rollback and troubleshooting are in [`deployment.md`](deployment.md). In the container the player runs with `--exit-on-stall` (a stalled worker thread makes it exit with status 70 and Docker restarts it) instead of the systemd watchdog. The systemd user unit described in this section is **for developers only**.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -45,6 +47,8 @@ The web thread is deliberately **not** part of the watchdog check. A stuck web p
 No libsystemd is needed: the datagrams go straight to `$NOTIFY_SOCKET`, and nothing is sent when it is unset (started by hand).
 
 ### Single instance
+
+The same lock and socket are used in the container (`/tmp/midicontrol-0/` unless `XDG_RUNTIME_DIR` is set); a stale socket file from a previous run is unlinked at start while the lock is held.
 
 - The player takes an exclusive `flock` on `$XDG_RUNTIME_DIR/midicontrol.lock`, falling back to `/tmp/midicontrol-<uid>/` when `XDG_RUNTIME_DIR` is unset.
 - It opens the serial port with `TIOCEXCL`, so a second process can never steal the base link.
@@ -157,7 +161,7 @@ Field names, which are the contract between `CommHandler`, `main` and the page:
 
 | Node | Fields | Counters |
 |---|---|---|
-| software | `version`, `build_date`, `started_ms`, `config_path`, `play_folder`, `song_count`, `song_problems`, `playback`, `stops`, `song`, `section`, `last_song`, `last_sections`, `last_end`, `activity` | `songs_ended`, `songs_stopped`, `warnings`, `errors` |
+| software | `version`, `build_date`, `started_ms`, `config_path`, `play_folder`, `song_count`, `song_problems`, `playback`, `recording` (bool, true while `arecordmidi` runs; read by the container updater's idle guard), `fw_update_state` (`running`/`done`/`failed`), `stops`, `song`, `section`, `last_song`, `last_sections`, `last_end`, `activity` | `songs_ended`, `songs_stopped`, `warnings`, `errors` |
 | base | `connected`, `alive`, `updating`, `device`, `vidpid`, `midi_port_found`, `midi_out`, `keepalive_ack_ms`, `connected_since_ms`, `reconnects`, `organ_power` (base SSR, null = unknown), `status_ms`, `status_ble`, `status_relay`, `status_display`, `status_pc`, `status_answered` (the `status_*` fields are null while not connected) | `tx`, `rx`, `retries`, `gave_up`, `nak_sent`, `nak_received`, `crc_errors`, `duplicates`, `warnings`, `errors` |
 | controller | `last_rx_ms`, `last_cmd`, `last_cmd_reply`, `last_cmd_ms`, `last_tx`, `last_tx_result`, `last_tx_ms` | the same packet counters, plus `cmd.<MSGTYPE>` per received command |
 | base, controller (INFO_RESP) | `info_ms`, `info_unsupported`, `fw_revision`, `fw_branch`, `fw_built`, `fw_dirty`, `uptime_ms`, `reset_cause`, `fault_count`, `ble_connected`, `ble_stream_open`, `ble_secured`, `ble_bonded`, `ble_module_up`, `ble_peer_alive`, `ble_pc_alive`, `ble_peer`, `ble_name`, `ble_pairing`, `link_rssi`, `link_peer_rssi`, `link_interval_ms`, `link_latency`, `link_timeout_ms`, `link_phy`, `link_losses`, `link_err_conn`, `link_module_reboots`, `link_secure_retries`, `link_reconnect_ms` (RSSI fields are omitted when not measured); base `display`, `ssr`; controller `battery_mv`, `battery_level`, `battery_percent`, `charging`, `charge_done`, `vbus`, `battery_critical`, `vbus_mv` (all null when not reported) | |
@@ -287,6 +291,7 @@ There is no login and no HTTPS, by design: the page is meant for a trusted LAN (
 | Controller dot grey | The base isn't connected, or hasn't answered GET_STATUS in the last 15 s. |
 | `error: another midicontrol instance is running … but does not answer` | A second player holds the lock but its socket is gone. Find it with `pgrep -a midicontrol`. |
 | `warning: a worker thread stalled; withholding the watchdog ping` | A CommHandler thread made no progress for 10 s; systemd will restart the service within 30 s. |
+| Container: player keeps restarting | `docker logs midicontrol`; a stalled worker thread makes it exit with status 70 (about 45 s after the last good heartbeat), and Docker restarts it. |
 | `arecordmidi did not stop on SIGTERM; killed` | The recording file may be incomplete. |
 
 ---

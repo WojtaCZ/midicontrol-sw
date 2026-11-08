@@ -17,10 +17,11 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/midicontrol            # in a terminal: attaches to the running service, else runs standalone
 ./build/midicontrol --headless # service mode (implied when stdin is not a TTY); stops on SIGINT/SIGTERM
+./build/midicontrol --headless --exit-on-stall  # container mode: exit 70 on a stalled worker thread (env MIDICONTROL_EXIT_ON_STALL=1; off when NOTIFY_SOCKET is set)
 ./build/midicontrol --cmd "update base fw-update.bin"  # one command (service or standalone), exit 0 = ok
 ./build/midicontrol_tests      # run unit tests (no hardware required)
 ctest --test-dir build         # same tests via CTest
-cmake --install build          # binary, share/midicontrol/config.conf.example, lib/systemd/user/midicontrol.service
+cmake --install build          # developer use: binary, share/midicontrol/config.conf.example, lib/systemd/user/midicontrol.service
 ```
 
 Device: USB serial VID:PID=ABCD:1234 (base bootloader: ABCD:1235) plus ALSA MIDI ports named "MIDIControl"; both are re-discovered after a USB reconnect. Uses `arecordmidi` for recording.
@@ -29,12 +30,15 @@ Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME
 
 ## Service, status page, control socket
 
+**Production path: the Docker container** (image `ghcr.io/wojtacz/midicontrol-sw-py`, one-command `install.sh`, night-window updater with idle guard and rollback): [`docs/deployment.md`](docs/deployment.md), bench checklist [`docs/bench-acceptance-docker.md`](docs/bench-acceptance-docker.md). The systemd user unit below is developer-only.
+
 Full operator guide, behaviour, design decisions, known issues and the bench checklist: [`docs/status-web-and-service.md`](docs/status-web-and-service.md).
 
 - **Status page**: `http://<pc>:50118/` (`GET /`, `GET /api/status` JSON schema 2, `GET /api/diag`, `GET /api/stops` and `PUT /api/stops/<code>` for the per-song organ stops in `<PlayFolder>/<CODE>.conf` (needs `Content-Type: application/json`), `POST /api/firmware/<base|remote>` with a `<name>-update.bin` as `application/octet-stream` (≤ 512 KiB, 202 then progress in Software `fw_update_*` fields)), served by the player process itself on its own thread. Two views: home "Přehled" (Czech, for the organist: notices, system topology, now playing, stops editor) and "Pokročilé" (English: Overview / Software / Base / Controller / Diagnostics / Firmware, `#adv/<page>`; Firmware = drop zone per unit, the trailer's board ID is checked in the browser, by `fwupload` and by the device, so base and controller images can't be swapped); design context in `PRODUCT.md`; Base and Controller show only what the PC sees (firmware debug data later = more `fields` in the same JSON). Port 50118 is also used by the superpowers brainstorm companion server; don't run both.
 - **Single instance**: exclusive `flock` on `$XDG_RUNTIME_DIR/midicontrol.lock` (fallback `/tmp/midicontrol-<uid>/`); the serial port is opened with `TIOCEXCL`.
 - **Control socket** `$XDG_RUNTIME_DIR/midicontrol.sock` (0600): `midicontrol` in a terminal attaches to the running service as a thin client (commands run in the service; `quit` detaches); `--cmd` is the one-shot form. Line protocol in `console.hpp` (reply ends with `\x1eOK` / `\x1eFAIL`).
-- **systemd**: `Type=notify` (`READY=1`, `WATCHDOG=1` sent directly to `$NOTIFY_SOCKET`, no libsystemd), `WatchdogSec=30`, `Restart=always`, `StartLimitIntervalSec=0`. The watchdog ping is sent only while the CommHandler reader, keepalive and control threads all stamp their heartbeats. `loginctl enable-linger $USER` is required for start at boot.
+- **systemd (developer-only)**: `Type=notify` (`READY=1`, `WATCHDOG=1` sent directly to `$NOTIFY_SOCKET`, no libsystemd), `WatchdogSec=30`, `Restart=always`, `StartLimitIntervalSec=0`. The watchdog ping is sent only while the CommHandler reader, keepalive and control threads all stamp their heartbeats. `loginctl enable-linger $USER` is required for start at boot.
+- **Container**: `docker/` holds `compose.template.yaml` (services `midicontrol` and `updater`), `entrypoint.sh` (seeds `/data`, runs `--headless --exit-on-stall`), `midicontrol-wrapper.sh` (host console), `config.container.conf` and `updater/` (`lib.sh`, `updater.sh`; tests in `docker/tests/`, run with `sh docker/tests/test_*.sh`); `install.sh` and `Dockerfile` at the root, CI in `.github/workflows/ci.yml`. Software status field `recording` (bool) and `fw_update_state` are read by the updater's idle guard from `/api/status`.
 
 ## Diagnostics (base log + remote DIAG records)
 
@@ -54,6 +58,7 @@ Full operator guide, behaviour, design decisions, known issues and the bench che
   - The dev container has the `rtmidi` package (6.0, checked 2026-10-26), so the full app builds there too (bench runs in a scratch build dir). Earlier bench builds (2026-10-19/20) used an ALSA shim instead.
 - POSIX termios (serial) + pthreads
 - `arecordmidi` (ALSA utils) for recording
+- Container deployment only: Docker with the Compose plugin; the image adds `curl`, `jq`, `docker-cli`, `docker-compose` for the updater.
 
 ## C++ Architecture
 
@@ -98,7 +103,7 @@ App layer (needs hardware):
 - **`instance`** — runtime dir and the single-instance lock.
 - **`sd_notify`** — `READY=1` / `WATCHDOG=1` / `STOPPING=1` datagrams.
 - **`main`** — args/config/headless/`--cmd`; attach-or-run; interactive CLI: `play <code>`, `stop`, `verse` (add verse), `list`, `record`, `on`, `off`, `status`, `update`, `quit`.
-- **`packaging/midicontrol.service.in`** — systemd user unit (configured at build time).
+- **`packaging/midicontrol.service.in`** — systemd user unit (configured at build time; developer use only, production is the container).
 
 ## Tests
 

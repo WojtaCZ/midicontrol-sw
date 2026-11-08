@@ -1,4 +1,6 @@
 # systemd user unit for the MIDIControl PC player (always-on service).
+# DEVELOPER USE ONLY. The supported production path is the Docker container
+# (docs/deployment.md); this unit is kept for local development on a dev machine.
 #
 # Install:  cmake --install build            (default prefix /usr/local)
 # Config:   ~/.config/midicontrol/config.conf
