@@ -99,6 +99,7 @@ repo; PC = `ctest` / `midicontrol_tests` in `midicontrolpy-sw`.
 | 2.6 web details | | | `http_405_carries_allow`, `fwimage_unknown_board_id_*`, `fwupload_transfer_progress_*` |
 | 2.7 Host header | | | none: accepted per SYS-WEB-05 (D4) |
 | 2.8 shifted digits | | | `songcheck_warns_*` |
+| 3 base GET_STATUS (gap 10) | `test_cdc_local.py::test_status_ble_only_when_secured`, `test_get_status` | `BleLinkUsable.*` | |
 | 3 indicator bus (gaps 24, 29) | `test_display.py` (all 8; `test_rx_frame_flag_check`, `test_rx_off_for_the_whole_frame`, `test_quiet_bus_holds_tx`) | `IndicatorFrame.*`, `QuietBus.*` | |
 
 ## 3. Robustness and security faults found in code review
@@ -113,7 +114,9 @@ the details.
   - It accepts connections, frames and OTA from any base, not only the bonded one (D3, gap 6).
   - It has no "pair new base" action (gap 7).
   - It trusts RN status text injected by a peer (F2/F4, gap 8).
-- **Base.** GET_STATUS reports BLE "connected" before the link is secured (gap 10).
+- **Base.** **Fixed 2026-11-12** (local, not pushed): GET_STATUS reported BLE "connected" from %CONNECT%, before the
+  link was secured (gap 10). It now reports 1 only for a usable link: connected, stream open and peer accepted
+  (SYS-LINK-07, `blestatus::linkUsable`, the same rule as BUSY vs UNREACHABLE).
 - **Indicator bus.**
   - **Fixed 2026-11-12** (local, not pushed): the `0xB0` flag of received frames is now checked (SYS-BUS-08, gap 24).
   - **Fixed 2026-11-12** (local, not pushed): the base waits for 25 ms of quiet bus before transmitting (SYS-BUS-05, gap 29).
