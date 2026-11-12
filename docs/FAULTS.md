@@ -99,6 +99,7 @@ repo; PC = `ctest` / `midicontrol_tests` in `midicontrolpy-sw`.
 | 2.6 web details | | | `http_405_carries_allow`, `fwimage_unknown_board_id_*`, `fwupload_transfer_progress_*` |
 | 2.7 Host header | | | none: accepted per SYS-WEB-05 (D4) |
 | 2.8 shifted digits | | | `songcheck_warns_*` |
+| 3 indicator bus (gaps 24, 29) | `test_display.py` (all 8; `test_rx_frame_flag_check`, `test_rx_off_for_the_whole_frame`, `test_quiet_bus_holds_tx`) | `IndicatorFrame.*`, `QuietBus.*` | |
 
 ## 3. Robustness and security faults found in code review
 
@@ -114,8 +115,11 @@ the details.
   - It trusts RN status text injected by a peer (F2/F4, gap 8).
 - **Base.** GET_STATUS reports BLE "connected" before the link is secured (gap 10).
 - **Indicator bus.**
-  - The `0xB0` flag of received frames is not checked (SYS-BUS-08, gap 24).
-  - There is no wait for a quiet bus before transmitting (SYS-BUS-05, gap 29).
+  - **Fixed 2026-11-12** (local, not pushed): the `0xB0` flag of received frames is now checked (SYS-BUS-08, gap 24).
+  - **Fixed 2026-11-12** (local, not pushed): the base waits for 25 ms of quiet bus before transmitting (SYS-BUS-05, gap 29).
+  - **Fixed 2026-11-12**: the RX DMA came back at DMA TC, about 2 bytes before our frame left the wire, so the echo tail
+    could fall into the RX buffer and misalign the next foreign frame. It now comes back at USART TC after an RDR flush.
+  - Still to check on a real display: `midicontrol-fw/TODO.md` (Indicator bus).
   - Reference: `midicontrol-protocol/INDICATOR-BUS.md`.
 
 ## 4. Not verified yet (no fault known)
