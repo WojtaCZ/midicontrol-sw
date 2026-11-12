@@ -100,6 +100,8 @@ repo; PC = `ctest` / `midicontrol_tests` in `midicontrolpy-sw`.
 | 2.7 Host header | | | none: accepted per SYS-WEB-05 (D4) |
 | 2.8 shifted digits | | | `songcheck_warns_*` |
 | 3 base GET_STATUS (gap 10) | `test_cdc_local.py::test_status_ble_only_when_secured`, `test_get_status` | `BleLinkUsable.*` | |
+| 3 remote peer guard (gaps 6, 7, 8) | `test_remote_guard.py` (8: bond, F4 `CMD>`, F2 `%CONNECT%`, unknown status, other central refused, pairing window stores / closes, own K,1 relinks) | `PeerGuard.*` (midicontroller-fw) | |
+| 3 remote RX resync, stuck command mode | `test_remote_status_rx.py` (lost closing / opening '%', `%DATA%` recovery) | `StatusFramer.*`, `StuckCommandMode.*` (midicontroller-fw) | |
 | 3 indicator bus (gaps 24, 29) | `test_display.py` (all 8; `test_rx_frame_flag_check`, `test_rx_off_for_the_whole_frame`, `test_quiet_bus_holds_tx`) | `IndicatorFrame.*`, `QuietBus.*` | |
 
 ## 3. Robustness and security faults found in code review
@@ -110,10 +112,25 @@ the details.
 - **Bootloader.**
   - A power cut during the vector-page commit can brick the board (F4/P6, gap 20).
   - An image without a trailer still boots (F5/P6, gap 21).
-- **Remote.**
-  - It accepts connections, frames and OTA from any base, not only the bonded one (D3, gap 6).
-  - It has no "pair new base" action (gap 7).
-  - It trusts RN status text injected by a peer (F2/F4, gap 8).
+- **Remote.** **Fixed 2026-11-12** (local, not pushed), `midicontroller-fw` `src/logic/peer_guard`:
+  - It accepted connections, frames and OTA from any base (D3, gap 6). Now only the bonded base gets a link that carries
+    frames; any other central gets K,1. The module's accept list holds the bond too.
+  - It had no "pair new base" action (gap 7). Now Nastaveni -> "Sparovat zakl." opens a 60 s window; the first central
+    that connects and secures becomes the bond. No trust on first use: after the upgrade the remote has no bond and must
+    be paired once from this menu. Any base in range during the window can take it, so switch an old base off first.
+  - It trusted RN status text injected by a peer (F2/F4, gap 8). Now a second %CONNECT% while linked and a "CMD>" we did
+    not ask for are ignored, and a refused peer's text is not believed.
+  - Residual risk: RN status text and data share one stream, so the bonded base itself could still write status text.
+  - Found on the bench while testing this (all fixed, same repo):
+    - The RX parser had no resync. One lost '%' left it inside a "status" for good, so every protocol frame went into the
+      status buffer: no keepalive reached `link`, and the base dropped the remote while BLE stayed up.
+      `src/logic/status_framer` now ends a status on a control byte, an overlong text or "%%".
+    - The module sometimes sat in command mode while the firmware thought it was in data mode. The base's frames then came
+      as `%DATA:<handle>,<char>,<hex>%` and `---` answered `Err`. The firmware now sends K,1 and leaves command mode
+      (`---`) on the next accepted link (`StuckCommandMode`). Why the module got there is not known.
+    - The RNBD350 answers our own K,1 with `AOK` and sends **no** %DISCONNECT%. The guard kept the old link up and
+      ignored the base's reconnect as F2 text: linked, but no frames. The firmware now ends the link itself after its own
+      K,1 (`disconnect()`, `refusePeer()`, the stuck-mode path).
 - **Base.** **Fixed 2026-11-12** (local, not pushed): GET_STATUS reported BLE "connected" from %CONNECT%, before the
   link was secured (gap 10). It now reports 1 only for a usable link: connected, stream open and peer accepted
   (SYS-LINK-07, `blestatus::linkUsable`, the same rule as BUSY vs UNREACHABLE).
