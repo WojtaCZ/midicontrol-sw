@@ -27,10 +27,11 @@ std::string problem(const std::vector<uint8_t>& file, uint8_t board, fwimage::Ch
     if (file.size() >= 4 && file[0] == 0x7F && file[1] == 'E' && file[2] == 'L' && file[3] == 'F')
         return "this is an ELF file; use the <name>-update.bin next to it in the firmware's build folder";
     if (file[0] == ':') return "this looks like an Intel hex file; use the <name>-update.bin from the firmware build";
+    if (c == fwimage::Check::UnknownBoard) {
+        return "this is built for an unknown unit (board ID " +
+               std::to_string(fwimage::boardIdOf(file).value_or(0)) + "); nothing was sent";
+    }
     if (c == fwimage::Check::WrongBoard) {
-        const uint8_t id = file[file.size() - fwimage::kTrailerSize + 12];  // trailer boardId
-        if (id != protocol::ADDR_BASE && id != protocol::ADDR_REMOTE)
-            return "this is built for an unknown unit (board ID " + std::to_string(id) + "); nothing was sent";
         const uint8_t other = board == protocol::ADDR_BASE ? protocol::ADDR_REMOTE : protocol::ADDR_BASE;
         if (fwimage::check(file, other) == fwimage::Check::Ok)
             return std::string("this is the ") + unitName(other) + " firmware, not the " + unitName(board) +
@@ -60,6 +61,17 @@ mc::http::Response handlePost(const std::string& target, const std::string& body
     if (auto why = start(std::move(a)); !why.empty()) return refuse(409, why);
     return json(202, "{\"target\":\"" + target + "\",\"version\":\"" + version + "\",\"size\":" +
                          std::to_string(size) + "}");
+}
+
+std::optional<TransferProgress::Step> TransferProgress::update(std::size_t done, std::size_t total) {
+    const int pct = total ? static_cast<int>(done * 100 / total) : 100;
+    if (pct == _lastPct) return std::nullopt;
+    _lastPct = pct;
+    Step s;
+    s.pct = pct;
+    s.msg = done >= total ? "Image sent (" + std::to_string(total) + " bytes)"
+                          : "Sending the image: " + std::to_string(done) + " of " + std::to_string(total) + " bytes";
+    return s;
 }
 
 }  // namespace mc::fwupload

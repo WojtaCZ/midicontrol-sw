@@ -57,19 +57,48 @@ Workspace layout (`/workspaces/MIDICONTROL-*`):
 - The base does not send All Notes Off and does not switch the SSR off when the PC goes away (D1).
 - A PC start does not send All Notes Off / organ off (D14).
 - These are code gaps, not hardware faults. They matter for the church.
+- **Base side fixed 2026-11-12** (local, not pushed). `recovery::PcLossGuard` (`midicontrol-fw/src/logic/recovery.hpp`)
+  fires once on PC present → lost (USB unmounted or keepalive timeout). `router::logChanges` then sends
+  `midi::sendStuckNoteCleanup()`, switches the SSR off, syncs the menu checkbox and logs
+  "PC lost: all notes off, organ power off". A base that never saw a PC keeps power (D19).
+  Tests: host `PcLossGuard.*`, hw `tools/basetest/test_pc_loss.py` (keepalive pause → SSR off within 6 s + 3 s). The
+  DIN half stays unverified until 1.1 is fixed.
+- **PC start fixed 2026-11-12** (local, not pushed). `mc::StartupReset` (`midicontrolpy-sw/src/startup_reset.cpp`)
+  sends All Notes Off on all 16 channels and organ power off on the first keepalive ACK, unless a command already claimed
+  the organ. Tests: `tests/test_startup_reset.cpp` (6). The wiring in `comm.cpp` has no unit test; on the bench the
+  service logs "Startup: All Notes Off sent on all 16 channels." and "Startup: organ power off." (seen in the
+  `test_web_update.py` service logs).
 
 ## 2. Faults seen on the bench
 
 | # | Fault | State | Where |
 |---|---|---|---|
-| 2.1 | Web base update failed with "cannot open bootloader port /dev/ttyACM0" about 1 s in. The base was left in the bootloader (reproduced 2 of 2). Cause: the service opened the new CDC port only once, while the `/dev` node was still appearing | **Fixed and pushed** (`0dbd924`, `4a58151` on `origin/main`: `mc::openWhenReady` plus tests). **Not re-tested on hardware**: re-run the web update of the base and the remote several times, busy (409 + CLI during web), page reload, and unplug mid-transfer | `midicontrolpy-sw` |
-| 2.2 | The first BLE attempt after a base boot fails (P1) | Open, gap 11 | `midicontrol-fw` |
+| 2.1 | Web base update failed with "cannot open bootloader port /dev/ttyACM0" about 1 s in. The base was left in the bootloader (reproduced 2 of 2). Cause: the service opened the new CDC port only once, while the `/dev` node was still appearing | **Fixed and pushed** (`0dbd924`, `4a58151` on `origin/main`: `mc::openWhenReady` plus tests). **Re-tested on hardware 2026-11-12**, all pass: 3 base updates in one service run (~13 s each, the service reconnects by itself), one remote update (152 s, same as the CLI's 143 s; link back 12 s later), busy (409 "already running" and the CLI `update` says busy while the page and `/api/status` keep answering), probe reset at 7 % (the job ends "failed: chunk at offset 8400 failed", the base stays in its bootloader, the CLI updater recovers it). Tests: `midicontrol-fw/tools/basetest/test_web_update.py`. A real USB unplug was not done (no switchable hub); the probe reset stands in for it. Note: the web page cannot itself recover a base left in its bootloader (POST answers 409 "the base is not connected"); the CLI `update base` can | `midicontrolpy-sw` |
+| 2.2 | The first BLE attempt after a base boot fails (P1) | **Fixed 2026-11-12** (local, not pushed). The remote still holds the link to the base that just reset, loses it ~2 s into the boot and restarts advertising (blocking `$$$` commands). That collides with the base's first CE: %CONNECT%, then %ERR_CONN% ~120 ms later before %STREAM_OPEN%, and the module connects again by itself ~200 ms later. Proof: with the remote module held in reset through the base boot 0 of 3 boots fail, normal boots 3 of 3. The link always came up on the first CE, only the counters said otherwise: a link that ends before STREAM_OPEN is now a failed setup (`linkstats::Stats::onLost` returns false, both fw repos), logged as "connect failed during setup". Tests: `tools/basetest/test_ble_boot.py` (3 boots, counters 0/0, stream open within 10 s), host `LinkStats.SetupFailureBeforeStreamOpenIsNotALoss` | `midicontrol-fw`, `midicontroller-fw` |
 | 2.3 | The base ST-Link V3 gets only the IDCODE, AP access fails ("examination failed"). Probe, cable or MCU state? | Open; the base is updated over USB meanwhile | bench |
-| 2.4 | `basetest` on 2026-11-07: 96 passed, 21 failed. Most failures are setup: no logic analyzer, remote ELF missing, `BASETEST_UPDATE_*` unset, DIN dead. Real ones: `test_set_current_on_off` uses a stale menu index; `test_log::test_positions_survive_uint32_wrap` gets a stray partial line in the `level d` reply | Open | `midicontrol-fw/TODO.md` |
-| 2.5 | Pairing tests still use the RN4870 address `D88039FE5996` (also in `src/logic/ble_status.hpp`). The RNBD350 remote is `40843204625F` | Open | `midicontrol-fw` |
-| 2.6 | Minor web issues: POST `/api/firmware` without a target answers 413 (expected 404); a chunked body says "the file is empty"; GET answers 404 (expected 405); board ID 7 shows "other unit" in the service but "unknown unit" in the page; `fw_update_msg` stays at "Requesting reboot into bootloader..." during the transfer | Open, cosmetic | `midicontrolpy-sw` |
-| 2.7 | The HTTP server does not check the Host header (DNS rebinding could PUT stops) | Open | `midicontrolpy-sw/TODO.md` |
-| 2.8 | Song files `512.mid` (verse shifted) and `513.mid` (song number shifted) contain misaligned display SysEx digits. These are authoring mistakes (D24). songcheck should warn about them (gap 31) | Open | `midicontrolpy-sw` |
+| 2.4 | `basetest` on 2026-11-07: 96 passed, 21 failed. Most failures are setup: no logic analyzer, remote ELF missing, `BASETEST_UPDATE_*` unset, DIN dead. Real ones: `test_set_current_on_off` uses a stale menu index; `test_log::test_positions_survive_uint32_wrap` gets a stray partial line in the `level d` reply | **Fixed 2026-11-12** (local). `test_set_current_on_off`: the power checkbox moved to `GUI::settingsItems[2]` (`test_cdc_local.py`). Wrap test: it moved the ring tail, not the head, to just below 2^32, a state the firmware never reaches (it rebases once tail >= 2^31), so the masked head jumped and the base sent line stubs; it now moves the head (`test_log.py`). Also `loglink.py` drops the partial first line after an open (`_synced`). The setup failures need the bench pieces (LA, remote ELF, `BASETEST_UPDATER`) | `midicontrol-fw/tools/basetest` |
+| 2.5 | Pairing tests still use the RN4870 address `D88039FE5996` (also in `src/logic/ble_status.hpp`). The RNBD350 remote is `40843204625F` | **Already resolved**: `test_pairing.py` and `test_ble_security.py` use `40843204625F`. The RN4870 address left in `ble_status.hpp` and `test_ble_status.cpp` is only an example of the RN4870 scan/connect line format, which the parser still accepts | `midicontrol-fw` |
+| 2.6 | Minor web issues: POST `/api/firmware` without a target answers 413 (expected 404); a chunked body says "the file is empty"; GET answers 404 (expected 405); board ID 7 shows "other unit" in the service but "unknown unit" in the page; `fw_update_msg` stays at "Requesting reboot into bootloader..." during the transfer | **Fixed 2026-11-12** (local, not pushed). 405 with `Allow: POST`; board ID 7 reads "unknown unit (board ID 7)" in both (`fwimage::Check::UnknownBoard`); `fwupload::TransferProgress` sets "Sending the image: N of M bytes". The 404/411 items were already fixed. Tests: `http_405_carries_allow`, `fwimage_unknown_board_id_reads_as_on_the_page`, `fwupload_transfer_progress_updates_the_message` | `midicontrolpy-sw` |
+| 2.7 | The HTTP server does not check the Host header (DNS rebinding could PUT stops) | **Accepted, not a fault (owner, 2026-11-12):** `SYSTEM.md` SYS-WEB-05 (D4) says "no authentication, no Host check: accepted", the church LAN is trusted. A Host check was written and dropped on the owner's decision; nothing to test | `midicontrolpy-sw` |
+| 2.8 | Song files `512.mid` (verse shifted) and `513.mid` (song number shifted) contain misaligned display SysEx digits. These are authoring mistakes (D24). songcheck should warn about them (gap 31) | **Fixed 2026-11-12** (local, not pushed). songcheck warns when the display digits are not right-aligned (`kWarnVerseShifted` for 512, `kWarnSongShifted` for 513). Tests: `songcheck_aligned_digits_no_warning`, `songcheck_warns_shifted_verse`, `songcheck_warns_shifted_song`, `songcheck_warns_real_shifted_files` | `midicontrolpy-sw` |
+
+### Fault → test index
+
+Run these to check that a fault stays fixed. hw = `cd midicontrol-fw/tools/basetest && ../../.venv/bin/python -m pytest -q -m hw <file>`
+(OTA and web tests need `BASETEST_UPDATER`); host fw = `cmake --build build-host && ./build-host/logic_tests` in the fw
+repo; PC = `ctest` / `midicontrol_tests` in `midicontrolpy-sw`.
+
+| Fault | hw (bench) | host fw | PC |
+|---|---|---|---|
+| 1.1 DIN | `test_midi.py` (fails until fixed) | | |
+| 1.2 PC loss / PC start | `test_pc_loss.py` | `PcLossGuard.*` | `test_startup_reset.cpp` |
+| 2.1 web update | `test_web_update.py`, `test_ota.py` | | `open_when_ready_*` |
+| 2.2 boot link | `test_ble_boot.py` | `LinkStats.SetupFailureBeforeStreamOpenIsNotALoss` (both fw repos) | |
+| 2.4 basetest | `test_cdc_local.py::test_set_current_on_off`, `test_log.py::test_positions_survive_uint32_wrap` | | |
+| 2.5 pairing address | `test_pairing.py`, `test_ble_security.py` | `test_ble_status.cpp` | |
+| 2.6 web details | | | `http_405_carries_allow`, `fwimage_unknown_board_id_*`, `fwupload_transfer_progress_*` |
+| 2.7 Host header | | | none: accepted per SYS-WEB-05 (D4) |
+| 2.8 shifted digits | | | `songcheck_warns_*` |
 
 ## 3. Robustness and security faults found in code review
 

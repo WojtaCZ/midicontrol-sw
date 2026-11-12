@@ -26,6 +26,7 @@
 #include "midicontrol/protocol/parser.hpp"
 #include "midicontrol/protocol/types.hpp"
 #include "midicontrol/serial_port.hpp"
+#include "midicontrol/startup_reset.hpp"
 #include "midicontrol/status.hpp"
 
 namespace mc {
@@ -144,7 +145,7 @@ private:
     };
 
     struct Command {
-        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown } kind;
+        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset } kind;
         std::string code;
         std::string path;
         uint64_t generation = 0;
@@ -282,6 +283,16 @@ private:
     std::unique_ptr<Player> _player;
     uint64_t _generation = 0;  // control thread only
     std::atomic<bool> _organOn{false};
+
+    // Startup reset (gap 2 / SYS-PWR-07 / SYS-NOTE-04): notes off + organ off
+    // once the base link is up. The keepalive ACK posts Kind::StartupReset
+    // while it is not finished; the control thread decides and performs it.
+    void doStartupReset();
+    mc::startup::StartupReset _startupReset;  // control thread only
+    std::atomic<bool> _startupResetDone{false};
+    std::atomic<bool> _startupResetQueued{false};
+    std::atomic<bool> _organClaimed{false};  // organOn() ran: never power off at startup
+    std::atomic<int64_t> _baseUpMs{-1};      // steady ms of the first keepalive ACK
 
     std::mutex _recorderMutex;
     int _recorderPid = -1;

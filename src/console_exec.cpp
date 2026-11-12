@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include "midicontrol/diag_api.hpp"
+#include "midicontrol/firmware_upload.hpp"
 #include "midicontrol/log.hpp"
 #include "midicontrol/protocol/constants.hpp"
 
@@ -127,10 +128,12 @@ bool ConsoleExecutor::runUpdate(const std::string& target, const Run& run, const
     set("fw_update_msg", std::string());
     _status.setNow(Node::Software, "fw_update_ms");
     _status.set(Node::Software, "activity", "firmware update to " + target + " in progress");
-    int lastPct = 0;
+    mc::fwupload::TransferProgress transfer;
     auto bar = [&](std::size_t done, std::size_t total) {
-        const int pct = total ? static_cast<int>(done * 100 / total) : 100;
-        if (pct != lastPct) set("fw_update_pct", static_cast<int64_t>(lastPct = pct));
+        if (auto step = transfer.update(done, total)) {
+            set("fw_update_pct", static_cast<int64_t>(step->pct));
+            set("fw_update_msg", step->msg);
+        }
         if (progress) progress(done, total);
     };
     auto tell = [&](const std::string& text) {

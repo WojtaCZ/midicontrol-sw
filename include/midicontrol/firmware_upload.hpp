@@ -1,6 +1,7 @@
 #ifndef MIDICONTROL_FIRMWARE_UPLOAD_HPP
 #define MIDICONTROL_FIRMWARE_UPLOAD_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -33,6 +34,22 @@ using Start = std::function<std::string(Accepted)>;
 // 202 {"target","version","size"} once started; 404 unknown target; 422 {"error"}
 // for a file that is not a valid update file for that unit; 409 {"error"} from `start`.
 mc::http::Response handlePost(const std::string& target, const std::string& body, const Start& start);
+
+// Progress of the image transfer for the status fields fw_update_pct / fw_update_msg
+// (FAULTS 2.6: the message used to stay at "Requesting reboot into bootloader..."). update()
+// returns a step only when the percentage changes (the first call always does), so the status
+// is not rewritten for every block.
+class TransferProgress {
+public:
+    struct Step {
+        int pct = 0;
+        std::string msg = {};
+    };
+    std::optional<Step> update(std::size_t done, std::size_t total);
+
+private:
+    int _lastPct = -1;
+};
 
 }  // namespace mc::fwupload
 

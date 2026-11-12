@@ -67,6 +67,11 @@ CommHandler::CommHandler(const Config& config, MidiPortFinder midiFinder,
     out.onNak = [this](uint8_t pid, uint8_t reason) { handleAck(pid, true, reason); };
     out.onKeepaliveAck = [this]() {
         _lastBaseKeepalive.store(Clock::now());
+        int64_t unset = -1;
+        _baseUpMs.compare_exchange_strong(unset, steadyMs());
+        if (!_startupResetDone.load() && !_updating.load() && !_startupResetQueued.exchange(true)) {
+            post({Command::Kind::StartupReset, {}, {}, 0});
+        }
         _status.setNow(Node::Base, "keepalive_ack_ms");
         if (_baseLostReported.exchange(false)) {
             _status.set(Node::Base, "alive", true);
@@ -866,6 +871,7 @@ std::vector<std::string> CommHandler::songList() const {
 }
 
 void CommHandler::organOn() {
+    _organClaimed.store(true);
     _organOn.store(true);
     _status.set(Node::Base, "organ_power", true);
     ++_setCurrentGen;  // STATUS_RESPs to earlier GET_STATUS no longer tell the SSR state
@@ -885,6 +891,7 @@ void CommHandler::displayClear() {
 }
 
 void CommHandler::recordSong() {
+    _organClaimed.store(true);  // the operator uses the organ: no startup power off
     auto ports = _midiFinder ? _midiFinder() : std::nullopt;
     if (!ports) {
         mc::log::error(Node::Software, "MIDIControl MIDI input port not found; cannot record.");
@@ -952,7 +959,8 @@ bool CommHandler::waitInterruptible(int ms) {
         const auto slice = std::min(deadline, Clock::now() + std::chrono::seconds(1));
         bool interrupted = _queueCv.wait_until(lk, slice, [&] {
             for (const auto& c : _queue) {
-                if (c.kind != Command::Kind::Finished) return true;  // stale Finished don't count
+                // Stale Finished and the startup check don't interrupt a warm-up.
+                if (c.kind != Command::Kind::Finished && c.kind != Command::Kind::StartupReset) return true;
             }
             return false;
         });
@@ -995,6 +1003,10 @@ void CommHandler::controlLoop() {
                 _organOn.store(false);
                 _status.set(Node::Base, "organ_power", std::monostate{});  // unknown until the base reports again
                 break;
+            case Command::Kind::StartupReset:
+                _startupResetQueued.store(false);
+                doStartupReset();
+                break;
             case Command::Kind::Shutdown:
                 if (releasePlayer()) {
                     displayClear();
@@ -1005,6 +1017,41 @@ void CommHandler::controlLoop() {
                 return;
         }
     }
+}
+
+void CommHandler::doStartupReset() {
+    if (_startupReset.finished()) return;
+    // Someone switched the organ on (a song, a recording) before the reset
+    // ran: the operator owns it now.
+    if (_organClaimed.load()) {
+        _startupReset.cancel();
+        _startupResetDone.store(true);
+        return;
+    }
+    const int64_t upMs = _baseUpMs.load();
+    const int64_t since = upMs < 0 ? -1 : steadyMs() - upMs;
+    auto ports = _midiFinder ? _midiFinder() : std::nullopt;
+    auto due = _startupReset.due(since, ports.has_value());
+    mc::startup::Actions performed;
+    if (due.allNotesOff) {
+        std::string err;
+        if (sendMidiMessages(ports->outIndex, mc::startup::allNotesOffMessages(), &err)) {
+            mc::log::info(Node::Software, "Startup: All Notes Off sent on all 16 channels.");
+        } else {
+            mc::log::warn(Node::Software, "Startup: All Notes Off not sent: " + err);
+        }
+        performed.allNotesOff = true;
+    } else if (due.organOff) {
+        mc::log::warn(Node::Software, "Startup: MIDI output port not found; organ powered off "
+                                      "without All Notes Off.");
+    }
+    if (due.organOff) {
+        organOff();  // indicator bus untouched (no display clear)
+        mc::log::info(Node::Software, "Startup: organ power off.");
+        performed.organOff = true;
+    }
+    _startupReset.done(performed);
+    if (_startupReset.finished()) _startupResetDone.store(true);
 }
 
 bool CommHandler::releasePlayer() {
@@ -1037,6 +1084,7 @@ void CommHandler::playbackEnded(const std::string& how, const char* counter) {
 }
 
 void CommHandler::doPlay(const Command& cmd) {
+    _organClaimed.store(true);  // a song owns the organ now: no startup power off
     if (releasePlayer()) playbackEnded("stopped", "songs_stopped");  // a new song replaces it
     {
         std::lock_guard<std::mutex> lk(_songMutex);

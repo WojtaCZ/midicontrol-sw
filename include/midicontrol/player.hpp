@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "midicontrol/display.hpp"
 #include "midicontrol/playback.hpp"
@@ -21,6 +22,12 @@ namespace mc {
 // thread (CommHandler's control thread). Callbacks run on the playback thread
 // and must not destroy the Player; onFinished should only post a message to
 // the owner, which then destroys the Player (joining the finished thread).
+// Open MIDI output `outPortIndex`, send `messages` and close it again (used
+// when no song plays, e.g. the startup All Notes Off). False with `err` set
+// when the port cannot be opened or a send fails.
+bool sendMidiMessages(int outPortIndex, const std::vector<std::vector<uint8_t>>& messages,
+                      std::string* err);
+
 class Player {
 public:
     explicit Player(int outPortIndex);

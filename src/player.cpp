@@ -38,6 +38,23 @@ private:
 
 }  // namespace
 
+bool sendMidiMessages(int outPortIndex, const std::vector<std::vector<uint8_t>>& messages,
+                      std::string* err) {
+    try {
+        RtMidiOut out;
+        out.openPort(static_cast<unsigned int>(outPortIndex));
+        for (const auto& m : messages) {
+            std::vector<unsigned char> msg(m.begin(), m.end());
+            out.sendMessage(&msg);
+        }
+        out.closePort();
+        return true;
+    } catch (const RtMidiError& e) {
+        if (err) *err = e.getMessage();
+        return false;
+    }
+}
+
 Player::Player(int outPortIndex) : _outPortIndex(outPortIndex) {}
 
 Player::~Player() { stop(); }

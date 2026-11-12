@@ -42,10 +42,11 @@ struct Response {
     int status = 200;
     std::string contentType;
     std::string body;
+    std::string allow = {};  // methods for the Allow header (set on every 405); empty = no header
 };
 
-// Status line, Content-Type, Content-Length, Cache-Control: no-store,
-// Connection: close, then the body.
+// Status line, Content-Type, Content-Length, Allow (when set), Cache-Control:
+// no-store, Connection: close, then the body.
 std::string serialize(const Response& r);
 
 // text/plain "<code> <reason>\n".
@@ -70,8 +71,8 @@ struct FirmwareApi {
 // Content-Type is application/json, so a plain cross-site form cannot post; 404 without `stops`),
 // POST /api/firmware/<target> -> firmware->post(target, body) (415 unless Content-Type is
 // application/octet-stream, which a cross-site form cannot send; 404 without `firmware`; other
-// methods on /api/firmware/<target> 405, /api/firmware without a target 404), other paths 404,
-// other methods 405.
+// methods on /api/firmware/<target> 405 with Allow: POST; POST /api/firmware without a target 404,
+// other methods there 405), other paths 404, other methods 405. Every 405 carries Allow.
 Response route(const Request& req, const std::string& html,
                const std::function<std::string()>& statusJson, const DiagHandler& diagJson = nullptr,
                const StopsApi* stops = nullptr, const FirmwareApi* firmware = nullptr);

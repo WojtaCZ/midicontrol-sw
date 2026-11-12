@@ -15,6 +15,6 @@ Per-song stops are implemented (stops editor on the home page, one `<CODE>.conf`
   after a pause, power-cycle to reset the stops (see "Organ stops" above),
   what happens at the start and end of a session.
 
-## Web: Host header not checked
+## Web: Host header not checked (accepted, SYS-WEB-05 / D4)
 
-- The HTTP server does not check the Host header, so a DNS-rebinding page on a LAN device could PUT stops. Consider accepting only IP-literal or own-hostname Host values.
+- The HTTP server does not check the Host header, so a DNS-rebinding page on a LAN device could PUT stops. Owner decision 2026-11-12 (FAULTS 2.7): accepted, the church LAN is trusted; no check.

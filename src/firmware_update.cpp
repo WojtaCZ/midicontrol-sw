@@ -90,7 +90,7 @@ bool FirmwareUpdater::checkImage(const std::vector<uint8_t>& image, const std::s
     fwimage::Info info;
     auto c = fwimage::check(image, board, &info);
     if (c != fwimage::Check::Ok) {
-        error("firmware update: refusing " + name + ": " + fwimage::describe(c));
+        error("firmware update: refusing " + name + ": " + fwimage::describe(c, fwimage::boardIdOf(image).value_or(0)));
         return false;
     }
     this->info("Image " + name + ": " + std::to_string(info.imageSize) + " bytes, version " +

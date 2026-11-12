@@ -117,6 +117,7 @@ std::string serialize(const Response& r) {
     std::string s = "HTTP/1.1 " + std::to_string(r.status) + " " + reasonPhrase(r.status) + "\r\n";
     s += "Content-Type: " + r.contentType + "\r\n";
     s += "Content-Length: " + std::to_string(r.body.size()) + "\r\n";
+    if (!r.allow.empty()) s += "Allow: " + r.allow + "\r\n";
     s += "Cache-Control: no-store\r\n";
     s += "Connection: close\r\n\r\n";
     s += r.body;
@@ -128,23 +129,36 @@ Response errorResponse(int status) {
                     std::to_string(status) + " " + reasonPhrase(status) + "\n"};
 }
 
+namespace {
+Response notAllowed(const char* allow) {
+    Response r = errorResponse(405);
+    r.allow = allow;
+    return r;
+}
+}  // namespace
+
 Response route(const Request& req, const std::string& html,
                const std::function<std::string()>& statusJson, const DiagHandler& diagJson,
                const StopsApi* stops, const FirmwareApi* firmware) {
     constexpr const char* kStopsPrefix = "/api/stops/";
     if (req.path.rfind(kFirmwarePrefix, 0) == 0) {
-        if (req.method != "POST") return errorResponse(405);
+        if (req.method != "POST") return notAllowed("POST");
         if (!firmware || !firmware->post) return errorResponse(404);
         if (req.contentType.rfind("application/octet-stream", 0) != 0) return errorResponse(415);
         return firmware->post(req.path.substr(std::string(kFirmwarePrefix).size()), req.body);
     }
-    if (req.path + "/" == kFirmwarePrefix) return errorResponse(404);  // no target given
+    if (req.path + "/" == kFirmwarePrefix) {
+        // The upload resource is POST-only; a POST without a target names no device.
+        return req.method == "POST" ? errorResponse(404) : notAllowed("POST");
+    }
     if (req.method == "PUT" && req.path.rfind(kStopsPrefix, 0) == 0) {
         if (!stops || !stops->put) return errorResponse(404);
         if (req.contentType.rfind("application/json", 0) != 0) return errorResponse(415);
         return stops->put(req.path.substr(std::string(kStopsPrefix).size()), req.body);
     }
-    if (req.method != "GET") return errorResponse(405);
+    if (req.method != "GET") {
+        return notAllowed(req.path.rfind(kStopsPrefix, 0) == 0 ? "PUT" : "GET");
+    }
     if (req.path == "/api/stops" && stops && stops->get) {
         return Response{200, "application/json", stops->get()};
     }

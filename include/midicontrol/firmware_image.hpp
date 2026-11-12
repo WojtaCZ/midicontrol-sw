@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,7 +34,8 @@ enum class Check {
     Ok,
     NoTrailer,   // plain .bin (use the -update.bin)
     BadTrailer,  // trailer CRC / format wrong
-    WrongBoard,  // built for the other unit
+    WrongBoard,    // built for the other unit
+    UnknownBoard,  // board ID is neither base (0x02) nor remote (0x03), e.g. 7
     BadSize,
     BadCrc,
 };
@@ -49,6 +51,12 @@ struct Info {
 Check check(const std::vector<uint8_t>& file, uint8_t board, Info* info = nullptr);
 
 std::string describe(Check c);
+// As describe(c), naming the image's board ID for UnknownBoard ("... unknown unit (board ID 7)"),
+// the same wording the web page uses (FAULTS 2.6).
+std::string describe(Check c, uint8_t boardId);
+
+// The board ID from a valid trailer (magic, format and trailer CRC good); empty otherwise.
+std::optional<uint8_t> boardIdOf(const std::vector<uint8_t>& file);
 
 }  // namespace mc::fwimage
 
