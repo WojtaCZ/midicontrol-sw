@@ -81,6 +81,7 @@ Workspace layout (`/workspaces/MIDICONTROL-*`):
 | 2.6 | Minor web issues: POST `/api/firmware` without a target answers 413 (expected 404); a chunked body says "the file is empty"; GET answers 404 (expected 405); board ID 7 shows "other unit" in the service but "unknown unit" in the page; `fw_update_msg` stays at "Requesting reboot into bootloader..." during the transfer | **Fixed 2026-11-12** (local, not pushed). 405 with `Allow: POST`; board ID 7 reads "unknown unit (board ID 7)" in both (`fwimage::Check::UnknownBoard`); `fwupload::TransferProgress` sets "Sending the image: N of M bytes". The 404/411 items were already fixed. Tests: `http_405_carries_allow`, `fwimage_unknown_board_id_reads_as_on_the_page`, `fwupload_transfer_progress_updates_the_message` | `midicontrolpy-sw` |
 | 2.7 | The HTTP server does not check the Host header (DNS rebinding could PUT stops) | **Accepted, not a fault (owner, 2026-11-12):** `SYSTEM.md` SYS-WEB-05 (D4) says "no authentication, no Host check: accepted", the church LAN is trusted. A Host check was written and dropped on the owner's decision; nothing to test | `midicontrolpy-sw` |
 | 2.8 | Song files `512.mid` (verse shifted) and `513.mid` (song number shifted) contain misaligned display SysEx digits. These are authoring mistakes (D24). songcheck should warn about them (gap 31) | **Fixed 2026-11-12** (local, not pushed). songcheck warns when the display digits are not right-aligned (`kWarnVerseShifted` for 512, `kWarnSongShifted` for 513). Tests: `songcheck_aligned_digits_no_warning`, `songcheck_warns_shifted_verse`, `songcheck_warns_shifted_song`, `songcheck_warns_real_shifted_files` | `midicontrolpy-sw` |
+| 2.9 | Base BLE wedged after the remote ECC test (2026-11-13): "$$$ timeout" and "RN4870 init failed again" every 60 s, the RST restart did not help, only an MCU reset did. The bond was intact. Cause: the USART2 ISR split statuses with a plain "inside a status" flag. One lost or extra `%` left it set for good, so `CMD> ` was swallowed as status text, and `%REBOOT%` after the RST only flipped the flag (the remote had the same bug, fixed 2026-11-12) | **Fixed 2026-11-13**, bench-verified the same day: the remote ECC test passed without the teardown error and the base relinked; no wedge since. `logic/status_framer` resyncs on a control byte or a >50 ms pause inside a status; `restart()` resets it; a `$$$` timeout is followed by `\r---\r`. Tests: host `StatusFramer.*` (10 cases), then the BLE regression on the new base firmware | `midicontrol-fw` |
 
 ### Fault → test index
 
@@ -109,9 +110,13 @@ repo; PC = `ctest` / `midicontrol_tests` in `midicontrolpy-sw`.
 These come from the review: "F" items are review faults, "P" items are developer-delegated (D30). See the gap list for
 the details.
 
-- **Bootloader.**
-  - A power cut during the vector-page commit can brick the board (F4/P6, gap 20).
-  - An image without a trailer still boots (F5/P6, gap 21).
+- **Bootloader.** **Fixed 2026-11-13**, `midicontrol-bootloader` (both bootloaders):
+  - A power cut during the vector-page commit could brick the board (F4/F4b, P6, gap 20). The half-programmed
+    doubleword carries an ECC double error; the boot check's read took an NMI into `Default_Handler` on every boot. Now
+    `NMI_Handler` -> `boot::ecc::handleNmi()` erases the failing app page and the vector page, then resets: the base stays
+    in its bootloader with USB up, the remote releases its power hold.
+  - An image without a trailer still booted (F5/P6, gap 21). Now only an image with a valid trailer boots. A plain ELF
+    loaded over SWD stays in the bootloader; flash `-full.hex` or `-update.hex`.
 - **Remote.** **Fixed 2026-11-12** (local, not pushed), `midicontroller-fw` `src/logic/peer_guard`:
   - It accepted connections, frames and OTA from any base (D3, gap 6). Now only the bonded base gets a link that carries
     frames; any other central gets K,1. The module's accept list holds the bond too.
@@ -127,7 +132,12 @@ the details.
       `src/logic/status_framer` now ends a status on a control byte, an overlong text or "%%".
     - The module sometimes sat in command mode while the firmware thought it was in data mode. The base's frames then came
       as `%DATA:<handle>,<char>,<hex>%` and `---` answered `Err`. The firmware now sends K,1 and leaves command mode
-      (`---`) on the next accepted link (`StuckCommandMode`). Why the module got there is not known.
+      (`---`) on the next accepted link (`StuckCommandMode`).
+      **Likely cause (2026-11-13, from the code and earlier bench traces; not reproduced on demand):** after `$$$` with no `CMD>` within 1 s (the module is busy right after %SECURED%, when
+      `requestCodedPhy()` runs), `setMode()` kept DATA and never sent `---`; the module entered command mode late, its
+      prompt was ignored as unrequested (F4), and our own frames then filled its command line, so `---` got `Err`. Now a
+      `$$$` timeout always sends `\r---\r` (the `\r` ends a partial line). The base engine had the same hole (a late
+      `CMD> ` left it in COMMAND with no job: `canSendData()` false) and does the same.
     - The RNBD350 answers our own K,1 with `AOK` and sends **no** %DISCONNECT%. The guard kept the old link up and
       ignored the base's reconnect as F2 text: linked, but no frames. The firmware now ends the link itself after its own
       K,1 (`disconnect()`, `refusePeer()`, the stuck-mode path).
