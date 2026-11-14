@@ -135,7 +135,7 @@ power policy and serves a status web page.
 | SYS-PAIR-04 | Remote accepts a connection and frames (incl. OTA, SIGNAL_*) **only from its bonded base**; any other central is refused (D3) | implemented 2026-11-12 | `peerguard::Guard`: frames in and out only on a link whose %CONNECT% MAC is the bond and that is secured; other centrals get K,1 (every 3 s while they stay); module accept list (JC/JA) holds the bond. Residual: the MAC in %CONNECT% is what the module reports, a spoofed MAC still needs our bond key to secure |
 | SYS-PAIR-05 | New bond over Coded may go silent after ~4 s; base drops it once (K,1) and reconnects ~5 s later. Workaround accepted (proposed default, P2) | implemented | cause unknown |
 | SYS-PAIR-06 | Pairing the remote to a new base is an explicit action on the remote (menu item); without it the remote keeps its current bond (D3) | implemented 2026-11-12 | Nastaveni -> "Sparovat zakl.": 60 s window, accept list cleared, the first central that connects and secures becomes the bond (settings v2 `baseMac`). No trust on first use: a remote upgraded from an older release has no bond and must be paired once from this menu (and from the base menu). Any base in range during the window can take it: switch an old base off first |
-| SYS-PAIR-07 | Base reconnect uses the module's last bond (bare `C`); acceptable because both ends whitelist the peer (proposed default, P12) | implemented | depends on SYS-PAIR-04 |
+| SYS-PAIR-07 | Base reconnect uses the module's last bond (bare `C`); acceptable because both ends whitelist the peer (proposed default, P12) | differs from code (gap) | base bluetooth.cpp `reconnect()` (~:552-561) sends `Z` then `CE,0,<stored addr>` on both PHYs, not bare `C` (SA-7, gap 33) |
 
 ### 4.3 Normal use (playback)
 
@@ -148,16 +148,16 @@ power policy and serves a status web page.
 | SYS-USE-05 | Sections come from the display SysEx anchors; blank verse = prelude ("Predehra"), then "Sloka n" | implemented | PC playback.cpp |
 | SYS-USE-06 | Each anchor -> NOW_PLAYING_INFO -> base sends one 9-byte frame on the indicator bus | implemented, not bench-verified | no real indicator on the bench |
 | SYS-USE-07 | Add verse (REPLAY_ANCHOR): after the current section, replay it once per press (presses accumulate); indicator verse unchanged, no extra hint (proposed default, P4); label "Sloka 2 +1"; NAK NOT_PLAYING if idle; button enabled after the first anchor | implemented | PC playback.cpp:236 |
-| SYS-USE-08 | Stop from remote or base -> STOP_SONG -> PC stops, All Notes Off (CC123 x 16 ch), indicator cleared ONLY if it still shows our number (shared bus, D20), SIGNAL_STOPPED. Organ power: see SYS-ORG-04 | implemented (organ part: gap in SYS-ORG-04) | PC comm.cpp:1190 `doStop` |
+| SYS-USE-08 | Stop from remote or base -> STOP_SONG -> PC stops, All Notes Off (CC123 x 16 ch), indicator cleared ONLY if it still shows our number (shared bus, D20), SIGNAL_STOPPED. Organ power: see SYS-ORG-04 | differs from code (gap) | PC comm.cpp:1190 `doStop` clears the indicator unconditionally (D20, gap 27); organ part: gap in SYS-ORG-04 |
 | SYS-USE-09 | Pause (STOP_SONG mode 1): real pause. PC halts playback, sends All Notes Off, keeps the song position; SIGNAL to remote/base shows "paused" (D6) | differs from code (gap) | PC dispatch.cpp:100 treats pause as stop |
 | SYS-USE-10 | Song end: All Notes Off, indicator cleared only if it still shows our number (D20), SIGNAL_STOPPED. Organ stays on; idle-off timer starts (SYS-ORG-04/05) (D2, D5) | differs from code (gap) | PC comm.cpp:1180 `finishPlayback` switches organ off unless KeepPowerOn, also when it was switched on manually |
 | SYS-USE-11 | Song list: GET_SONG_LIST with offset, `[hasMore, "a;b;..."]`, paged; play from list; "Zadne pisne" when empty | implemented | remote song_list_screen, PC songs.cpp |
 | SYS-USE-12 | New PLAY while playing (or paused) replaces the current song | implemented (paused case depends on SYS-USE-09) | PC comm.cpp:1086 `doPlay` |
 | SYS-USE-13 | No tempo change and no transposition, anywhere (D6) | implemented | none present; do not add |
 | SYS-USE-14 | Recording is a required feature; see sec. 4.13 SYS-REC (D6, D9) | partial | see SYS-REC |
-| SYS-USE-15 | Base OLED: menu Prehraj / Nahraj / Nastaveni; "Odpojeno" overlay without PC; OLED sleeps after 30 s, wakes on input or overlay change | implemented | base menu.cpp |
+| SYS-USE-15 | Base OLED: menu Prehraj / Nahraj / Nastaveni; "Odpojeno" overlay without PC; OLED sleeps after 30 s, wakes on input or overlay change | partial | base menu.cpp; "Nahraj" is shown but its callback is empty (menu.cpp:453, UI-1, gap 15) |
 | SYS-USE-16 | Song folder rescan every 60 s | implemented, not bench-verified | PC web_server.cpp `kRescanMs` (status page + songcheck); GET_SONG_LIST and PLAY scan the folder on demand |
-| SYS-USE-17 | Indicator shows a song as 4 digit positions, each 0-9 or blank, songs up to **1999** (thousands digit blank or 1, D23) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | implemented | base `setSong()` caps at 1999 |
+| SYS-USE-17 | Indicator shows a song as 4 digit positions, each 0-9 or blank, songs up to **1999** (thousands digit blank or 1, D23) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | differs from code (gap) | base `setSong()` (display.cpp:251) caps at 1999 but has no caller; the live path display.cpp:210 `applyNowPlaying` passes any thousands digit; PC `fromSongCode` accepts 4 digits (US-6, gap 32) |
 | SYS-USE-18 | Digits are ones-first and right-aligned as the V2 text says; V2's "song 12" example is a typo. Shifted digits in a song file are authoring mistakes (512.mid: verse in the tens position, 513.mid: song shifted left): the PC right-aligns them and songcheck should warn (D24) | implemented (songcheck warning 2026-11-12: songcheck_warns_*) | PC display.cpp |
 | SYS-USE-19 | Song without a usable display anchor: PC uses the song code from the file name for the indicator AND flags the file (songcheck warning) (D15) | implemented, not bench-verified | PC playback.cpp:110 fallback; songcheck flags "empty display anchor" / "no display anchors" |
 | SYS-USE-20 | Song config without stops: PC sends a configured **default registration** at song start (not "leave stops as they are") (D16) | NOT IMPLEMENTED (gap) | PC organ/stops: no default registration setting |
@@ -196,7 +196,7 @@ power policy and serves a status web page.
 | SYS-ORG-04 | Between songs the organ stays on. The PC owns the policy: organ on at play, off after a configurable idle time (default 30 min, D27) (D2, D5) | differs from code (gap) | PC switches off after each song (KeepPowerOn=false) |
 | SYS-ORG-05 | Idle-off: PC switches the organ off after X min (default 30, D27) without playback/recording; a paused song is NOT idle (D18); setting in PC config (D5) | NOT IMPLEMENTED (gap) | with KeepPowerOn=true it never goes off |
 | SYS-ORG-06 | SSR drive (LM317L constant-current, <= ~104 mA) must match the installed SSR | open (D12: SSR type unknown, O-4) | hardware |
-| SYS-ORG-07 | Manual organ-on from the base menu or the remote: organ stays on (overrides song-end handling) until the next idle timeout; the PC must see the manual state and run its idle timer (D2) | partial | base checkbox exists; remote has no control; PC switches it off at song end and has no idle timer |
+| SYS-ORG-07 | Manual organ-on from the base menu or the remote: organ stays on (overrides song-end handling) until the next idle timeout; the PC must see the manual state and run its idle timer (D2) | partial | base checkbox exists (menu.cpp:457-464, PC learns it only via the 5 s GET_STATUS poll); remote has no control and shows no organ state; PC switches it off at song end (comm.cpp:1180 `finishPlayback`), on stop even when nothing played (:1190 `doStop`), on a failed start, and at its own startup reset (:1049, D14 vs D2); no idle timer (gap 4, gap 5) |
 
 ### 4.7 Stuck notes / All Notes Off
 
@@ -288,7 +288,7 @@ The base is one writer among several.
 | SYS-BUS-04 | The base writes to the bus only on NOW_PLAYING_INFO from the PC; PC start/restart does not write to the bus (D14) | implemented | base display.cpp, PC |
 | SYS-BUS-05 | Before transmitting, the base waits until the bus has been quiet for a short time (a few byte times; suggested 25 ms = 3 bytes at 1200 Bd) and is not receiving a frame; then it sends (D25) | implemented 2026-11-12 | `indicator::QuietBus` (25 ms, base display.cpp); real-bus check pending |
 | SYS-BUS-06 | Base hot-plug sense of the bus (PC13); no frames sent while the bus is absent | implemented, not bench-verified | base display.cpp; bench has no indicator |
-| SYS-BUS-07 | On stop / song end the indicator is cleared only if it still shows the number we sent; if another master wrote since, leave it (D20) | differs from code (gap, verify) | clearing today is unconditional (SYS-USE-08/10) |
+| SYS-BUS-07 | On stop / song end the indicator is cleared only if it still shows the number we sent; if another master wrote since, leave it (D20) | differs from code (gap) | clearing today is unconditional (SYS-USE-08/10; PC comm.cpp:1180 `finishPlayback`, :1190 `doStop`), gap 27 |
 | SYS-BUS-08 | A received frame is accepted only if it is 9 bytes and starts with the `0xB0` flag; anything else is dropped and does not change the base's state (D26) | implemented 2026-11-12 | `indicator::frameAccepted` (length + flag); rejected frames counted in `display::rxRejected` |
 
 ### 4.15 Documentation (new group)
@@ -321,7 +321,7 @@ NOW_PLAYING_INFO and the display SysEx). In the firmware repos it is under `lib/
 - **Colour numbering differs.** SysEx and NOW_PLAYING_INFO use 1 red, 2 green, 3 blue, 4 yellow. The bus uses `20` red,
   `21` yellow, `22` green, `23` blue. Convert by table.
 - **Song code set (D7).** 4 digit positions (0-9 or blank), letter A-D or blank. Songs go up to 1999 only
-  (thousands digit blank or 1, D23); the base `setSong()` caps there. All four LED colours exist on the board (D26).
+  (thousands digit blank or 1, D23); no live code path enforces the cap today (gap 32). All four LED colours exist on the board (D26).
 - **Digit order (D24).** The V2 text rule holds: ones first, numbers right-aligned. V2's second example ("song 12")
   is a typo. Song files with shifted digits (512, 513) are authoring mistakes.
 
@@ -337,7 +337,7 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 2 | SYS-PWR-07, SYS-NOTE-04 | CLOSED 2026-11-12 (startup_reset.cpp, test_startup_reset.cpp): PC start/restart: All Notes Off + organ off, indicator untouched (D14) | midicontrolpy-sw |
 | 3 | SYS-ORG-04, SYS-USE-10 | Organ stays on between songs; no off at song end/stop (D2, D5) | midicontrolpy-sw |
 | 4 | SYS-ORG-05 | Configurable idle-off timer on the PC (D5) | midicontrolpy-sw |
-| 5 | SYS-ORG-07 | Manual organ-on from base/remote overrides until the next idle timeout; PC learns manual state; remote control | midicontrolpy-sw, midicontroller-fw, midicontrol-protocol (if a new message), midicontrol-fw |
+| 5 | SYS-ORG-07 | Manual organ-on from base/remote overrides until the next idle timeout; PC learns manual state; remote control. Today the PC switches a manual on off at stop (also with nothing playing), song end, failed start and its startup reset (comm.cpp:1049, :1180, :1190; US-2/3/4, Q-US-2); the remote has no organ control or display (US-5, routing Q-US-3); a manual base-on with no PC ever seen has no time limit (US-17, Q-US-4) | midicontrolpy-sw, midicontroller-fw, midicontrol-protocol (if a new message), midicontrol-fw |
 | 6 | SYS-PAIR-04, SYS-FW-07 | CLOSED 2026-11-12 (`peerguard::Guard`, `test_remote_guard.py`, `PeerGuard.*`): Remote accepts connection/frames/OTA only from the bonded base (D3) | midicontroller-fw |
 | 7 | SYS-PAIR-06 | CLOSED 2026-11-12 (menu "Sparovat zakl.", `test_pairing_window_*`): Explicit "pair new base" action on the remote (D3) | midicontroller-fw |
 | 8 | SYS-LINK-05 | CLOSED 2026-11-12 (`test_remote_guard.py`, `test_remote_status_rx.py`, `StatusFramer.*`): Remote ignores RN status text injected by a peer (F2/F4) | midicontroller-fw |
@@ -347,12 +347,12 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 12 | SYS-USE-09, SYS-NOTE-01 | Real pause: halt, All Notes Off, keep position (D6) | midicontrolpy-sw, midicontroller-fw, midicontrol-fw (OLED) |
 | 13 | SYS-USE-21 | Resume at the same spot; resume message + UI (D6) | midicontrol-protocol, midicontrolpy-sw, midicontroller-fw, midicontrol-fw |
 | 14 | SYS-USE-20 | Default registration for songs without stops (D16) | midicontrolpy-sw |
-| 15 | SYS-USE-14, SYS-REC-01 | Record start/stop from the base; RECORD_SONG / SIGNAL_RECORDING defined (D9, D29) | midicontrol-protocol, midicontrolpy-sw, midicontrol-fw |
+| 15 | SYS-USE-14, SYS-USE-15, SYS-REC-01 | Record start/stop from the base; RECORD_SONG / SIGNAL_RECORDING defined (D9, D29). The base "Nahraj" item is an empty stub today (menu.cpp:109, :453; UI-1, P-UI-1) | midicontrol-protocol, midicontrolpy-sw, midicontrol-fw |
 | 16 | SYS-REC-02 | Record organ MIDI from DIN into a new song file; verify DIN-in path | midicontrolpy-sw, midicontrol-fw |
 | 17 | SYS-REC-03, SYS-REC-04, SYS-BUS-03 | Embed bus frames seen during recording as display SysEx; recorded file plays back with anchors (D9) | midicontrolpy-sw (+ midicontrol-fw if the echo is incomplete) |
 | 18 | SYS-BUS-01, SYS-BUS-02 | Observe the shared bus; mirror foreign song number on base OLED and remote, playback untouched (D13) | midicontrol-fw, midicontroller-fw, midicontrol-protocol |
 | 19 | SYS-IDLE-03 | Remote power easy wins (BLE module / peripheral sleep) (D17) | midicontroller-fw |
-| 22 | SYS-FW-08 | PC refuses play/control during update; finds base stuck in bootloader (P7) | midicontrolpy-sw |
+| 22 | SYS-FW-08 | PC refuses play/control during update; finds base stuck in bootloader (P7). CLI/socket update refused while a song plays: done b3340d2 (SB-1); stuck-in-bootloader detection still open (SB-2) | midicontrolpy-sw |
 | 23 | SYS-DIAG-04 | PROTOCOL.md: diag 17/18, KEEPALIVE byte 1, CRC name (P8) | midicontrol-protocol |
 | 24 | SYS-BUS-08 | CLOSED 2026-11-12 (`test_display.py::test_rx_frame_flag_check`, `IndicatorFrame.*`): check the `0xB0` flag on received indicator frames | midicontrol-fw |
 | 25 | SYS-DOC-02 | Mark IMPLEMENTATION_PROMPT.md obsolete (P11) | midicontrol-fw |
@@ -362,6 +362,13 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 29 | SYS-BUS-05 | CLOSED 2026-11-12 (`test_display.py::test_quiet_bus_holds_tx`, `QuietBus.*`): wait for a short quiet bus before transmitting (D25); real-bus check in midicontrol-fw/TODO.md | midicontrol-fw |
 | 30 | SYS-REC-05..08 | Recording: organ on, date/time file name, trim leading silence, stops -> `.conf` (D29) | midicontrolpy-sw |
 | 31 | SYS-USE-18 | CLOSED 2026-11-12 (songcheck_warns_*): songcheck warns on shifted display digits (D24) | midicontrolpy-sw |
+| 32 | SYS-USE-17 | Enforce the 1999 song cap on the live indicator path: `setSong()` caps but has no caller, display.cpp:210 `applyNowPlaying` and PC `fromSongCode` pass 2000-9999 (US-6) | midicontrol-fw, midicontrolpy-sw |
+| 33 | SYS-PAIR-07, sec. 3.2 Reconnect | Spec says reconnect with bare `C` (P12); code sends `Z` + `CE,0,<stored addr>` (stricter). Owner decides which is the rule (SA-7, Q-SA-3) | midicontrol-fw (or this spec) |
+| 34 | sec. 3.1 Reliability | Base dedup slot per source (router.cpp:94-100, :353-364) is never cleared and the PC numbers PacketIds from 0 (comm.hpp:207); a restarted PC's first ack-needing frame can be ACKed but not executed (today one status poll, or a one-shot `--cmd`). Proposal: slot lifetime ~2.5 s + clear on PC loss (SA-4, Q-SA-2) | midicontrol-fw, midicontrolpy-sw |
+| 35 | SYS-ORG-02 | PA4 (SSR) level during reset, bootloader stay and OTA never measured; no pull-down (D28) (SB-3, Q-SB-1) | midicontrol-fw, midicontrol-hw |
+| 36 | sec. 3.2 Link | Remote module stuck in command mode while connected and the base is quiet is not detected (late `CMD>` after a `$$$` timeout, lost `END`; remote bluetooth.cpp:343-391); an unconnected module recovers via the RST re-init (RD-1, Q-RD-5) | midicontroller-fw |
+| 37 | sec. 2 Remote row, sec. 3.3 Routing vs SYS-REC-01, SYS-ORG-07 | Spec contradiction: sec. 2 gives the remote record start/stop and manual organ-on, sec. 3.3 routes RECORD_SONG and resume remote -> PC; SYS-REC-01 / D29 say recording is base-only. Owner decides (SA-2, Q-SA-1, Q-RD-1) | this spec |
+| 38 | SYS-USE-01, sec. 8 Song code vs sec. 5 | Spec contradiction: song code 1-8 chars `[0-9A-Z]` vs the real set (1-4 digits <= 1999 + optional A-D); remote entry allows 4 digits + A-D, `validCode` accepts 8 (US-7, UI-5, Q-US-1, Q-UI-1) | this spec, midicontroller-fw, midicontrolpy-sw, midicontrol-protocol |
 
 ---
 
