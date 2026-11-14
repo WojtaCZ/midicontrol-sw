@@ -248,7 +248,7 @@ power policy and serves a status web page.
 | SYS-DIAG-01 | Base: fault record in no-init RAM, loop watchdog 1000 ms, IWDG ~2 s, reported at next boot | implemented | base fault.*, wdg |
 | SYS-DIAG-02 | Remote: 32-record RAM ring, flash slots for fault/stall/error shutdown; loop watchdog 2000 ms, IWDG ~4 s; a fault powers the remote off | implemented | remote diag.*, fault.* |
 | SYS-DIAG-03 | PC polls DIAG_GET every 10 s, stores JSONL 1 MiB x 3; pauses during remote OTA | implemented | PC diag_poller |
-| SYS-DIAG-04 | PROTOCOL.md lists all diag codes (incl. 17 BLE_MODULE_REBOOT, 18 BLE_ERR_CONN), KEEPALIVE byte 1 (base RSSI) and the correct CRC name (non-reflected, poly 0x31) (proposed default, P8) | differs from code (gap) | spec text lags the code |
+| SYS-DIAG-04 | PROTOCOL.md lists all diag codes (incl. 17 BLE_MODULE_REBOOT, 18 BLE_ERR_CONN), KEEPALIVE byte 1 (base RSSI) and the correct CRC name (non-reflected, poly 0x31) (proposed default, P8) | implemented | midicontrol-protocol PROTOCOL.md:32 (CRC), :179 (KEEPALIVE byte 1), :263-264 (diag 17/18), protocol 6ce5716 |
 | SYS-DIAG-05 | Link metrics: RSSI both ends, link losses, conn params in INFO TLVs 0x14/0x15/0x17 | implemented | router.cpp, remote |
 | SYS-DIAG-06 | User-visible texts are Czech without diacritics | implemented | both fw |
 
@@ -296,8 +296,8 @@ The base is one writer among several.
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
 | SYS-DOC-01 | Indicator bus protocol and song code set documented from the owner's V2 protocol files (D7), sec. 5 | implemented | `midicontrol-protocol/INDICATOR-BUS.md` |
-| SYS-DOC-02 | `midicontrol-fw` IMPLEMENTATION_PROMPT.md marked obsolete (proposed default, P11) | NOT IMPLEMENTED (gap) | contradicts PROTOCOL.md |
-| SYS-DOC-03 | Doc inconsistencies resolved from code (RSSI poll 10 vs 11 s, ST-Link serials, ConfirmScreen language, JSON schema 1 vs 2, upload head limit 4 vs 8 KiB) (proposed default, P9) | NOT IMPLEMENTED (gap) | CLAUDE.md / docs in fw and PC repos |
+| SYS-DOC-02 | `midicontrol-fw` IMPLEMENTATION_PROMPT.md marked obsolete (proposed default, P11) | implemented | OBSOLETE banner at the top of midicontrol-fw IMPLEMENTATION_PROMPT.md (c0d26cf) |
+| SYS-DOC-03 | Doc inconsistencies resolved from code (RSSI poll 10 vs 11 s, ST-Link serials, ConfirmScreen language, JSON schema 1 vs 2, upload head limit 4 vs 8 KiB) (proposed default, P9) | implemented | RSSI 11 s (sec. 8, remote TODO.md), serials agree in both fw CLAUDE.md/HARDWARE docs, ConfirmScreen Ano/Ne (remote CLAUDE.md), `/api/status` schema 2 (status-web-and-service.md), 8 KiB head+body / 4 KiB body (PC CLAUDE.md, status-web-and-service.md) |
 | SYS-DOC-04 | SysEx manufacturer ID 0x4D kept; the display format is fixed by existing church hardware (proposed default, P10) | implemented | - |
 | SYS-DOC-05 | Hardware docs: firmware pin map + bench are authoritative; KiCad repos are historical (D11). Schematics showing RN4870 are pre-adapter (D10) | implemented | docs/HARDWARE.md in both fw repos |
 
@@ -353,21 +353,21 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 18 | SYS-BUS-01, SYS-BUS-02 | Observe the shared bus; mirror foreign song number on base OLED and remote, playback untouched (D13) | midicontrol-fw, midicontroller-fw, midicontrol-protocol |
 | 19 | SYS-IDLE-03 | Remote power easy wins (BLE module / peripheral sleep) (D17) | midicontroller-fw |
 | 22 | SYS-FW-08 | PC refuses play/control during update; finds base stuck in bootloader (P7). CLI/socket update refused while a song plays: done b3340d2 (SB-1); stuck-in-bootloader detection still open (SB-2) | midicontrolpy-sw |
-| 23 | SYS-DIAG-04 | PROTOCOL.md: diag 17/18, KEEPALIVE byte 1, CRC name (P8) | midicontrol-protocol |
+| 23 | SYS-DIAG-04 | CLOSED 2026-11-14 (protocol 6ce5716): PROTOCOL.md: diag 17/18, KEEPALIVE byte 1, CRC name (P8) | midicontrol-protocol |
 | 24 | SYS-BUS-08 | CLOSED 2026-11-12 (`test_display.py::test_rx_frame_flag_check`, `IndicatorFrame.*`): check the `0xB0` flag on received indicator frames | midicontrol-fw |
-| 25 | SYS-DOC-02 | Mark IMPLEMENTATION_PROMPT.md obsolete (P11) | midicontrol-fw |
-| 26 | SYS-DOC-03 | Resolve doc inconsistencies from code (P9) | midicontrol-fw, midicontroller-fw, midicontrolpy-sw |
+| 25 | SYS-DOC-02 | CLOSED 2026-11-14 (midicontrol-fw c0d26cf): Mark IMPLEMENTATION_PROMPT.md obsolete (P11) | midicontrol-fw |
+| 26 | SYS-DOC-03 | CLOSED 2026-11-14 (audit step 1 doc commits in all repos): Resolve doc inconsistencies from code (P9) | midicontrol-fw, midicontroller-fw, midicontrolpy-sw |
 | 27 | SYS-BUS-07, SYS-USE-08, SYS-USE-10 | Clear indicator on stop/end only if it still shows our number (D20) | midicontrol-fw, midicontrolpy-sw |
 | 28 | SYS-NOTE-05 | Find and fix the DIN MIDI fault (cable / ATtiny port direction / MIDI_TX_VCC_ON / TX polarity); verify both directions before installation (D31) | midicontrol-fw, midicontrol-hw (ATtiny fw?) |
 | 29 | SYS-BUS-05 | CLOSED 2026-11-12 (`test_display.py::test_quiet_bus_holds_tx`, `QuietBus.*`): wait for a short quiet bus before transmitting (D25); real-bus check in midicontrol-fw/TODO.md | midicontrol-fw |
 | 30 | SYS-REC-05..08 | Recording: organ on, date/time file name, trim leading silence, stops -> `.conf` (D29) | midicontrolpy-sw |
 | 31 | SYS-USE-18 | CLOSED 2026-11-12 (songcheck_warns_*): songcheck warns on shifted display digits (D24) | midicontrolpy-sw |
 | 32 | SYS-USE-17 | Enforce the 1999 song cap on the live indicator path: `setSong()` caps but has no caller, display.cpp:210 `applyNowPlaying` and PC `fromSongCode` pass 2000-9999 (US-6) | midicontrol-fw, midicontrolpy-sw |
-| 33 | SYS-PAIR-07, sec. 3.2 Reconnect | Spec says reconnect with bare `C` (P12); code sends `Z` + `CE,0,<stored addr>` (stricter). Owner decides which is the rule (SA-7, Q-SA-3) | midicontrol-fw (or this spec) |
+| 33 | SYS-PAIR-07, sec. 3.2 Reconnect | Spec says reconnect with bare `C` (P12); code sends `Z` + `CE,0,<stored addr>` (stricter; bare `C` never connected to the remote's Coded-only advertiser on the bench, learning 2026-11-07). Owner decides which is the rule (SA-7, Q-SA-3) | midicontrol-fw (or this spec) |
 | 34 | sec. 3.1 Reliability | Base dedup slot per source (router.cpp:94-100, :353-364) is never cleared and the PC numbers PacketIds from 0 (comm.hpp:207); a restarted PC's first ack-needing frame can be ACKed but not executed (today one status poll, or a one-shot `--cmd`). Proposal: slot lifetime ~2.5 s + clear on PC loss (SA-4, Q-SA-2) | midicontrol-fw, midicontrolpy-sw |
 | 35 | SYS-ORG-02 | PA4 (SSR) level during reset, bootloader stay and OTA never measured; no pull-down (D28) (SB-3, Q-SB-1) | midicontrol-fw, midicontrol-hw |
 | 36 | sec. 3.2 Link | Remote module stuck in command mode while connected and the base is quiet is not detected (late `CMD>` after a `$$$` timeout, lost `END`; remote bluetooth.cpp:343-391); an unconnected module recovers via the RST re-init (RD-1, Q-RD-5) | midicontroller-fw |
-| 37 | sec. 2 Remote row, sec. 3.3 Routing vs SYS-REC-01, SYS-ORG-07 | Spec contradiction: sec. 2 gives the remote record start/stop and manual organ-on, sec. 3.3 routes RECORD_SONG and resume remote -> PC; SYS-REC-01 / D29 say recording is base-only. Owner decides (SA-2, Q-SA-1, Q-RD-1) | this spec |
+| 37 | sec. 2 Remote row, sec. 3.3 Routing vs SYS-REC-01, SYS-ORG-07 | Spec contradiction: sec. 2 gives the remote record start/stop and manual organ-on, sec. 3.3 routes RECORD_SONG and resume remote -> PC; SYS-REC-01 / D29 say recording is base-only (D29 is the later owner decision, 2026-11-12: remote recording not wanted), so sec. 2 / 3.3 likely only need rewording; no remote recording is to be built. Owner rewords (SA-2, Q-SA-1, Q-RD-1) | this spec |
 | 38 | SYS-USE-01, sec. 8 Song code vs sec. 5 | Spec contradiction: song code 1-8 chars `[0-9A-Z]` vs the real set (1-4 digits <= 1999 + optional A-D); remote entry allows 4 digits + A-D, `validCode` accepts 8 (US-7, UI-5, Q-US-1, Q-UI-1) | this spec, midicontroller-fw, midicontrolpy-sw, midicontrol-protocol |
 
 ---
