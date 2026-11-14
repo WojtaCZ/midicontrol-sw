@@ -213,7 +213,7 @@ power policy and serves a status web page.
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
 | SYS-IDLE-01 | Remote powers off after 20 min without a key press ("Necinnost: vypnuti") | implemented, not bench-verified | timer never fired on the bench |
-| SYS-IDLE-02 | Remote idle clock suspended while playing, during OTA, on USB power | implemented, not bench-verified | remote |
+| SYS-IDLE-02 | Remote idle clock suspended while playing, during OTA, on USB power | implemented, not bench-verified | remote; during OTA the idle clock is reset by every FW packet (link.cpp:167 `Power::touch()`), not suspended (P-TG-2) |
 | SYS-IDLE-03 | Remote power: easy wins only (OLED sleep, WFI, BLE module/peripheral sleep where trivial); no stop-mode redesign required (D17) | partial | OLED sleep + WFI done; BLE module / peripheral sleep not reviewed |
 | SYS-IDLE-04 | Base: OLED sleep after 30 s; no other idle behaviour on the base (organ idle-off is the PC's, SYS-ORG-05) | implemented | base |
 
@@ -441,23 +441,42 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | Prehraj / Nahraj / Nastaveni | Play / Record / Settings (base menu) |
 | Sparovat ovladac / Sparuj ovladac | Pair the remote (menu item / hint) |
 | Napajeni varhan | Organ power (checkbox) |
-| Odpojeno / Nepripojeno | Disconnected / Not connected |
+| Odpojeno / Nepripojeno | Not synonyms. Odpojeno: disconnected, overlay title (base: no PC; remote: no base or no PC), also remote battery page "USB: Odpojeno". Nepripojeno: not connected, remote message when a song command or list cannot be sent |
 | Cekam na PC / Cekam na zakladnu | Waiting for the PC / for the base |
 | Ovladac nenalezen | Remote not found (pairing) |
 | Bez odpovedi | No answer (retries exhausted) |
 | Chybny kod | Invalid song code |
 | Zadne pisne | No songs |
 | Predehra | Prelude |
-| Sloka n / Sloka n +k | Verse n / verse n replayed k extra times |
+| Sloka n / Sloka n +k | Verse n / verse n replayed k extra times (PC label; the OLEDs show "Sloka: n" / "Sloka: n (xk)", "Predehra (xk)") |
 | Necinnost: vypnuti | Inactivity: switching off |
-| Slaba baterie | Weak battery |
+| Slaba baterie | Weak battery; on the remote OLED shown only at the 3300 mV cut-off under "Vypnuti" (the web says "slabá" for the 3450 mV warning, "vybitá" for cut-off; Q-TG-6) |
 | Instalace | Installing (OTA copy) |
 | Ano / Ne / Zpet | Yes / No / Back |
-| Prehled / Pokrocile | Overview / Advanced (web tabs) |
-| bez spojeni | no connection (web) |
+| Prehled / Pokrocile | Overview / Advanced (web tabs; the page shows "Přehled" / "Pokročilé", web text uses diacritics) |
+| bez spojeni | no connection (web; the header shows "bez spojení s přehrávačem", no connection to the player) |
 | rejstrik(y) | organ stop(s) |
-| tabule | church indicator board |
+| tabule | church indicator board (no UI uses the word: base menu says "Displej", web Advanced "Church display"; Q-TG-3) |
 | zakladna / ovladac | base / remote |
+| Prehravac / Hlavni menu | Player screen / main menu (remote) |
+| Prehravam / Spoustim / Zastavuji / Zastaveno | Playing / starting / stopping / stopped (player state) |
+| Nehraje se | Nothing is playing (PC NAK NOT_PLAYING) |
+| Neznama <kod> | Unknown song code (PC NAK NOT_FOUND) |
+| PC nedostupne / PC zaneprazdneno / Odmitnuto | PC unreachable / busy / refused (NAK reasons) |
+| PC neodpovida | PC did not answer the song list request within 3 s (base; the remote says "Bez odpovedi") |
+| Zkuste znovu | Try again (command could not be queued) |
+| Pisne / Nacitani... | Song list / loading |
+| Parovani / Hledam ovladac... / Sparovano / Nesparovano / Parovani selhalo / Cas vyprsel / Zbyva n s | Pairing screens |
+| Sparovat zakl. | Pair a new base (remote menu, opens the 60 s pairing window, SYS-PAIR-06; abbreviated, Q-TG-2) |
+| Sparovat? (Kod nnnnnn) | Confirm pairing (passkey, information only) |
+| Vypnuti / Drzte 5 s | Switching off / hold 5 s (remote power button) |
+| Aktualizace / Prijem dat / Prenos do ovladace / Instalace ovladace / Chyba aktualizace / Chyba, opakujte / Nevypinejte | Firmware update screens (the last two from the base bootloader) |
+| Baterie: Napeti / Uroven / Nabiji / Nabito / Nenabiji / Vybiji | Battery page (remote) |
+| Verze FW: Revize / Vetev / Datum / Cas | Firmware version page |
+| Modul: OK / OK, bez RST / neodpovida / mlci | BLE module self-test, Bluetooth page: OK / OK but the reset line does not work / no reply / silent (Q-TG-4) |
+| Ident. MIDI / LED / Displej | Base settings: MIDI identification, status LED, church board page |
+| Stisk: Nastaveni | Press: settings (hint on the remote's Odpojeno overlay) |
+| MIDIControl BASE / CONTROLLER | Power-on splash, English product name (Q-TG-1) |
 
 ## 10. Open items
 
