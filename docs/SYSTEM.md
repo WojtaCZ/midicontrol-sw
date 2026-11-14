@@ -403,31 +403,36 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | BLE supervision | 2.5 s, interval 20 ms, latency 0 |
 | Base BLE reconnect / remote advertise retry | 5 s / 30 s |
 | Unsecured-link watchdog | B after 3 s, K,1 after +3 s |
-| Pairing timeout | 15 s |
+| Pairing timeout | base search 15 s; remote "Sparovat zakl." window 60 s, refused-peer retry 3 s |
 | Base BLE init retry | 60 s |
-| RSSI poll | base ~7 s, remote 10-11 s (SYS-DOC-03) |
+| RSSI poll | base 7 s, remote 11 s (not 10: avoids beating with the PC DIAG poll); a reading older than 25 s counts as stale (both) |
 | Max payload / frame | 128 B / 270 B |
 | Song code | 1-8 chars `[0-9A-Z]` (real set: sec. 5) |
 | FW chunk | <= 120 B; base multiple of 8 B |
 | PC GET_STATUS / GET_INFO / DIAG | 5 s (2 s timeout) / 15 s / 10 s |
 | PC warm-up | WarmupMs 3000 ms |
-| Organ idle-off | 30 min default, configurable on the PC (D27) |
-| Stops | AllOffDelayMs 100, StopDelayMs per stop |
+| Organ idle-off | 30 min default, configurable on the PC (D27) - NOT IMPLEMENTED (gap 4) |
+| Stops | AllOffDelayMs 100, StopDelayMs 20 default, per stop |
 | Verse gap | VerseGapMs 0 |
 | Remote idle off / power button | 20 min / hold 5 s |
-| Key debounce | 20 ms |
+| Key debounce | remote 20 ms; base encoder/keys polled every 10 ms |
 | Battery cut-off | 3300 mV, 5 x 1 s |
 | Charge | 2048 mA, term 256 mA, 12 h timer |
 | Watchdogs | base loop 1000 ms / IWDG ~2 s; remote loop 2000 ms / IWDG ~4 s |
-| OLED sleep (base) | 30 s |
+| OLED sleep | base 30 s, remote 30 s |
 | Indicator bus | 1200 Bd, 9 B frames |
 | MIDI DIN | 31250 Bd |
-| Web | port 50118, poll 1 s, fetch timeout 3 s, upload <= 512 KiB |
+| Web | port 50118, poll 1 s, fetch timeout 3 s (stops editor 5 s), upload <= 512 KiB with a 60 s deadline; other requests <= 8 KiB, bodies <= 4 KiB, 3 s deadline; song folder rescan 60 s |
 | systemd | WatchdogSec 30, ping 5 s, RestartSec 5 |
 | Song rescan | 60 s |
 | Diag store | JSONL 1 MiB x 3 |
 | OTA duration | base ~11 s; remote ~75 s (1M) / 2 min 32 s (Coded S8, 68.8 kB) |
 | BLE range | unverified (O-6) |
+| FW update (PC) | START 15 s remote / 3 s base x3; DATA 1.5 s x8 per chunk; END 5 s x3; OLED progress stall 20 s, result shown 10 s |
+| Battery warning (remote) | below 3450 mV, 100 mV hysteresis |
+| Song list request | 3 s timeout (base and remote) |
+| OLED messages | base "stopped" screen 1.5 s, base splash 3 s; remote message 2.5 s |
+| PC status page | recent-problem window 10 min; STATUS_RESP counts as fresh for 15 s |
 
 ## 9. Glossary (Czech UI terms)
 
