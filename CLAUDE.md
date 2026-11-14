@@ -12,6 +12,8 @@ disagree, the spec says what is wanted: ask the owner instead of changing the sp
 `docs/HARDWARE-base.md` / `docs/HARDWARE-remote.md` (or `docs/HARDWARE.md` in the matching firmware repo) describe the
 base (STM32G431) and remote (STM32G071) hardware. The firmware pin maps are authoritative; the KiCad repos are historical.
 
+- **User-visible changes** (screen text, menus, keys, timeouts, web page, CLI output, config keys, install steps): in the same commit series update midicontrolpy-sw/docs/SYSTEM.md (status/glossary/timing; then run midicontrolpy-sw/tools/sync-system-doc.sh), this CLAUDE.md/README, midicontrolpy-sw/docs/status-web-and-service.md for the PC, the screen scenarios in tools/screens/main.cpp, and the Czech user manual.
+
 This repo holds the MAIN copy of `docs/SYSTEM.md`. After editing it run `tools/sync-system-doc.sh` and commit the copies in the sibling repos.
 
 ## Project Overview
@@ -37,7 +39,7 @@ cmake --install build          # binary, share/midicontrol/config.conf.example, 
 
 Device: USB serial VID:PID=ABCD:1234 (base bootloader: ABCD:1235) plus ALSA MIDI ports named "MIDIControl"; both are re-discovered after a USB reconnect. Uses `arecordmidi` for recording.
 
-Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME/midicontrol/config.conf` (`~/.config/...`), else `./config.conf`. Sections: `[FILES]` (PlayFolder/RecordFolder; `~/` and config-relative paths allowed), `[PLAYBACK]` (WarmupMs, KeepPowerOn, VerseGapMs), `[WEB]` (Enabled=true, Port=50118, Bind=0.0.0.0), `[DIAG]` (LogPort= override of the log CDC auto-detection, Dir= store directory, default `$XDG_STATE_HOME/midicontrol`, else `~/.local/state/midicontrol`, else `/tmp/midicontrol-<uid>/diag`, created recursively), `[ORGAN]` (stops layout, Opus 910 defaults), `[BINDINGS]` (parsed, unused). See `config.conf`.
+Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME/midicontrol/config.conf` (`~/.config/...`), else `./config.conf`. Sections: `[FILES]` (PlayFolder/RecordFolder; `~/` and config-relative paths allowed), `[PLAYBACK]` (WarmupMs, KeepPowerOn, VerseGapMs), `[WEB]` (Enabled=true, Port=50118, Bind=0.0.0.0), `[DIAG]` (LogPort= override of the log CDC auto-detection, Dir= store directory, default `$XDG_STATE_HOME/midicontrol`, else `~/.local/state/midicontrol`, else `/tmp/midicontrol-<uid>/diag`, created recursively), `[ORGAN]` (stops layout, Opus 910 defaults), `[BINDINGS]` (parsed, reserved, unused: do not remove). See `config.conf`.
 
 ## Service, status page, control socket
 
@@ -46,7 +48,7 @@ Full operator guide, behaviour, design decisions, known issues and the bench che
 - **Status page**: `http://<pc>:50118/` (`GET /`, `GET /api/status` JSON schema 2, `GET /api/diag`, `GET /api/stops` and `PUT /api/stops/<code>` for the per-song organ stops in `<PlayFolder>/<CODE>.conf` (needs `Content-Type: application/json`), `POST /api/firmware/<base|remote>` with a `<name>-update.bin` as `application/octet-stream` (≤ 512 KiB, 202 then progress in Software `fw_update_*` fields)), served by the player process itself on its own thread. Two views: home "Přehled" (Czech, for the organist: notices, system topology, now playing, stops editor) and "Pokročilé" (English: Overview / Software / Base / Controller / Diagnostics / Firmware, `#adv/<page>`; Firmware = drop zone per unit, the trailer's board ID is checked in the browser, by `fwupload` and by the device, so base and controller images can't be swapped); design context in `PRODUCT.md`; Base and Controller show only what the PC sees (firmware debug data later = more `fields` in the same JSON). Port 50118 is also used by the superpowers brainstorm companion server; don't run both.
 - **Single instance**: exclusive `flock` on `$XDG_RUNTIME_DIR/midicontrol.lock` (fallback `/tmp/midicontrol-<uid>/`); the serial port is opened with `TIOCEXCL`.
 - **Control socket** `$XDG_RUNTIME_DIR/midicontrol.sock` (0600): `midicontrol` in a terminal attaches to the running service as a thin client (commands run in the service; `quit` detaches); `--cmd` is the one-shot form. Line protocol in `console.hpp` (reply ends with `\x1eOK` / `\x1eFAIL`).
-- **systemd**: `Type=notify` (`READY=1`, `WATCHDOG=1` sent directly to `$NOTIFY_SOCKET`, no libsystemd), `WatchdogSec=30`, `Restart=always`, `StartLimitIntervalSec=0`. The watchdog ping is sent only while the CommHandler reader, keepalive and control threads all stamp their heartbeats. `loginctl enable-linger $USER` is required for start at boot.
+- **systemd**: `Type=notify` (`READY=1`, `WATCHDOG=1` sent directly to `$NOTIFY_SOCKET`, no libsystemd), `WatchdogSec=30`, `Restart=always`, `StartLimitIntervalSec=0`. The watchdog ping is sent only while the CommHandler reader, keepalive and control threads all stamp their heartbeats. `loginctl enable-linger $USER` is required for start at boot. Divergence: on main the systemd user unit IS the production service; the unmerged branch `docker-deployment` (worktree `midicontrolpy-sw-docker`) proposes Docker as production instead. Recorded only; nothing merged, the owner decides.
 
 ## Diagnostics (base log + remote DIAG records)
 
@@ -72,7 +74,7 @@ Full operator guide, behaviour, design decisions, known issues and the bench che
 The code is split into a **pure core library** (`midicontrol_core`, no hardware deps, fully unit-tested) and a thin **app layer** (RtMidi + serial). Public headers live in `include/midicontrol/`, sources in `src/`.
 
 Core (testable anywhere):
-- **`protocol/`** (`crc8`, `codec`, `parser`, `constants`, `types`) — binary protocol v2: frame format (SOH/EOT, byte stuffing, CRC-8/MAXIM), `Packet`, `MsgType`, NAK reasons, and a byte-by-byte `Parser` state machine. Vendored from `midicontrol-protocol` (the spec is its `PROTOCOL.md`); wire format is byte-identical. The PC copy uses `std::vector`/`size_t` (no fixed buffers).
+- **`protocol/`** (`crc8`, `codec`, `parser`, `constants`, `types`) — binary protocol v2: frame format (SOH/EOT, byte stuffing, CRC-8 poly 0x31, init 0, non-reflected, no final XOR, check value 0xA2 for "123456789"; this is NOT CRC-8/MAXIM), `Packet`, `MsgType`, NAK reasons, and a byte-by-byte `Parser` state machine. Vendored from `midicontrol-protocol` (the spec is its `PROTOCOL.md`); wire format is byte-identical. The PC copy uses `std::vector`/`size_t` (no fixed buffers).
 - **`sysex`** — MIDIControl display SysEx (header `4D 43`, device `01`, targets `0x00`–`0x04`). Per-digit spec (each digit one byte ≤ `0x0F`). `DisplayInfo` keeps the decoded numbers and the digits as authored (`songDigits`/`verseDigits`).
 - **`smf`** — Standard MIDI File reader (format 0/1, running status, tempo map → seconds). Accepts both the project files' raw `F0 … F7` SysEx (no length) and standard `F0 <len> … F7`.
 - **`display`** — NOW_PLAYING_INFO encoding (per-digit BCD, `0xF` blank digit, `0xFF` no change, `0xFE` blank field, empty = clear), song-code fallback digits, verse-digit placement.
@@ -88,7 +90,7 @@ Core (testable anywhere):
 - **`config`** — INI loader and config-path resolution.
 - **`status`** — `StatusRegistry` (thread-safe; per-node counters, fields, 200-event rings, 50-entry problems list of WARN/ERROR; injected clock), `nodesForPeer` (BASE→Base, REMOTE→Controller, BROADCAST→both, rest→Base) and the dot rules (`evaluateDot`).
 - **`status_json`** — `/api/status` JSON (schema 2: per node `last_fault`, `unseen_faults`) and a UTF-8-safe `jsonEscape`.
-- **`http`** — request parsing (8 KiB head limit; bodies via Content-Length up to `kMaxBody`), routing (`/`, `/api/status`, `/api/diag`, `GET /api/stops`, `PUT /api/stops/<code>`, 404, 405, 415 for a non-JSON PUT) and response building, no sockets.
+- **`http`** — request parsing (8 KiB limit for head+body together (`kMaxRequest`); bodies via Content-Length up to `kMaxBody` = 4 KiB, firmware uploads up to `kMaxFirmwareBody` = 512 KiB), routing (`/`, `/api/status`, `/api/diag`, `GET /api/stops`, `PUT /api/stops/<code>`, 404, 405, 415 for a non-JSON PUT) and response building, no sockets.
 - **`web_page`** — the embedded status page (inline CSS/JS, no external requests).
 - **`log_line`, `fault_decode`, `diag_codes`, `diag_store`, `diag_api`, `diag_poller`, `log_reader`** — diagnostics (see the section above): line parser, fault accumulation/decoding, DIAG record decoder, JSONL store, `/api/diag` + `diag` text, remote polling state machine, base log ingest + reader thread.
 - **`songcheck`** — per-file song checks (parse failure, empty display anchor, no anchors, bad file name) and an incremental `Scanner` (mtime/size).
@@ -109,7 +111,7 @@ App layer (needs hardware):
 - **`control_socket`** — Unix socket server (thread per client, ≤ 4) and the thin client (`runClient`).
 - **`instance`** — runtime dir and the single-instance lock.
 - **`sd_notify`** — `READY=1` / `WATCHDOG=1` / `STOPPING=1` datagrams.
-- **`main`** — args/config/headless/`--cmd`; attach-or-run; interactive CLI: `play <code>`, `stop`, `verse` (add verse), `list`, `record`, `on`, `off`, `status`, `update`, `quit`.
+- **`main`** — args/config/headless/`--cmd`; attach-or-run; interactive CLI: `play <code>`, `stop`, `verse` (add verse), `list`, `record`, `on`, `off`, `status`, `update` (refused while a song is playing, while another update runs or when the base is not connected; the same rule covers `--cmd`, the socket and the web upload, because ENTER_BOOTLOADER reboots the base), `quit`.
 - **`packaging/midicontrol.service.in`** — systemd user unit (configured at build time).
 
 ## Tests

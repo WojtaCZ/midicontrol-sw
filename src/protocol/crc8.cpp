@@ -2,7 +2,7 @@
 
 namespace mc::protocol {
 
-// CRC-8/MAXIM lookup table (polynomial 0x31, init 0x00). Copied verbatim from
+// CRC-8 lookup table (polynomial 0x31, init 0x00, non-reflected; not CRC-8/MAXIM, check value 0xA2). Copied verbatim from
 // the firmware so the two implementations are guaranteed to agree.
 static constexpr uint8_t kCrc8Table[256] = {
     0x00, 0x31, 0x62, 0x53, 0xC4, 0xF5, 0xA6, 0x97,

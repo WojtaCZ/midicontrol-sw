@@ -14,7 +14,7 @@
 //              the config file are resolved by loadConfig)
 //   [PLAYBACK] WarmupMs, KeepPowerOn, VerseGapMs (all optional, see Config)
 // The song structure (prelude, verses) comes from the anchors in each MIDI file.
-//   [BINDINGS] Bind0=song.mid, ...   (parsed, not used yet)
+//   [BINDINGS] Bind0=song.mid, ...   (parsed, reserved, unused: do not remove)
 //   [WEB]      Enabled, Port, Bind (status page, all optional, see Config)
 //   [ORGAN]    stop layout and Program Change mapping (all optional, see organ.hpp)
 //   [DIAG]     LogPort (override of the log CDC auto-detection), Dir (diagnostics store)
