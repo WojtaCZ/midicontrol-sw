@@ -96,3 +96,21 @@ TEST(web_page_has_firmware_upload) {
     CHECK(!has(html, "innerHTML"));
     CHECK(!has(html, "http://"));
 }
+
+TEST(web_page_home_last_end_is_czech) {
+    // US-9: comm.cpp writes "ended normally" / "stopped (base disconnected)" / "failed: <why>";
+    // the home page maps them by prefix so no English reaches the organist.
+    const std::string& html = mc::web::statusPageHtml();
+    CHECK(has(html, "function endText"));
+    CHECK(has(html, "startsWith(\"ended\")"));
+    CHECK(has(html, "startsWith(\"failed\")"));
+    CHECK(has(html, "startsWith(\"stopped (base\")"));
+    CHECK(has(html, "dohrála"));
+    CHECK(has(html, "nepodařilo se ji přehrát"));
+    CHECK(has(html, "zastavena, základna se odpojila"));
+    // The old exact-key map, which missed "ended normally", is gone.
+    CHECK(!has(html, "{ended:\"dohrála\""));
+    // Stops editor: HTTP errors are Czech, the server's English body is not shown.
+    CHECK(has(html, "spojení s přehrávačem selhalo"));
+    CHECK(!has(html, "(await r.text()).trim()"));
+}
