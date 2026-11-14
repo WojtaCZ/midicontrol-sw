@@ -1,8 +1,9 @@
 # MIDIcontrol system specification
 
-Version 2026-11-12. Owner decisions D1-D31 applied (binding). Items marked **(proposed default)** come from
-P1-P12: technical choices the owner delegated to the developers (D30); change them only with a reason. Code reference: base `midicontrol-fw` 6a68acc, remote
-`midicontroller-fw` 7539b85, PC `midicontrolpy-sw` main 8a7ed0f (the docker branch is not covered).
+Version 2026-11-14. Owner decisions D1-D31 applied (binding). Items marked **(proposed default)** come from
+P1-P12: technical choices the owner delegated to the developers (D30); change them only with a reason. Code reference (branch audit/step1-docs): base
+`midicontrol-fw` 64b7733, remote `midicontroller-fw` d23e26e, bootloader `midicontrol-bootloader` 560809b, protocol
+`midicontrol-protocol` d9084b0, PC `midicontrolpy-sw` 300ba89 (the docker branch is not covered).
 Wire protocol: `midicontrol-protocol/PROTOCOL.md`.
 
 > **How to use this document**
@@ -92,7 +93,7 @@ power policy and serves a status web page.
 | Roles | Base = central, remote = peripheral, Transparent UART, RNBD350 on both (D10) |
 | Security | `SA,2` Just Works on both ends; Just Works accepted by the owner (D21) together with the bonded-base whitelist (D3) |
 | Pairing | Base menu "Nastaveni > Sparovat ovladac" plus an explicit pairing action on the remote (D3) |
-| Peer filter | Both ends accept frames only from the bonded peer after %SECURED% (base: implemented; remote: gap) |
+| Peer filter | Both ends accept frames only from the bonded peer after %SECURED% (base and remote: implemented, SYS-PAIR-04) |
 | Reconnect | Base retries every 5 s with bare `C` (module bond) (proposed default, P12); remote re-advertises (30 s retry) |
 | PHY / params | TX max (SGA/SGC 0F); 20 ms interval, latency 0, supervision 2.5 s; Coded S8; remote advertises extended on Coded only |
 | Link loss | %DISCONNECT% or %ERR_CONN% while connected (RNBD350 never sends %DISCONNECT% for a vanished peer) |
@@ -116,7 +117,7 @@ power policy and serves a status web page.
 
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
-| SYS-PWR-01 | Base power-up: SSR off, USB enumerates (2 CDC + MIDI), log banner with git revision and reset cause | implemented | base main.cpp:290 |
+| SYS-PWR-01 | Base power-up: SSR off, USB enumerates (2 CDC + MIDI), log banner with git revision and reset cause | implemented | base src/base.cpp:19 (PA4 output, low from static init), main.cpp:273 `Debug::banner()` |
 | SYS-PWR-02 | Base power-up with a stored remote: BLE reconnect starts; link up in ~6-8 s **on the first attempt**. A failing first attempt after each boot is a known issue to investigate, not accepted behaviour (proposed default, P1) | implemented (2026-11-12) | link up on the first CE, STREAM_OPEN ~7.4 s after reset. The %CONNECT% + %ERR_CONN% seen right after boot is a connection setup that fails while the remote restarts advertising after losing the old link; the module retries by itself within ~200 ms and it is no longer counted as a loss (link_stats onLost before STREAM_OPEN). Test: basetest test_ble_boot.py, host LinkStats.SetupFailureBeforeStreamOpenIsNotALoss |
 | SYS-PWR-03 | Base BLE init failure is non-fatal: USB-MIDI/SSR/indicator keep working; BLE init retried every 60 s | implemented | base main.cpp |
 | SYS-PWR-04 | Remote power-on by button; firmware holds the latch; shows "Cekam na zakladnu", then "Cekam na PC" until both are alive | implemented | remote base.cpp, menu.cpp |
@@ -143,19 +144,19 @@ power policy and serves a status web page.
 | SYS-USE-01 | Remote: enter 1-8 chars `[0-9A-Z]` (digits + letter A-D via Up/Down); OK sends PLAY_SONG; invalid -> "Chybny kod" | implemented | remote player_screen.cpp |
 | SYS-USE-02 | PC: song code = file `<CODE>.mid` in the play folder; unknown -> NAK NOT_FOUND; remote shows the error | implemented | PC songs.cpp |
 | SYS-USE-03 | No answer after 3 x 500 ms -> remote shows "Bez odpovedi" | implemented | remote |
-| SYS-USE-04 | Play: if organ off -> PC switches it on (SET_CURRENT 1, D2), warm-up WarmupMs (3000 ms, interruptible), stops preamble (song stops or default registration, SYS-USE-20), SIGNAL_PLAYING `code`, then SIGNAL_ANCHOR per section | implemented, not bench-verified | PC comm.cpp:1037; never run on the real organ |
+| SYS-USE-04 | Play: if organ off -> PC switches it on (SET_CURRENT 1, D2), warm-up WarmupMs (3000 ms, interruptible), stops preamble (song stops or default registration, SYS-USE-20), SIGNAL_PLAYING `code`, then SIGNAL_ANCHOR per section | implemented, not bench-verified | PC comm.cpp:1086 `doPlay`; never run on the real organ |
 | SYS-USE-05 | Sections come from the display SysEx anchors; blank verse = prelude ("Predehra"), then "Sloka n" | implemented | PC playback.cpp |
 | SYS-USE-06 | Each anchor -> NOW_PLAYING_INFO -> base sends one 9-byte frame on the indicator bus | implemented, not bench-verified | no real indicator on the bench |
 | SYS-USE-07 | Add verse (REPLAY_ANCHOR): after the current section, replay it once per press (presses accumulate); indicator verse unchanged, no extra hint (proposed default, P4); label "Sloka 2 +1"; NAK NOT_PLAYING if idle; button enabled after the first anchor | implemented | PC playback.cpp:236 |
-| SYS-USE-08 | Stop from remote or base -> STOP_SONG -> PC stops, All Notes Off (CC123 x 16 ch), indicator cleared ONLY if it still shows our number (shared bus, D20), SIGNAL_STOPPED. Organ power: see SYS-ORG-04 | implemented (organ part: gap in SYS-ORG-04) | PC comm.cpp:1143 |
+| SYS-USE-08 | Stop from remote or base -> STOP_SONG -> PC stops, All Notes Off (CC123 x 16 ch), indicator cleared ONLY if it still shows our number (shared bus, D20), SIGNAL_STOPPED. Organ power: see SYS-ORG-04 | implemented (organ part: gap in SYS-ORG-04) | PC comm.cpp:1190 `doStop` |
 | SYS-USE-09 | Pause (STOP_SONG mode 1): real pause. PC halts playback, sends All Notes Off, keeps the song position; SIGNAL to remote/base shows "paused" (D6) | differs from code (gap) | PC dispatch.cpp:100 treats pause as stop |
-| SYS-USE-10 | Song end: All Notes Off, indicator cleared only if it still shows our number (D20), SIGNAL_STOPPED. Organ stays on; idle-off timer starts (SYS-ORG-04/05) (D2, D5) | differs from code (gap) | PC comm.cpp:1132 switches organ off unless KeepPowerOn, also when it was switched on manually |
+| SYS-USE-10 | Song end: All Notes Off, indicator cleared only if it still shows our number (D20), SIGNAL_STOPPED. Organ stays on; idle-off timer starts (SYS-ORG-04/05) (D2, D5) | differs from code (gap) | PC comm.cpp:1180 `finishPlayback` switches organ off unless KeepPowerOn, also when it was switched on manually |
 | SYS-USE-11 | Song list: GET_SONG_LIST with offset, `[hasMore, "a;b;..."]`, paged; play from list; "Zadne pisne" when empty | implemented | remote song_list_screen, PC songs.cpp |
-| SYS-USE-12 | New PLAY while playing (or paused) replaces the current song | implemented (paused case depends on SYS-USE-09) | PC comm.cpp:1038 |
+| SYS-USE-12 | New PLAY while playing (or paused) replaces the current song | implemented (paused case depends on SYS-USE-09) | PC comm.cpp:1086 `doPlay` |
 | SYS-USE-13 | No tempo change and no transposition, anywhere (D6) | implemented | none present; do not add |
 | SYS-USE-14 | Recording is a required feature; see sec. 4.13 SYS-REC (D6, D9) | partial | see SYS-REC |
 | SYS-USE-15 | Base OLED: menu Prehraj / Nahraj / Nastaveni; "Odpojeno" overlay without PC; OLED sleeps after 30 s, wakes on input or overlay change | implemented | base menu.cpp |
-| SYS-USE-16 | Song folder rescan every 60 s | implemented, not bench-verified | PC |
+| SYS-USE-16 | Song folder rescan every 60 s | implemented, not bench-verified | PC web_server.cpp `kRescanMs` (status page + songcheck); GET_SONG_LIST and PLAY scan the folder on demand |
 | SYS-USE-17 | Indicator shows a song as 4 digit positions, each 0-9 or blank, songs up to **1999** (thousands digit blank or 1, D23) + letter A-D or blank, verse as 2 digit positions (D7, sec. 5) | implemented | base `setSong()` caps at 1999 |
 | SYS-USE-18 | Digits are ones-first and right-aligned as the V2 text says; V2's "song 12" example is a typo. Shifted digits in a song file are authoring mistakes (512.mid: verse in the tens position, 513.mid: song shifted left): the PC right-aligns them and songcheck should warn (D24) | implemented (songcheck warning 2026-11-12: songcheck_warns_*) | PC display.cpp |
 | SYS-USE-19 | Song without a usable display anchor: PC uses the song code from the file name for the indicator AND flags the file (songcheck warning) (D15) | implemented, not bench-verified | PC playback.cpp:110 fallback; songcheck flags "empty display anchor" / "no display anchors" |
@@ -181,8 +182,8 @@ power policy and serves a status web page.
 | SYS-PC-01 | Base: PC lost -> overlay "Odpojeno / Cekam na PC"; remote learns it from KEEPALIVE `[pcAlive]` and shows "Cekam na PC" | implemented | router.cpp, remote |
 | SYS-PC-02 | Remote commands to an absent PC -> NAK UNREACHABLE | implemented | base router |
 | SYS-PC-03 | PC lost mid-song (USB gone, PC dead, keepalive timeout): base IMMEDIATELY sends All Notes Off (CC120 + CC123, 16 ch) to DIN AND switches the SSR off (D1). Fires only on the transition PC present -> PC lost; manual use of the base with no PC ever present keeps power (D19). This is the backstop for the PC-owned power policy (D5) | implemented (2026-11-12; DIN half unverified until SYS-NOTE-05) | base router.cpp logChanges + logic/recovery.hpp PcLossGuard; tests host PcLossGuard.*, hw test_pc_loss.py |
-| SYS-PC-04 | PC loses USB (base reset): playback stopped, organ state "unknown"; reconnects on USB return | implemented | PC comm.cpp:990 |
-| SYS-PC-05 | PC service shutdown (SIGTERM): stop, clear, SIGNAL_STOPPED, organ off. Interactive Ctrl-C may exit without cleanup; SYS-PC-03 and SYS-PWR-07 cover it | implemented | PC comm.cpp:998 |
+| SYS-PC-04 | PC loses USB (base reset): playback stopped, organ state "unknown"; reconnects on USB return | implemented | PC comm.cpp:995 (`SerialLost`) |
+| SYS-PC-05 | PC service shutdown (SIGTERM): stop, clear, SIGNAL_STOPPED, organ off. Interactive Ctrl-C may exit without cleanup; SYS-PC-03 and SYS-PWR-07 cover it | implemented | PC comm.cpp:1010 (`Shutdown`) |
 | SYS-PC-06 | systemd watchdog ping every 5 s only if worker threads progressed within 10 s | implemented, not bench-verified | PC sd_notify |
 
 ### 4.6 Organ power
@@ -190,7 +191,7 @@ power policy and serves a status web page.
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
 | SYS-ORG-01 | SSR switched by SET_CURRENT from the PC or the base menu checkbox "Napajeni varhan"; checkbox follows the real state | implemented, not bench-verified | router.cpp:364, menu.cpp:460; LED on bench, not real SSR |
-| SYS-ORG-02 | SSR off after any base reset | implemented (fw) | base main.cpp:290; no hardware pull-down on PA4; the float until GPIO init is accepted (D28) |
+| SYS-ORG-02 | SSR off after any base reset | implemented (fw) | base src/base.cpp:19 (PA4 output at static init), main.cpp:290; no hardware pull-down on PA4; the float until GPIO init is accepted (D28) |
 | SYS-ORG-03 | Organ on before first note + WarmupMs; if already on, start immediately | implemented, not bench-verified | PC |
 | SYS-ORG-04 | Between songs the organ stays on. The PC owns the policy: organ on at play, off after a configurable idle time (default 30 min, D27) (D2, D5) | differs from code (gap) | PC switches off after each song (KeepPowerOn=false) |
 | SYS-ORG-05 | Idle-off: PC switches the organ off after X min (default 30, D27) without playback/recording; a paused song is NOT idle (D18); setting in PC config (D5) | NOT IMPLEMENTED (gap) | with KeepPowerOn=true it never goes off |
