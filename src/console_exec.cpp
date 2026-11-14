@@ -156,13 +156,15 @@ bool ConsoleExecutor::runUpdate(const std::string& target, const Run& run, const
 
 ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, bool remote) {
     // Same refusals as the status page upload (startUpload): never reboot the base under a song.
-    const std::string why = mc::fwupload::updateRefusal(_updating.load(), _handler.isPlaying(), true);
+    // The busy wording is unchanged ("busy: ...") for scripts that match it.
+    const bool busy = _updating.load();
+    const std::string why = mc::fwupload::updateRefusal(busy, _handler.isPlaying(), true);
     if (!why.empty()) {
-        out("refused: " + why + "\n");
+        out((busy ? "busy: " : "refused: ") + why + "\n");
         return ExecResult::Failed;
     }
     if (_updating.exchange(true)) {
-        out("refused: a firmware update is already running\n");
+        out("busy: a firmware update is already running\n");
         return ExecResult::Failed;
     }
     auto progress = [&out](std::size_t done, std::size_t total) {
