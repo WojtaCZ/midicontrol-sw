@@ -165,7 +165,7 @@ the details.
 ## 4. Not verified yet (no fault known)
 
 - Range walk in the church with Coded PHY S8 at +14 dBm (O-6).
-- Remote 20-minute auto-off on battery, and the current drawn with the 10 s RSSI poll.
+- Remote 20-minute auto-off on battery, and the current drawn with the 11 s RSSI poll (base polls every 7 s).
 - `bletest` suites, pairing edge cases, and a reconnect soak of 20+ resets (`midicontrol-fw/TODO.md`, RNBD350 section).
 - Opus 910 stop mapping: ProgramOffset and octal numbering (O-14, `midicontrolpy-sw/TODO.md`).
 - SSR type (O-4). It decides whether the PA4 drive is enough.
