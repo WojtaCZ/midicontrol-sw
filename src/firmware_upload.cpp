@@ -5,6 +5,13 @@
 
 namespace mc::fwupload {
 
+std::string updateRefusal(bool updating, bool playing, bool baseAlive) {
+    if (updating) return "a firmware update is already running";
+    if (playing) return "a song is playing; stop it first";
+    if (!baseAlive) return "the base is not connected";
+    return {};
+}
+
 namespace {
 
 const char* unitName(uint8_t board) {

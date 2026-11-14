@@ -27,6 +27,12 @@ struct Accepted {
     std::vector<uint8_t> image;
 };
 
+// Why a firmware update (web upload or CLI `update`) must not start now, or "" when it may.
+// Busy comes first: a running base update takes the base off USB, which would read as
+// "not connected". Playing is refused because both units are reached through the base and a
+// base reboot (ENTER_BOOTLOADER) would cut the song off.
+std::string updateRefusal(bool updating, bool playing, bool baseAlive);
+
 // Starts the update in the background; returns "" when it started, else why
 // not (busy, base not connected, playing), answered as 409.
 using Start = std::function<std::string(Accepted)>;

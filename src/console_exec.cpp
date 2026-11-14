@@ -155,8 +155,14 @@ bool ConsoleExecutor::runUpdate(const std::string& target, const Run& run, const
 }
 
 ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, bool remote) {
+    // Same refusals as the status page upload (startUpload): never reboot the base under a song.
+    const std::string why = mc::fwupload::updateRefusal(_updating.load(), _handler.isPlaying(), true);
+    if (!why.empty()) {
+        out("refused: " + why + "\n");
+        return ExecResult::Failed;
+    }
     if (_updating.exchange(true)) {
-        out("busy: a firmware update is already running\n");
+        out("refused: a firmware update is already running\n");
         return ExecResult::Failed;
     }
     auto progress = [&out](std::size_t done, std::size_t total) {
@@ -178,11 +184,9 @@ ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, 
 }
 
 std::string ConsoleExecutor::startUpload(mc::fwupload::Accepted upload) {
-    // Busy first: a running base update takes the base off USB, which would read as "not connected".
-    if (_updating.load()) return "a firmware update is already running";
-    // Both units are reached through the base; a base update would cut a playing song off.
-    if (_handler.isPlaying()) return "a song is playing; stop it first";
-    if (!_handler.isBaseAlive()) return "the base is not connected";
+    // Busy, then playing, then base connection (see fwupload::updateRefusal).
+    const std::string why = mc::fwupload::updateRefusal(_updating.load(), _handler.isPlaying(), _handler.isBaseAlive());
+    if (!why.empty()) return why;
     if (_updating.exchange(true)) return "a firmware update is already running";
     std::lock_guard<std::mutex> lk(_workerMutex);
     if (_worker.joinable()) _worker.join();  // the previous upload has finished: _updating was clear

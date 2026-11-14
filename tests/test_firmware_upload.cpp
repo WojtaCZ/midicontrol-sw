@@ -150,3 +150,12 @@ TEST(fwupload_transfer_progress_updates_the_message) {
     TransferProgress empty;
     CHECK_EQ(empty.update(0, 0)->pct, 100);
 }
+
+TEST(fwupload_update_refusal_covers_cli_and_web) {
+    // SB-1: the CLI `update` and the web upload share one rule; a playing song refuses both.
+    CHECK_EQ(updateRefusal(false, false, true), "");
+    CHECK(has(updateRefusal(false, true, true), "song is playing"));
+    CHECK(has(updateRefusal(true, true, true), "already running"));  // busy wins over playing
+    CHECK(has(updateRefusal(false, false, false), "not connected"));
+    CHECK(has(updateRefusal(false, true, false), "song is playing"));  // playing wins over base state
+}
