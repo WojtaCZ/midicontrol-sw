@@ -2,8 +2,8 @@
 
 Version 2026-11-14. Owner decisions D1-D31 applied (binding). Items marked **(proposed default)** come from
 P1-P12: technical choices the owner delegated to the developers (D30); change them only with a reason. Code reference (branch audit/step1-docs): base
-`midicontrol-fw` 64b7733, remote `midicontroller-fw` d23e26e, bootloader `midicontrol-bootloader` 560809b, protocol
-`midicontrol-protocol` d9084b0, PC `midicontrolpy-sw` 300ba89 (the docker branch is not covered).
+`midicontrol-fw` f3302ee, remote `midicontroller-fw` 29c9a5c, bootloader `midicontrol-bootloader` 16d99a4, protocol
+`midicontrol-protocol` 6fb3efb, PC `midicontrolpy-sw` c45c17a (the docker branch is not covered).
 Wire protocol: `midicontrol-protocol/PROTOCOL.md`.
 
 > **How to use this document**
@@ -297,7 +297,7 @@ The base is one writer among several.
 |---|---|---|---|
 | SYS-DOC-01 | Indicator bus protocol and song code set documented from the owner's V2 protocol files (D7), sec. 5 | implemented | `midicontrol-protocol/INDICATOR-BUS.md` |
 | SYS-DOC-02 | `midicontrol-fw` IMPLEMENTATION_PROMPT.md marked obsolete (proposed default, P11) | implemented | OBSOLETE banner at the top of midicontrol-fw IMPLEMENTATION_PROMPT.md (c0d26cf) |
-| SYS-DOC-03 | Doc inconsistencies resolved from code (RSSI poll 10 vs 11 s, ST-Link serials, ConfirmScreen language, JSON schema 1 vs 2, upload head limit 4 vs 8 KiB) (proposed default, P9) | partial | RSSI 11 s (sec. 8, remote TODO.md; pending: midicontrolpy-sw docs/FAULTS.md:168 still says 10 s), serials agree in both fw CLAUDE.md/HARDWARE docs, ConfirmScreen Ano/Ne (remote CLAUDE.md), `/api/status` schema 2 (status-web-and-service.md), 8 KiB head+body / 4 KiB body (PC CLAUDE.md, status-web-and-service.md) |
+| SYS-DOC-03 | Doc inconsistencies resolved from code (RSSI poll 10 vs 11 s, ST-Link serials, ConfirmScreen language, JSON schema 1 vs 2, upload head limit 4 vs 8 KiB) (proposed default, P9) | implemented | RSSI 11 s (sec. 8, remote TODO.md, midicontrolpy-sw docs/FAULTS.md c45c17a), serials agree in both fw CLAUDE.md/HARDWARE docs, ConfirmScreen Ano/Ne (remote CLAUDE.md), `/api/status` schema 2 (status-web-and-service.md), 8 KiB head+body / 4 KiB body (PC CLAUDE.md, status-web-and-service.md) |
 | SYS-DOC-04 | SysEx manufacturer ID 0x4D kept; the display format is fixed by existing church hardware (proposed default, P10) | implemented | - |
 | SYS-DOC-05 | Hardware docs: firmware pin map + bench are authoritative; KiCad repos are historical (D11). Schematics showing RN4870 are pre-adapter (D10) | implemented | docs/HARDWARE.md in both fw repos |
 
@@ -356,7 +356,7 @@ Work list. Close a row by changing the requirement status in sec. 4 and deleting
 | 23 | SYS-DIAG-04 | CLOSED 2026-11-14 (protocol 6ce5716): PROTOCOL.md: diag 17/18, KEEPALIVE byte 1, CRC name (P8) | midicontrol-protocol |
 | 24 | SYS-BUS-08 | CLOSED 2026-11-12 (`test_display.py::test_rx_frame_flag_check`, `IndicatorFrame.*`): check the `0xB0` flag on received indicator frames | midicontrol-fw |
 | 25 | SYS-DOC-02 | CLOSED 2026-11-14 (midicontrol-fw c0d26cf): Mark IMPLEMENTATION_PROMPT.md obsolete (P11) | midicontrol-fw |
-| 26 | SYS-DOC-03 | Resolve doc inconsistencies from code (P9). Done 2026-11-14 except one item: midicontrolpy-sw docs/FAULTS.md:168 says "10 s RSSI poll" (remote is 11 s); close after that line is fixed | midicontrol-fw, midicontroller-fw, midicontrolpy-sw |
+| 26 | SYS-DOC-03 | CLOSED 2026-11-14 (midicontrolpy-sw c45c17a): Resolve doc inconsistencies from code (P9) | midicontrol-fw, midicontroller-fw, midicontrolpy-sw |
 | 27 | SYS-BUS-07, SYS-USE-08, SYS-USE-10 | Clear indicator on stop/end only if it still shows our number (D20) | midicontrol-fw, midicontrolpy-sw |
 | 28 | SYS-NOTE-05 | Find and fix the DIN MIDI fault (cable / ATtiny port direction / MIDI_TX_VCC_ON / TX polarity); verify both directions before installation (D31) | midicontrol-fw, midicontrol-hw (ATtiny fw?) |
 | 29 | SYS-BUS-05 | CLOSED 2026-11-12 (`test_display.py::test_quiet_bus_holds_tx`, `QuietBus.*`): wait for a short quiet bus before transmitting (D25); real-bus check in midicontrol-fw/TODO.md | midicontrol-fw |
