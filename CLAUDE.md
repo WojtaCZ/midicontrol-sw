@@ -111,7 +111,7 @@ App layer (needs hardware):
 - **`control_socket`** — Unix socket server (thread per client, ≤ 4) and the thin client (`runClient`).
 - **`instance`** — runtime dir and the single-instance lock.
 - **`sd_notify`** — `READY=1` / `WATCHDOG=1` / `STOPPING=1` datagrams.
-- **`main`** — args/config/headless/`--cmd`; attach-or-run; interactive CLI: `play <code>`, `stop`, `verse` (add verse), `list`, `record`, `on`, `off`, `status`, `update` (refused while a song is playing, while another update runs or when the base is not connected; the same rule covers `--cmd`, the socket and the web upload, because ENTER_BOOTLOADER reboots the base), `quit`.
+- **`main`** — args/config/headless/`--cmd`; attach-or-run; interactive CLI: `play <code>`, `stop`, `verse` (add verse), `list`, `record`, `on`, `off`, `status`, `update` (refused while a song is playing or while another update runs; the same rule covers `--cmd`, the socket and the web upload, because ENTER_BOOTLOADER reboots the base. Only the web upload also refuses when the base is not connected; the CLI path passes `baseAlive=true` to `updateRefusal`), `quit`.
 - **`packaging/midicontrol.service.in`** — systemd user unit (configured at build time).
 
 ## Tests
