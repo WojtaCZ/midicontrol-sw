@@ -107,6 +107,8 @@ Each node keeps its last 200 events in memory. Nothing survives a restart: the j
 |---|---|---|---|---|
 | Software | otherwise | a Software WARN in the last 10 min, or a song file with a problem | a Software ERROR in the last 10 min | never |
 | Base | connected, keepalive OK | waiting for the base (unplugged), GET_STATUS not answered, or a firmware update in progress | serial open but keepalives lost | never |
+
+Base field **`in_bootloader`**: true while the serial port is closed, no update is running and the base shows up as its USB bootloader (ABCD:1235), i.e. a firmware update did not finish (P1-13). The player logs an ERROR once; the console `status` command then advises `update base <file>` to re-flash it. Nothing is re-flashed automatically.
 | Controller | the base's last STATUS_RESP (≤ 15 s old) says BLE connected | BLE reported disconnected, or the remote reports a critical battery | never: the PC can't tell a fault from "switched off" | base not connected, or no fresh STATUS_RESP |
 
 An unplugged base is a state, not an error: the dot is yellow "Waiting for the base" and the player reconnects on its own.
@@ -286,6 +288,7 @@ There is no login and no HTTPS, by design: the page is meant for a trusted LAN (
 | Page shows "no connection" | The service is stopped, restarting or frozen. `systemctl --user status midicontrol`. |
 | Base dot yellow "Waiting for the base" | USB unplugged or not enumerated; the player reconnects by itself. |
 | Base dot red | Serial open but the base doesn't answer keepalives: firmware hung or wrong device. |
+| Base `in_bootloader` true / ERROR "The base is in its USB bootloader" | A base firmware update did not finish. Re-flash: `midicontrol --cmd "update base <file>-update.bin"`. |
 | Controller dot grey | The base isn't connected, or hasn't answered GET_STATUS in the last 15 s. |
 | `error: another midicontrol instance is running … but does not answer` | A second player holds the lock but its socket is gone. Find it with `pgrep -a midicontrol`. |
 | `warning: a worker thread stalled; withholding the watchdog ping` | A CommHandler thread made no progress for 10 s; systemd will restart the service within 30 s. |
