@@ -61,6 +61,10 @@ public:
     // Item 4b: a STATUS_RESP is held back until the next GET_STATUS arrives; then both answers go out
     // back to back (the late one first). Each answer carries the SSR state of its own GET_STATUS.
     std::atomic<bool> holdStatus{false};
+    // Item 4b follow-up: the next GET_STATUS (that PacketId, retries included) is lost on the wire.
+    std::atomic<int> loseNextStatus{0};
+    std::atomic<int> lostStatusPid{-1};
+    std::atomic<int> statusAnswers{0};
     std::atomic<int> statusPairs{0};
 
     std::vector<Rx> log() { std::lock_guard<std::mutex> lk(_m); return _log; }
@@ -86,6 +90,10 @@ private:
                           {p.packetId, static_cast<uint8_t>(NakReason::UNREACHABLE)}));
             return;
         }
+        if (p.msgType == MsgType::GET_STATUS) {
+            if (lostStatusPid.load() == p.packetId) return;                 // a retry of the lost request
+            if (loseNextStatus > 0) { --loseNextStatus; lostStatusPid = p.packetId; return; }
+        }
         bool isSet = p.msgType == MsgType::SET_CURRENT && !p.payload.empty();
         if (isSet && p.payload[0] == 0 && dropSetCurrentOff) { ++droppedOff; return; }  // frame lost on the wire
         // router.cpp dedup: remember only the last PacketId from this source.
@@ -108,6 +116,7 @@ private:
                 return;
             }
             tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::STATUS_RESP, st));
+            ++statusAnswers;
             return;
         }
         ack(p);
@@ -976,6 +985,42 @@ TEST(comm_item4b_two_status_resps_after_one_resend_count_once) {
     std::cout << "  pairs=" << pairs << " distinct SET_CURRENT{00} ids=" << ids << "\n";
     CHECK_EQ(pairs, 1);
     CHECK_EQ(ids, size_t(3));             // original + re-send 1 + exactly one re-send for the pair
+}
+
+// Item 4b follow-up (advisor #8): a GET_STATUS lost on the wire (no ACK, no answer, retries lost too) and then a
+// lost organ-off. The FIFO of request generations must not lag behind for the lost request: the PC has to
+// re-send the off within a bounded number of status answers, not only after the 15 s entry expiry.
+TEST(comm_item4b_lost_status_request_then_lost_off_recovers) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    CHECK(waitFor([&] { return base.statusAnswers.load() >= 1; }, 7000));
+    h.organOn();
+    std::this_thread::sleep_for(300ms);
+    base.loseNextStatus = 1;
+    CHECK(waitFor([&] { return base.lostStatusPid.load() >= 0; }, 7000));  // (1) a GET_STATUS is lost
+    base.dropSetCurrentOff = true;                                           // (2) the off is lost
+    h.organOff();
+    const int answersAtOff = base.statusAnswers.load();
+    auto offIdCount = [&] {
+        std::set<uint8_t> ids;
+        for (auto& r : base.log()) if (isSet(r, 0)) ids.insert(r.pid);
+        return ids.size();
+    };
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool resent = waitFor([&] { return offIdCount() >= 2; }, 20000);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    const int answers = base.statusAnswers.load() - answersAtOff;
+    auto log = base.log();
+    h.shutdown();
+    for (auto& r : log) if (r.type == MsgType::SET_CURRENT || r.type == MsgType::GET_STATUS)
+        std::cout << "  base rx " << msgTypeName(r.type) << " id=" << int(r.pid) << " [" << mc::test::toHex(r.payload) << "]\n";
+    std::cout << "  lost GET_STATUS id=" << base.lostStatusPid.load() << " resent=" << resent << " after " << ms
+              << " ms, status answers since the off=" << answers << "\n";
+    CHECK(resent);
+    CHECK(answers <= 2);   // the first or second fresh answer (relay=1 vs wanted off) triggers the re-send
 }
 
 // P1-18: sendReliable's defaults are the protocol's retry budget (RETRY_TIMEOUT_MS x MAX_RETRIES retries), not
