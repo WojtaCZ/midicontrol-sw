@@ -20,7 +20,7 @@ This repo holds the MAIN copy of `docs/SYSTEM.md`. After editing it run `tools/s
 
 MIDIControl PC companion app — a CLI tool that communicates with a MIDIControl hardware device (organ/MIDI controller) over a serial port. It plays and records MIDI files, controls power to the organ, and maintains a keepalive connection with the Base unit.
 
-The app is written in C++ (the original Python implementation was removed; only stale `__pycache__/` remains).
+The app is written in C++ (the original Python implementation was removed).
 
 The project language is English (comments, UI strings, documentation).
 
