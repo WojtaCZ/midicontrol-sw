@@ -378,7 +378,11 @@ uint8_t CommHandler::sendWithAckImpl(uint8_t dest, MsgType type, const std::vect
         const int group = supersedeGroup(type);
         if (group != 0) {
             for (auto it = _pending.begin(); it != _pending.end();) {
-                if (it->second.dest == dest && supersedeGroup(it->second.msgType) == group) {
+                // Item 2: a state signal (group 2) also drops a pending SIGNAL_ANCHOR, whose section belongs
+                // to the old state. One-directional: an ANCHOR supersedes nothing (a lost PLAYING must still
+                // be retried after the anchor that follows it).
+                const bool staleAnchor = group == 2 && it->second.msgType == MsgType::SIGNAL_ANCHOR;
+                if (it->second.dest == dest && (supersedeGroup(it->second.msgType) == group || staleAnchor)) {
                     it = _pending.erase(it);
                     ++superseded;
                 } else {

@@ -53,6 +53,8 @@ public:
     // Packets to the remote (P1-9): the remote ACKs, the base NAKs UNREACHABLE, or the frame is lost.
     enum RemoteMode { RemoteAck, RemoteUnreachable, RemoteDrop };
     std::atomic<int> remoteMode{RemoteAck};
+    std::atomic<int> dropAnchors{0};   // the next N SIGNAL_ANCHOR frames are lost on the air
+    std::atomic<int> dropPlaying{0};   // the next N SIGNAL_PLAYING frames are lost on the air
 
     std::vector<Rx> log() { std::lock_guard<std::mutex> lk(_m); return _log; }
 
@@ -69,6 +71,8 @@ private:
         default: break;
         }
         if (p.dest == ADDR_REMOTE) {  // forwarded, never executed by the base (own dedup: the remote's)
+            if (p.msgType == MsgType::SIGNAL_ANCHOR && dropAnchors > 0) { --dropAnchors; return; }
+            if (p.msgType == MsgType::SIGNAL_PLAYING && dropPlaying > 0) { --dropPlaying; return; }
             if (remoteMode == RemoteAck) tx(Packet(ADDR_REMOTE, ADDR_PC, _id++, MsgType::ACK, {p.packetId}));
             else if (remoteMode == RemoteUnreachable)
                 tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::NAK,
@@ -790,4 +794,60 @@ TEST(comm_p19_no_resync_during_update) {
     dumpSignals(log, 0);
     CHECK_EQ(during, size_t(0));
     CHECK_EQ(countType(log, m, MsgType::SIGNAL_STOPPED), size_t(1));
+}
+
+// Item 2: an un-ACKed SIGNAL_ANCHOR must not be retried after SIGNAL_STOPPED (the remote would show a
+// section of a song that has ended). STOPPED / PLAYING / RECORDING supersede pending ANCHORs.
+TEST(comm_item2_stopped_supersedes_pending_anchor) {
+    FakeBase base;
+    base.ble = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    statusNow(h);                                     // PC-start STOPPED done
+    base.dropAnchors = 100;
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] { return countType(base.log(), 0, MsgType::SIGNAL_ANCHOR) > 0; }, 5000));
+    const bool playing = h.isPlaying();
+    h.stopSong();
+    std::this_thread::sleep_for(2500ms);              // > 3 retries x 500 ms
+    auto log = base.log();
+    h.shutdown();
+    dumpSignals(log, 0);
+    size_t stopAt = log.size();
+    for (size_t i = 0; i < log.size(); ++i)
+        if (log[i].type == MsgType::SIGNAL_STOPPED && countType(log, 0, MsgType::SIGNAL_PLAYING) > 0 &&
+            countType(std::vector<Rx>(log.begin(), log.begin() + i), 0, MsgType::SIGNAL_PLAYING) > 0) { stopAt = i; break; }
+    CHECK(playing);
+    CHECK(stopAt < log.size());
+    CHECK_EQ(countType(log, stopAt, MsgType::SIGNAL_ANCHOR), size_t(0));
+}
+
+// Item 2 guard: the supersede is one-directional. A first SIGNAL_PLAYING lost on the air is still retried
+// after the SIGNAL_ANCHOR that follows it (ANCHOR supersedes nothing).
+TEST(comm_item2_anchor_does_not_supersede_playing) {
+    FakeBase base;
+    base.ble = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    statusNow(h);
+    base.dropPlaying = 1;
+    CHECK(!h.playSong("406A").has_value());
+    std::this_thread::sleep_for(1500ms);
+    auto log = base.log();
+    const bool playing = h.isPlaying();
+    h.shutdown();
+    dumpSignals(log, 0);
+    CHECK(playing);
+    size_t firstAnchor = log.size();
+    for (size_t i = 0; i < log.size(); ++i) if (log[i].type == MsgType::SIGNAL_ANCHOR) { firstAnchor = i; break; }
+    CHECK(firstAnchor < log.size());
+    CHECK(countType(log, firstAnchor, MsgType::SIGNAL_PLAYING) >= size_t(1));  // the retry after the anchor
 }
