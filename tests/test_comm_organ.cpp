@@ -58,6 +58,7 @@ public:
     std::atomic<int> remoteMode{RemoteAck};
     std::atomic<int> dropAnchors{0};   // the next N SIGNAL_ANCHOR frames are lost on the air
     std::atomic<int> dropPlaying{0};   // the next N SIGNAL_PLAYING frames are lost on the air
+    std::atomic<int> busyRemote{0};    // the next N frames to the remote (retries included) get NAK BUSY
     // Item 4b: a STATUS_RESP is held back until the next GET_STATUS arrives; then both answers go out
     // back to back (the late one first). Each answer carries the SSR state of its own GET_STATUS.
     std::atomic<bool> holdStatus{false};
@@ -84,6 +85,11 @@ private:
         if (p.dest == ADDR_REMOTE) {  // forwarded, never executed by the base (own dedup: the remote's)
             if (p.msgType == MsgType::SIGNAL_ANCHOR && dropAnchors > 0) { --dropAnchors; return; }
             if (p.msgType == MsgType::SIGNAL_PLAYING && dropPlaying > 0) { --dropPlaying; return; }
+            if (busyRemote > 0) {
+                --busyRemote;
+                tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::NAK, {p.packetId, static_cast<uint8_t>(NakReason::BUSY)}));
+                return;
+            }
             if (remoteMode == RemoteAck) tx(Packet(ADDR_REMOTE, ADDR_PC, _id++, MsgType::ACK, {p.packetId}));
             else if (remoteMode == RemoteUnreachable)
                 tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::NAK,
@@ -757,6 +763,54 @@ TEST(comm_p19_unreachable_is_retried_on_next_ble1) {
     CHECK_EQ(perStatus[1], size_t(1));  // NAKed -> again
     CHECK_EQ(perStatus[2], size_t(1));  // ACKed now
     CHECK_EQ(perStatus[3], size_t(0));  // clean
+}
+
+// NAK BUSY on a SIGNAL_* is retried like a timeout (SYSTEM.md protocol rule, PROTOCOL.md): same PacketId, same
+// retry budget, and an ACK on a retry leaves the remote clean. Bench 2026-11-15 (LAT-7): a BUSY was not retried,
+// so the remote showed the old state until the next 5 s status poll resynced it.
+TEST(comm_signal_nak_busy_is_retried_with_the_same_id) {
+    FakeBase base;
+    base.ble = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    base.busyRemote = 1;                              // the PC start resync (SIGNAL_STOPPED) gets NAK BUSY once
+    const size_t m = 0;
+    CHECK(h.connect(base.path()));
+    CHECK(waitFor([&] { return countType(base.log(), m, MsgType::SIGNAL_STOPPED) >= 2; }, 2000));
+    std::this_thread::sleep_for(300ms);
+    const size_t m2 = base.log().size();
+    statusNow(h);                                     // ACKed on the retry: clean, nothing more
+    auto log = base.log();
+    h.shutdown();
+    dumpSignals(log, 0);
+    std::set<int> ids;
+    for (size_t i = m; i < m2; ++i) if (log[i].type == MsgType::SIGNAL_STOPPED) ids.insert(log[i].pid);
+    CHECK_EQ(countType(log, m, MsgType::SIGNAL_STOPPED) - countType(log, m2, MsgType::SIGNAL_STOPPED), size_t(2));
+    CHECK_EQ(ids.size(), size_t(1));                  // the retry kept the PacketId
+    CHECK_EQ(countType(log, m2, MsgType::SIGNAL_STOPPED), size_t(0));
+}
+
+// BUSY on every attempt: 1 send + MAX_RETRIES retries, then the remote is dirty and the next ble=1 status resyncs.
+TEST(comm_signal_nak_busy_gives_up_after_the_retry_budget) {
+    FakeBase base;
+    base.ble = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    base.busyRemote = 1000;
+    const size_t m = 0;
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(std::chrono::milliseconds((MAX_RETRIES + 1) * RETRY_TIMEOUT_MS + 500));
+    const size_t m2 = base.log().size();
+    base.busyRemote = 0;
+    statusNow(h);                                     // dirty: one more resync, ACKed
+    auto log = base.log();
+    h.shutdown();
+    dumpSignals(log, 0);
+    CHECK_EQ(countType(log, m, MsgType::SIGNAL_STOPPED) - countType(log, m2, MsgType::SIGNAL_STOPPED),
+             size_t(MAX_RETRIES + 1));
+    CHECK_EQ(countType(log, m2, MsgType::SIGNAL_STOPPED), size_t(1));
 }
 
 // An idle remote that knows it is stopped gets nothing on a ble edge; a STOPPED lost on the air is re-sent once.

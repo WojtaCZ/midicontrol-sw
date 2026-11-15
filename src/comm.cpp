@@ -563,13 +563,36 @@ bool CommHandler::sendReliable(uint8_t dest, MsgType type, const std::vector<uin
 
 void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
     std::optional<Pending> pending;
+    std::optional<Pending> busyRetry;
     {
         std::lock_guard<std::mutex> lk(_mutex);
         auto it = _pending.find(pid);
         if (it != _pending.end()) {
-            pending = it->second;
-            _pending.erase(it);
+            Pending& p = it->second;
+            // Protocol rule (SYSTEM.md, PROTOCOL.md): NAK BUSY is retried like a timeout, same PacketId, same
+            // budget. Kept pending with a fresh timestamp, checkTimeouts resends it after RETRY_TIMEOUT_MS and
+            // spends one retry; the budget used up falls through to the NAK path below. Background polls keep
+            // their own BUSY rules (DiagPoller: next tick; InfoPoller; the 5 s GET_STATUS poll). Bench
+            // 2026-11-15 (LAT-7): an un-retried SIGNAL_* BUSY left the remote on the old state for ~3.6 s.
+            const bool background = p.msgType == MsgType::DIAG_GET || p.msgType == MsgType::GET_INFO ||
+                                    p.msgType == MsgType::GET_STATUS;
+            if (nak && reason == static_cast<uint8_t>(NakReason::BUSY) && !background && p.retries < MAX_RETRIES) {
+                p.timestamp = Clock::now();
+                busyRetry = p;
+            } else {
+                pending = p;
+                _pending.erase(it);
+            }
         }
+    }
+    if (busyRetry) {
+        for (Node n : mc::status::nodesForPeer(busyRetry->dest)) {
+            _status.count(n, "busy_retries");
+            mc::log::info(n, "NAK BUSY for " + std::string(msgTypeName(busyRetry->msgType)) + " id=" +
+                                 std::to_string(pid) + " to " + nodeName(busyRetry->dest) + ": retrying (" +
+                                 std::to_string(busyRetry->retries + 1) + "/" + std::to_string(MAX_RETRIES) + ")");
+        }
+        return;
     }
     if (nak && _diagPoller) _diagPoller->onNak(pid, reason);  // stops the polling after NAK UNKNOWN_MSG/UNREACHABLE (BUSY only retries on the timer)
     const bool infoGet = pending && pending->msgType == MsgType::GET_INFO;
