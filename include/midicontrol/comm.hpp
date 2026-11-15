@@ -195,6 +195,7 @@ private:
     bool releasePlayer();  // stop + destroy the player; false if there was none
     void displayClear();
     void stopRecorder();
+    bool recorderAliveLocked();  // _recorderMutex held; forgets a recorder that exited on its own
 
     Config _config;
     mc::status::StatusRegistry& _status;

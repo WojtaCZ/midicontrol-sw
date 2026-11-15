@@ -460,7 +460,7 @@ namespace {
 struct FakeRecorder {
     std::filesystem::path dir, recDir, log;
     std::string oldPath;
-    FakeRecorder() {
+    explicit FakeRecorder(bool exitAtOnce = false) {
         dir = std::filesystem::temp_directory_path() / ("mc_rec_test_" + std::to_string(getpid()));
         std::filesystem::remove_all(dir);
         recDir = dir / "rec";
@@ -469,7 +469,8 @@ struct FakeRecorder {
         auto script = dir / "arecordmidi";
         {
             std::ofstream s(script);
-            s << "#!/bin/sh\necho \"$$ $3\" >> '" << log.string() << "'\nexec sleep 30\n";
+            s << "#!/bin/sh\necho \"$$ $3\" >> '" << log.string() << "'\n"
+              << (exitAtOnce ? "exit 1\n" : "exec sleep 30\n");
         }
         std::filesystem::permissions(script, std::filesystem::perms::owner_all);
         const char* p = getenv("PATH");
@@ -488,6 +489,13 @@ struct FakeRecorder {
         return out;
     }
 };
+// The ALSA token "9999:0" cannot resolve: should the fake script ever be bypassed, the real
+// arecordmidi fails instead of opening the real MIDIControl port.
+std::optional<MidiPorts> recPorts() {
+    auto p = fakePorts();
+    p->inName = "fake 9999:0";
+    return p;
+}
 }  // namespace
 
 // A second Record while one runs must not start a second arecordmidi (the first would be orphaned).
@@ -497,7 +505,7 @@ TEST(comm_pcc1_second_record_is_refused_while_recording) {
     Config cfg = testConfig();
     cfg.recFolder = fr.recDir.string();
     cfg.warmupMs = 0;
-    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CommHandler h(cfg, [] { return recPorts(); }, reg);
     CHECK(h.recordSong());
     CHECK(!h.recordSong());  // refused: "Already recording"
     std::this_thread::sleep_for(500ms);
@@ -515,7 +523,7 @@ TEST(comm_pcc1_records_in_the_same_second_get_unique_files) {
     Config cfg = testConfig();
     cfg.recFolder = fr.recDir.string();
     cfg.warmupMs = 0;
-    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CommHandler h(cfg, [] { return recPorts(); }, reg);
     CHECK(h.connect(base.path()));
     std::this_thread::sleep_for(100ms);
     // Start at the beginning of a wall-clock second so both records fall into the same one.
@@ -544,7 +552,7 @@ TEST(comm_pcc1_stop_during_warmup_cancels_the_record) {
     Config cfg = testConfig();
     cfg.recFolder = fr.recDir.string();
     cfg.warmupMs = 1500;
-    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CommHandler h(cfg, [] { return recPorts(); }, reg);
     CHECK(h.connect(base.path()));
     std::this_thread::sleep_for(100ms);
     std::thread rec([&] { h.recordSong(); });
@@ -556,4 +564,45 @@ TEST(comm_pcc1_stop_during_warmup_cancels_the_record) {
     std::cout << "  arecordmidi started after Stop: " << spawned.size() << "\n";
     CHECK_EQ(spawned.size(), size_t(0));
     h.shutdown();
+}
+
+// A recorder that dies on its own (bad port, ALSA port gone) must not block the next Record.
+TEST(comm_pcc1_dead_recorder_does_not_block_the_next_record) {
+    FakeRecorder fr(/*exitAtOnce=*/true);
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.recFolder = fr.recDir.string();
+    cfg.warmupMs = 0;
+    CommHandler h(cfg, [] { return recPorts(); }, reg);
+    CHECK(h.recordSong());
+    std::this_thread::sleep_for(500ms);  // the fake recorder has exited
+    const bool second = h.recordSong();
+    std::this_thread::sleep_for(300ms);
+    std::cout << "  second Record accepted: " << second << ", started: " << fr.lines().size() << "\n";
+    CHECK(second);
+    CHECK_EQ(fr.lines().size(), size_t(2));
+    h.shutdown();
+}
+
+// Organ safety (Q1-1 b): a dead recorder must not keep the found-on organ from the idle power-off.
+TEST(comm_pcc1_dead_recorder_does_not_block_idle_off) {
+    FakeRecorder fr(/*exitAtOnce=*/true);
+    FakeBase base;
+    base.ssr = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.recFolder = fr.recDir.string();
+    cfg.warmupMs = 0;
+    cfg.organIdleOffMs = 4000;
+    CommHandler h(cfg, [] { return recPorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(3000ms);  // reset done, idle timer armed
+    CHECK(h.recordSong());                 // restarts the timer; the recorder exits at once
+    std::this_thread::sleep_for(8000ms);
+    auto log = base.log();
+    const bool ssr = base.ssr.load();
+    h.shutdown();
+    std::cout << "  offs=" << countSetV(log, 0) << " ssr=" << ssr << "\n";
+    CHECK_EQ(countSetV(log, 0), size_t(1));
+    CHECK(!ssr);
 }

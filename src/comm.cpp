@@ -1016,7 +1016,7 @@ bool CommHandler::recordSong() {
     // refused; overwriting _recorderPid would orphan the first arecordmidi (it keeps the ALSA port).
     {
         std::lock_guard<std::mutex> lk(_recorderMutex);
-        if (_recorderPid > 0 || _recorderStarting) {
+        if (recorderAliveLocked() || _recorderStarting) {
             mc::log::warn(Node::Software, "Already recording; Stop first.");
             return false;
         }
@@ -1075,6 +1075,14 @@ bool CommHandler::recordSong() {
     std::remove(fullPath.c_str());
     mc::log::error(Node::Software, "Failed to start arecordmidi (rc=" + std::to_string(-pid) + ")");
     return false;
+}
+
+bool CommHandler::recorderAliveLocked() {
+    if (_recorderPid > 0 && !mc::proc::running(_recorderPid)) {
+        mc::log::warn(Node::Software, "arecordmidi exited on its own; recording ended.");
+        _recorderPid = -1;
+    }
+    return _recorderPid > 0;
 }
 
 void CommHandler::stopRecorder() {
@@ -1251,7 +1259,7 @@ void CommHandler::doIdleOff() {
     }
     {
         std::lock_guard<std::mutex> lk(_recorderMutex);
-        busy = busy || _recorderPid > 0;
+        busy = busy || recorderAliveLocked();  // a dead recorder must not keep the organ on
     }
     if (busy) {
         armIdleOff();  // in use: start counting again
