@@ -23,6 +23,8 @@
 #include <csignal>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <set>
 #include <thread>
 
 using namespace mc;
@@ -55,6 +57,10 @@ public:
     std::atomic<int> remoteMode{RemoteAck};
     std::atomic<int> dropAnchors{0};   // the next N SIGNAL_ANCHOR frames are lost on the air
     std::atomic<int> dropPlaying{0};   // the next N SIGNAL_PLAYING frames are lost on the air
+    // Item 4b: a STATUS_RESP is held back until the next GET_STATUS arrives; then both answers go out
+    // back to back (the late one first). Each answer carries the SSR state of its own GET_STATUS.
+    std::atomic<bool> holdStatus{false};
+    std::atomic<int> statusPairs{0};
 
     std::vector<Rx> log() { std::lock_guard<std::mutex> lk(_m); return _log; }
 
@@ -91,8 +97,16 @@ private:
         }
         if (p.msgType == MsgType::GET_STATUS) {
             ack(p);
-            tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::STATUS_RESP,
-                      {static_cast<uint8_t>(ble ? 1 : 0), static_cast<uint8_t>(ssr ? 1 : 0), 1, 1}));
+            std::vector<uint8_t> st{static_cast<uint8_t>(ble ? 1 : 0), static_cast<uint8_t>(ssr ? 1 : 0), 1, 1};
+            if (holdStatus) {
+                if (!_held) { _held = st; return; }
+                tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::STATUS_RESP, *_held));
+                _held.reset();
+                tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::STATUS_RESP, st));
+                ++statusPairs;
+                return;
+            }
+            tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::STATUS_RESP, st));
             return;
         }
         ack(p);
@@ -116,6 +130,7 @@ private:
     std::vector<Rx> _log;
     uint8_t _id = 1, _lastPid = 0;
     bool _lastValid = false;
+    std::optional<std::vector<uint8_t>> _held;
 };
 
 Config testConfig() {
@@ -896,4 +911,34 @@ TEST(comm_item4a_confirmed_off_then_manual_on_during_outage_is_left_on) {
 // From SSR=1 alone the PC cannot tell a lost "off" from a manual "on"; re-sending "off" is the safe side.
 TEST(comm_item4a_unconfirmed_off_is_still_defended_after_reconnect_pinned) {
     CHECK_EQ(item4aOffsAfterReconnect(false, "fake-base-tty4a2"), size_t(1));
+}
+
+// Item 4b (PCC-2, advisor): two STATUS_RESPs that arrive back to back after one re-send (the first held back
+// until a newer GET_STATUS went out) count as one attempt, not two.
+TEST(comm_item4b_two_status_resps_after_one_resend_count_once) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    h.organOn();
+    std::this_thread::sleep_for(300ms);
+    base.dropSetCurrentOff = true;        // every off is lost
+    h.organOff();
+    auto offIdCount = [&] {
+        std::set<uint8_t> ids;
+        for (auto& r : base.log()) if (isSet(r, 0)) ids.insert(r.pid);
+        return ids.size();
+    };
+    CHECK(waitFor([&] { return offIdCount() >= 2; }, 12000));  // the first re-send (1/3)
+    base.holdStatus = true;
+    CHECK(waitFor([&] { return base.statusPairs.load() >= 1; }, 15000));
+    std::this_thread::sleep_for(500ms);
+    const size_t ids = offIdCount();
+    const int pairs = base.statusPairs.load();
+    h.shutdown();
+    std::cout << "  pairs=" << pairs << " distinct SET_CURRENT{00} ids=" << ids << "\n";
+    CHECK_EQ(pairs, 1);
+    CHECK_EQ(ids, size_t(3));             // original + re-send 1 + exactly one re-send for the pair
 }
