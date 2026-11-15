@@ -24,6 +24,18 @@ constexpr int kStatusPollMs = 5000;     // GET_STATUS to the base while connecte
 constexpr int kStatusAnswerMs = 2000;   // no STATUS_RESP by then = "not answered"
 constexpr int kMidiCheckMs = 10000;     // MIDI port re-discovery for the status page
 
+// PM-13: reliable messages that carry a state, where only the newest one may reach the node.
+// 0 = no supersede; equal non-zero values supersede each other (same destination only).
+int supersedeGroup(MsgType t) {
+    switch (t) {
+        case MsgType::SET_CURRENT: return 1;          // organ SSR on/off
+        case MsgType::SIGNAL_PLAYING:
+        case MsgType::SIGNAL_RECORDING:
+        case MsgType::SIGNAL_STOPPED: return 2;       // remote's playing/recording/stopped state
+        default: return 0;
+    }
+}
+
 std::string hexByte(uint8_t b) {
     char buf[8];
     std::snprintf(buf, sizeof(buf), "0x%02X", b);
@@ -323,11 +335,34 @@ uint8_t CommHandler::sendWithAck(uint8_t dest, MsgType type, const std::vector<u
     uint8_t pid = nextPacketId();
     Packet pkt(ADDR_PC, dest, pid, type, payload);
     auto raw = encode(pkt);
+    int superseded = 0;
     {
         std::lock_guard<std::mutex> lk(_mutex);
         if (!_serial.isOpen()) return pid;  // nothing to retry while disconnected
+        // PM-13 supersede rule, at the single send point for reliable packets: a newer SET_CURRENT
+        // (or SIGNAL_PLAYING/SIGNAL_STOPPED) drops every older un-ACKed one of the same group to the same
+        // node. Otherwise the old frame's retry (old PacketId) can reach the node after the new one, and
+        // the node, which remembers only the last PacketId per source, executes the stale state last.
+        // Erase, register and write under one lock so checkTimeouts cannot retransmit in between.
+        const int group = supersedeGroup(type);
+        if (group != 0) {
+            for (auto it = _pending.begin(); it != _pending.end();) {
+                if (it->second.dest == dest && supersedeGroup(it->second.msgType) == group) {
+                    it = _pending.erase(it);
+                    ++superseded;
+                } else {
+                    ++it;
+                }
+            }
+        }
         _pending[pid] = Pending{Clock::now(), 0, type, dest, payload};
         _serial.write(raw);
+    }
+    if (superseded > 0) {
+        for (Node n : mc::status::nodesForPeer(dest)) {
+            mc::log::debug(n, std::string(msgTypeName(type)) + " supersedes " + std::to_string(superseded) +
+                                  " pending older one(s)");
+        }
     }
     if (dest == ADDR_REMOTE && type != MsgType::DIAG_GET && type != MsgType::GET_INFO) {
         _status.set(Node::Controller, "last_tx", std::string(msgTypeName(type)));

@@ -149,6 +149,24 @@ if(RTMIDI_FOUND)
         target_link_directories(midicontrol PRIVATE ${RTMIDI_LIBRARY_DIRS})
     endif()
 
+    # CommHandler tests: real comm/player threads against a fake base on a pty.
+    add_executable(midicontrol_comm_tests
+        tests/test_main.cpp
+        tests/test_comm_organ.cpp
+        src/comm.cpp
+        src/player.cpp
+        src/midi_ports.cpp
+    )
+    target_link_libraries(midicontrol_comm_tests PRIVATE midicontrol_core Threads::Threads
+                          ${RTMIDI_LIBRARIES} util)
+    target_include_directories(midicontrol_comm_tests PRIVATE
+                               ${CMAKE_CURRENT_SOURCE_DIR}/tests ${RTMIDI_INCLUDE_DIRS})
+    target_compile_options(midicontrol_comm_tests PRIVATE ${RTMIDI_CFLAGS_OTHER})
+    if(RTMIDI_LIBRARY_DIRS)
+        target_link_directories(midicontrol_comm_tests PRIVATE ${RTMIDI_LIBRARY_DIRS})
+    endif()
+    add_test(NAME comm COMMAND midicontrol_comm_tests)
+
     # ---- Install: binary, example config, systemd user unit ----
     include(GNUInstallDirs)
     install(TARGETS midicontrol RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
