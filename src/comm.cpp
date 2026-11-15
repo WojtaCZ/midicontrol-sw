@@ -25,6 +25,8 @@ namespace {
 constexpr int kStatusPollMs = 5000;     // GET_STATUS to the base while connected
 constexpr int kStatusAnswerMs = 2000;   // no STATUS_RESP by then = "not answered"
 constexpr int kMidiCheckMs = 10000;     // MIDI port re-discovery for the status page
+constexpr uint64_t kNoStatusGen = UINT64_MAX;     // Item 4b: a STATUS_RESP that answers no known GET_STATUS
+constexpr int64_t kStatusGenMaxAgeMs = 15000;     // Item 4b: a request unanswered this long is not answered later
 constexpr int kOrganReassertMax = 3;         // PCC-2: re-sends of a SET_CURRENT the base did not take
 constexpr int64_t kOrganIntentWindowMs = 30000;  // PCC-2: how long a PC organ command is defended
 std::string idleText(int64_t ms) {
@@ -216,6 +218,8 @@ void CommHandler::disconnect() {
     std::lock_guard<std::mutex> lk(_mutex);
     _serial.close();
     _pending.clear();
+    _statusGens.clear();  // no answer to an earlier request can come over a new connection
+    _lastStatusRespPid = -1;
     _connected.store(false);
     _status.set(Node::Base, "connected", false);
     clearBaseReport();
@@ -287,6 +291,8 @@ void CommHandler::handleSerialLoss() {
         std::lock_guard<std::mutex> lk(_mutex);
         _serial.close();
         _pending.clear();
+        _statusGens.clear();  // no answer to an earlier request can come over a new connection
+        _lastStatusRespPid = -1;
     }
     _connected.store(false);
     _parser.reset();
@@ -338,6 +344,12 @@ uint8_t CommHandler::initialPacketId() {
     return static_cast<uint8_t>(seed ^ (seed >> 8) ^ (seed >> 16) ^ (seed >> 24));
 }
 
+void CommHandler::noteStatusRequestLocked() {
+    const int64_t now = steadyMs();
+    while (!_statusGens.empty() && now - _statusGens.front().first > kStatusGenMaxAgeMs) _statusGens.pop_front();
+    _statusGens.emplace_back(now, _setCurrentGen.load());
+}
+
 uint8_t CommHandler::nextPacketId() { return _packetId.fetch_add(1); }
 
 uint8_t CommHandler::send(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload) {
@@ -349,7 +361,12 @@ uint8_t CommHandler::sendPacket(const Packet& pkt) {
     bool sent = false;
     {
         std::lock_guard<std::mutex> lk(_mutex);
-        if (_serial.isOpen()) sent = _serial.write(raw);
+        if (_serial.isOpen()) {
+            const bool statusReq = pkt.msgType == MsgType::GET_STATUS && pkt.dest == ADDR_BASE;
+            if (statusReq) noteStatusRequestLocked();
+            sent = _serial.write(raw);
+            if (statusReq && !sent) _statusGens.pop_back();
+        }
     }
     if (sent) noteTx(pkt, false);
     return pkt.packetId;
@@ -369,6 +386,9 @@ uint8_t CommHandler::sendWithAckImpl(uint8_t dest, MsgType type, const std::vect
     int superseded = 0;
     {
         std::lock_guard<std::mutex> lk(_mutex);
+        // Item 4b: every SET_CURRENT counts, sent or not; STATUS_RESPs to earlier GET_STATUS no longer tell
+        // the SSR state. Under _mutex so no GET_STATUS write can fall between the bump and this write.
+        if (type == MsgType::SET_CURRENT && dest == ADDR_BASE) ++_setCurrentGen;
         if (!_serial.isOpen()) return pid;  // nothing to retry while disconnected
         // PM-13 supersede rule, at the single send point for reliable packets: a newer SET_CURRENT
         // (or SIGNAL_PLAYING/SIGNAL_STOPPED) drops every older un-ACKed one of the same group to the same
@@ -391,6 +411,7 @@ uint8_t CommHandler::sendWithAckImpl(uint8_t dest, MsgType type, const std::vect
             }
         }
         _pending[pid] = Pending{Clock::now(), 0, type, dest, payload};
+        if (type == MsgType::GET_STATUS && dest == ADDR_BASE) noteStatusRequestLocked();
         _serial.write(raw);
         if (registered) *registered = true;
     }
@@ -601,6 +622,11 @@ void CommHandler::checkTimeouts() {
             if (p.retries < MAX_RETRIES) {
                 // Retransmit with the SAME PacketId (receiver de-duplicates).
                 Packet pkt(ADDR_PC, p.dest, it->first, p.msgType, p.payload);
+                // A retried GET_STATUS may be answered again (the base keeps only its last PacketId): one
+                // more entry, so a second answer cannot take a newer request's generation.
+                if (p.msgType == MsgType::GET_STATUS && p.dest == ADDR_BASE && _serial.isOpen()) {
+                    noteStatusRequestLocked();
+                }
                 if (_serial.isOpen() && _serial.write(encode(pkt))) resent.push_back(std::move(pkt));
                 p.timestamp = now;
                 p.retries += 1;
@@ -737,10 +763,18 @@ void CommHandler::noteRx(const Packet& pkt) {
             }
             if (dirty && !_resyncQueued.exchange(true)) post({Command::Kind::RemoteResync, {}, {}, 0});
         }
-        uint64_t statusGen;
+        // Item 4b: judged by the generation of the GET_STATUS it answers (FIFO; the base answers in order).
+        // A repeat of the last STATUS_RESP (same PacketId) or an answer with no request left is not authoritative.
+        uint64_t statusGen = kNoStatusGen;
         {
-            std::lock_guard<std::mutex> lk(_routineMutex);
-            statusGen = _statusGen;
+            std::lock_guard<std::mutex> lk(_mutex);
+            if (pkt.packetId != _lastStatusRespPid) {
+                _lastStatusRespPid = pkt.packetId;
+                if (!_statusGens.empty()) {
+                    statusGen = _statusGens.front().second;
+                    _statusGens.pop_front();
+                }
+            }
         }
         reconcileOrgan(st.relay, statusGen);
         _status.set(Node::Base, "status_display", st.display);
@@ -798,7 +832,6 @@ void CommHandler::pollStatus() {
         std::lock_guard<std::mutex> lk(_routineMutex);
         _pollPids.insert(pid);
         _pollPid = pid;
-        _statusGen = _setCurrentGen.load();
     }
     sendPacket(Packet(ADDR_PC, ADDR_BASE, pid, MsgType::GET_STATUS));
 }
@@ -853,10 +886,6 @@ std::optional<CommHandler::BaseStatus> CommHandler::requestStatus(int timeoutMs)
     ++_statusWaiters;
     const uint64_t seq = _statusSeq;
     lk.unlock();
-    {
-        std::lock_guard<std::mutex> rl(_routineMutex);
-        _statusGen = _setCurrentGen.load();
-    }
     sendWithAck(ADDR_BASE, MsgType::GET_STATUS);
     lk.lock();
     bool got = _statusCv.wait_for(lk, std::chrono::milliseconds(timeoutMs),
@@ -1051,7 +1080,6 @@ void CommHandler::setOrganLocked(bool on) {
     _organIntent = on ? 1 : 0;
     _organIntentMs = steadyMs();
     _organReasserts = 0;
-    ++_setCurrentGen;  // STATUS_RESPs to earlier GET_STATUS no longer tell the SSR state
     sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {static_cast<uint8_t>(on ? 0x01 : 0x00)});
 }
 
@@ -1109,7 +1137,6 @@ void CommHandler::reconcileOrgan(bool relay, uint64_t statusGen) {
     mc::log::warn(Node::Base, "Organ power: the base reports " + std::string(relay ? "on" : "off") +
                                   ", the PC switched it " + wantText + "; re-sending (" +
                                   std::to_string(_organReasserts) + "/" + std::to_string(kOrganReassertMax) + ").");
-    ++_setCurrentGen;
     sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {static_cast<uint8_t>(want ? 0x01 : 0x00)});
 }
 

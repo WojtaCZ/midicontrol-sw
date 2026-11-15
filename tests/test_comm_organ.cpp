@@ -913,6 +913,40 @@ TEST(comm_item4a_unconfirmed_off_is_still_defended_after_reconnect_pinned) {
     CHECK_EQ(item4aOffsAfterReconnect(false, "fake-base-tty4a2"), size_t(1));
 }
 
+// Item 4b, found while writing the PCC-2 test: a STATUS_RESP to a GET_STATUS sent BEFORE the last SET_CURRENT,
+// arriving late (the base held it until a newer GET_STATUS went out), was checked against the newest
+// generation. Its stale relay=0 "confirmed" the lost off, the next relay=1 was adopted, and the organ stayed on
+// with no re-send and no fault. Each answer must be judged by the generation of its own GET_STATUS.
+TEST(comm_item4b_stale_status_answer_does_not_confirm_a_lost_off) {
+    FakeBase base;
+    base.holdStatus = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    // A GET_STATUS reaches the base before the organ commands (SSR off); its answer is held back.
+    CHECK(waitFor([&] {
+        for (auto& r : base.log()) if (r.type == MsgType::GET_STATUS) return true;
+        return false;
+    }, 7000));
+    h.organOn();
+    std::this_thread::sleep_for(300ms);
+    base.dropSetCurrentOff = true;        // every off is lost
+    h.organOff();
+    CHECK(waitFor([&] { return base.statusPairs.load() >= 1; }, 15000));
+    std::this_thread::sleep_for(500ms);
+    auto log = base.log();
+    const int pairs = base.statusPairs.load();
+    h.shutdown();
+    std::set<uint8_t> offIds;
+    for (auto& r : log) if (isSet(r, 0)) offIds.insert(r.pid);
+    for (auto& r : log) if (r.type == MsgType::SET_CURRENT || r.type == MsgType::GET_STATUS)
+        std::cout << "  base rx " << msgTypeName(r.type) << " id=" << int(r.pid) << " [" << mc::test::toHex(r.payload) << "]\n";
+    std::cout << "  pairs=" << pairs << " distinct SET_CURRENT{00} ids=" << offIds.size() << "\n";
+    CHECK_EQ(pairs, 1);
+    CHECK_EQ(offIds.size(), size_t(2));   // the original off + one re-send triggered by the fresh answer
+}
+
 // Item 4b (PCC-2, advisor): two STATUS_RESPs that arrive back to back after one re-send (the first held back
 // until a newer GET_STATUS went out) count as one attempt, not two.
 TEST(comm_item4b_two_status_resps_after_one_resend_count_once) {

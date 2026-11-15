@@ -253,9 +253,14 @@ private:
     uint8_t _pollPid = 0;
     int64_t _pollSentMs = 0;
     // Organ power: a STATUS_RESP is the base's truth only when no SET_CURRENT went out after its GET_STATUS
-    // (the base answers in order). _statusGen = _setCurrentGen when the last GET_STATUS was sent (_routineMutex).
+    // (the base answers in order). Item 4b: one (sentMs, _setCurrentGen) entry per GET_STATUS written to the
+    // base, popped by each new STATUS_RESP, so an answer to an older request is judged by that request's
+    // generation. Extra entries (lost or de-duplicated requests) only make the PC ignore more answers.
+    // _setCurrentGen is bumped and the entries pushed under _mutex, in the same section as the write.
     std::atomic<uint64_t> _setCurrentGen{0};
-    uint64_t _statusGen = 0;
+    std::deque<std::pair<int64_t, uint64_t>> _statusGens;  // _mutex
+    int _lastStatusRespPid = -1;                            // _mutex; the base retries an un-ACKed STATUS_RESP
+    void noteStatusRequestLocked();                         // caller holds _mutex
 
     // Interactive status request (requestStatus).
     std::mutex _statusMutex;
