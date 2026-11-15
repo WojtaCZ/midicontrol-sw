@@ -25,6 +25,9 @@ constexpr int kStatusAnswerMs = 2000;   // no STATUS_RESP by then = "not answere
 constexpr int kMidiCheckMs = 10000;     // MIDI port re-discovery for the status page
 constexpr int kOrganReassertMax = 3;         // PCC-2: re-sends of a SET_CURRENT the base did not take
 constexpr int64_t kOrganIntentWindowMs = 30000;  // PCC-2: how long a PC organ command is defended
+std::string idleText(int64_t ms) {
+    return ms >= 60000 ? std::to_string(ms / 60000) + " min" : std::to_string(ms / 1000) + " s";
+}
 
 // PM-13: reliable messages that carry a state, where only the newest one may reach the node.
 // 0 = no supersede; equal non-zero values supersede each other (same destination only).
@@ -710,6 +713,7 @@ void CommHandler::clearInfo(Node node) {
 
 void CommHandler::clearBaseReport() {
     _remoteLink.store(false);
+    _ssrReported.store(-1);
     for (const char* key : {"status_ble", "status_relay", "status_display", "status_pc", "status_ms"}) {
         _status.set(Node::Base, key, std::monostate{});
     }
@@ -814,6 +818,11 @@ void CommHandler::keepaliveLoop() {
                                               std::to_string(KEEPALIVE_LOSS_MS / 1000) + " s).");
             }
             pollStatus();
+            const int64_t idleArmed = _idleOffArmedMs.load();
+            if (idleArmed >= 0 && steadyMs() - idleArmed >= _config.organIdleOffMs &&
+                !_idleOffQueued.exchange(true)) {
+                post({Command::Kind::IdleOff, {}, {}, 0});
+            }
             if (_diagPoller) _diagPoller->tick(steadyMs(), false);  // while updating this block is skipped: no DIAG_GET
             _infoPoller->tick(steadyMs(), true, _remoteLink.load() && !_remotePaused.load());
         } else {
@@ -914,6 +923,7 @@ void CommHandler::organOff() {
 }
 
 void CommHandler::setOrganLocked(bool on) {
+    disarmIdleOff();  // the PC switches the organ now: its own rules apply
     _organOn.store(on);
     _status.set(Node::Base, "organ_power", on);
     _organIntent = on ? 1 : 0;
@@ -932,6 +942,8 @@ void CommHandler::setOrganLocked(bool on) {
 void CommHandler::reconcileOrgan(bool relay, uint64_t statusGen) {
     std::lock_guard<std::mutex> lk(_organMutex);
     if (statusGen != _setCurrentGen.load()) return;  // the answer may predate the last SET_CURRENT
+    _ssrReported.store(relay ? 1 : 0);
+    if (!relay) disarmIdleOff();  // switched off (base menu, remote, loss guard): nothing left to time out
     // The base's SSR, whoever switched it (PC, base menu, remote): shown on the page and used to decide
     // whether a song needs the warm-up.
     _organOn.store(relay);
@@ -986,6 +998,7 @@ void CommHandler::displayClear() {
 
 void CommHandler::recordSong() {
     _organClaimed.store(true);  // the operator uses the organ: no startup power off
+    if (_idleOffArmedMs.load() >= 0) armIdleOff();  // SYS-REC-05: recording restarts the idle timer
     auto ports = _midiFinder ? _midiFinder() : std::nullopt;
     if (!ports) {
         mc::log::error(Node::Software, "MIDIControl MIDI input port not found; cannot record.");
@@ -1053,8 +1066,9 @@ bool CommHandler::waitInterruptible(int ms) {
         const auto slice = std::min(deadline, Clock::now() + std::chrono::seconds(1));
         bool interrupted = _queueCv.wait_until(lk, slice, [&] {
             for (const auto& c : _queue) {
-                // Stale Finished and the startup check don't interrupt a warm-up.
-                if (c.kind != Command::Kind::Finished && c.kind != Command::Kind::StartupReset) return true;
+                // Stale Finished, the startup check and the idle check don't interrupt a warm-up.
+                if (c.kind != Command::Kind::Finished && c.kind != Command::Kind::StartupReset &&
+                    c.kind != Command::Kind::IdleOff) return true;
             }
             return false;
         });
@@ -1096,10 +1110,27 @@ void CommHandler::controlLoop() {
                 stopRecorder();
                 _organOn.store(false);
                 _status.set(Node::Base, "organ_power", std::monostate{});  // unknown until the base reports again
+                // PCC-3: the organ state is unknown now; run the startup reset again when the base is back
+                // (notes off, then the SSR rule: reported on -> idle timer, off/unknown -> power off).
+                disarmIdleOff();
+                {
+                    // PCC-2 never re-sends an unconfirmed "on" across a loss (nothing plays now; the base's
+                    // loss guard may have cut the SSR on purpose). An unconfirmed "off" is still defended.
+                    std::lock_guard<std::mutex> lk(_organMutex);
+                    if (_organIntent == 1) _organIntent = -1;
+                }
+                _startupReset = mc::startup::StartupReset();
+                _organClaimed.store(false);
+                _baseUpMs.store(-1);
+                _startupResetDone.store(false);
                 break;
             case Command::Kind::StartupReset:
                 _startupResetQueued.store(false);
                 doStartupReset();
+                break;
+            case Command::Kind::IdleOff:
+                _idleOffQueued.store(false);
+                doIdleOff();
                 break;
             case Command::Kind::Shutdown:
                 if (releasePlayer()) {
@@ -1125,7 +1156,9 @@ void CommHandler::doStartupReset() {
     const int64_t upMs = _baseUpMs.load();
     const int64_t since = upMs < 0 ? -1 : steadyMs() - upMs;
     auto ports = _midiFinder ? _midiFinder() : std::nullopt;
-    auto due = _startupReset.due(since, ports.has_value());
+    const int rep = _ssrReported.load();
+    const auto ssr = rep < 0 ? mc::startup::Ssr::Unknown : (rep ? mc::startup::Ssr::On : mc::startup::Ssr::Off);
+    auto due = _startupReset.due(since, ports.has_value(), ssr);
     mc::startup::Actions performed;
     if (due.allNotesOff) {
         std::string err;
@@ -1135,17 +1168,53 @@ void CommHandler::doStartupReset() {
             mc::log::warn(Node::Software, "Startup: All Notes Off not sent: " + err);
         }
         performed.allNotesOff = true;
-    } else if (due.organOff) {
-        mc::log::warn(Node::Software, "Startup: MIDI output port not found; organ powered off "
-                                      "without All Notes Off.");
+    } else if (due.notesSkipped) {
+        mc::log::warn(Node::Software, "Startup: MIDI output port not found; no All Notes Off.");
+        performed.notesSkipped = true;
     }
     if (due.organOff) {
         organOff();  // indicator bus untouched (no display clear)
-        mc::log::info(Node::Software, "Startup: organ power off.");
+        mc::log::info(Node::Software, std::string("Startup: organ power off") +
+                                          (ssr == mc::startup::Ssr::Unknown ? " (SSR state not reported)." : "."));
         performed.organOff = true;
+    } else if (due.armIdleOff) {
+        // Q1-1 b (owner 2026-11-14): a manual organ-on survives a PC start.
+        armIdleOff();
+        mc::log::info(Node::Software, "Startup: organ found switched on; left on, idle power-off in " +
+                                          idleText(_config.organIdleOffMs) + ".");
+        performed.armIdleOff = true;
     }
     _startupReset.done(performed);
     if (_startupReset.finished()) _startupResetDone.store(true);
+}
+
+void CommHandler::armIdleOff() {
+    _idleOffArmedMs.store(steadyMs());
+    _status.set(Node::Base, "organ_idle_off_armed", true);
+}
+
+void CommHandler::disarmIdleOff() {
+    if (_idleOffArmedMs.exchange(-1) >= 0) _status.set(Node::Base, "organ_idle_off_armed", false);
+}
+
+void CommHandler::doIdleOff() {
+    const int64_t armed = _idleOffArmedMs.load();
+    if (armed < 0 || steadyMs() - armed < _config.organIdleOffMs) return;  // disarmed or restarted meanwhile
+    bool busy = false;
+    {
+        std::lock_guard<std::mutex> lk(_playerMutex);
+        busy = _player != nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> lk(_recorderMutex);
+        busy = busy || _recorderPid > 0;
+    }
+    if (busy) {
+        armIdleOff();  // in use: start counting again
+        return;
+    }
+    mc::log::info(Node::Software, "Organ idle for " + idleText(_config.organIdleOffMs) + ": power off.");
+    organOff();  // disarms the timer
 }
 
 bool CommHandler::releasePlayer() {
@@ -1179,6 +1248,7 @@ void CommHandler::playbackEnded(const std::string& how, const char* counter) {
 
 void CommHandler::doPlay(const Command& cmd) {
     _organClaimed.store(true);  // a song owns the organ now: no startup power off
+    disarmIdleOff();            // after the song KeepPowerOn decides (2026-10-26, unchanged)
     if (releasePlayer()) playbackEnded("stopped", "songs_stopped");  // a new song replaces it
     {
         std::lock_guard<std::mutex> lk(_songMutex);

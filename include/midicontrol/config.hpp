@@ -1,6 +1,7 @@
 #ifndef MIDICONTROL_CONFIG_HPP
 #define MIDICONTROL_CONFIG_HPP
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -29,6 +30,9 @@ struct Config {
     int warmupMs = 3000;               // organ warm-up after power-on, before the first note
     bool keepPowerOn = false;          // leave organ power on between songs
     int verseGapMs = 0;                // silence before a section repeated with add-verse
+    // Q1-1 b: an organ found switched on at PC start is switched off after this
+    // idle time (SYSTEM.md D27 default 30 min). Not a config.conf key yet.
+    int64_t organIdleOffMs = 30LL * 60 * 1000;
 
     // [WEB] status page + Stops editor (writes <CODE>.conf per song; 0.0.0.0 exposes that to the LAN)
     bool webEnabled = true;

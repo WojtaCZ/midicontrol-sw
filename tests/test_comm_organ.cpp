@@ -6,6 +6,7 @@
 #include "midicontrol/comm.hpp"
 #include "midicontrol/config.hpp"
 #include "midicontrol/status.hpp"
+#include "midicontrol/log.hpp"
 #include "midicontrol/protocol/codec.hpp"
 #include "midicontrol/protocol/parser.hpp"
 #include "midicontrol/protocol/constants.hpp"
@@ -18,6 +19,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -233,4 +235,195 @@ TEST(comm_pcc2_gives_up_loudly) {
     CHECK(dropped > 4);                   // re-sent after the first give-up
     CHECK(dropped <= 4 * 4 + 4);          // bounded (1 + 3 re-sends, 4 frames each; slack for shutdown)
     CHECK(!fault.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Q1-1 b (owner 2026-11-14) + PCC-3: startup reset with the SSR found ON.
+// The MIDI finder reports an output index that does not exist (9999): the
+// notes-off is attempted (and fails harmlessly), never on a real port.
+// ---------------------------------------------------------------------------
+namespace {
+std::optional<MidiPorts> fakePorts() {
+    MidiPorts p;
+    p.outIndex = 9999;
+    p.inIndex = 9999;
+    p.outName = "fake MIDIControl";
+    p.inName = "fake MIDIControl";
+    return p;
+}
+bool hasEvent(status::StatusRegistry& reg, status::Node n, const std::string& part) {
+    auto snap = reg.snapshot();  // keep the copy alive while iterating
+    for (auto& e : snap.node(n).events) if (e.text.find(part) != std::string::npos) return true;
+    return false;
+}
+bool fieldBool(status::StatusRegistry& reg, status::Node n, const std::string& key) {
+    auto snap = reg.snapshot();
+    auto& f = snap.node(n).fields;
+    auto it = f.find(key);
+    if (it == f.end()) return false;
+    if (auto* b = std::get_if<bool>(&it->second)) return *b;
+    return false;
+}
+size_t countSetV(const std::vector<Rx>& log, uint8_t v) {
+    size_t n = 0;
+    for (auto& r : log) if (isSet(r, v)) ++n;
+    return n;
+}
+}  // namespace
+
+// PC restarts in < 6 s mid-song: the base loss guard never fired, the SSR is on and notes may sound.
+// Expected: All Notes Off sent, organ-off NOT sent, idle-off timer armed.
+TEST(comm_q11b_ssr_on_at_start_notes_off_no_power_off_idle_armed) {
+    FakeBase base;
+    base.ssr = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    mc::log::setRegistry(&reg);
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(8000ms);   // first keepalive ACK + first STATUS_RESP + retries
+    auto log = base.log();
+    const bool ssr = base.ssr.load();
+    const bool notes = hasEvent(reg, status::Node::Software, "Startup: All Notes Off");
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    h.shutdown();
+    mc::log::setRegistry(nullptr);
+    std::cout << "  notes-off attempted=" << notes << " SET_CURRENT{00}=" << countSetV(log, 0)
+              << " ssr=" << ssr << " idle armed=" << armed << "\n";
+    CHECK(notes);
+    CHECK_EQ(countSetV(log, 0), size_t(0));
+    CHECK(ssr);
+    CHECK(armed);
+}
+
+// The idle-off timer switches the organ off once it expires (short timer for the test).
+TEST(comm_q11b_idle_timer_switches_the_found_on_organ_off) {
+    FakeBase base;
+    base.ssr = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.organIdleOffMs = 4000;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(3000ms);   // reset done (armed), timer not expired yet
+    const size_t offsEarly = countSetV(base.log(), 0);
+    std::this_thread::sleep_for(7000ms);
+    auto log = base.log();
+    const bool ssr = base.ssr.load();
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    h.shutdown();
+    std::cout << "  offs early=" << offsEarly << " offs=" << countSetV(log, 0) << " ssr=" << ssr << "\n";
+    CHECK_EQ(offsEarly, size_t(0));         // not before the reset decided and the timer ran
+    CHECK_EQ(countSetV(log, 0), size_t(1));
+    CHECK(!ssr);
+    CHECK(!armed);
+}
+
+// SSR reported off at start: notes-off and the organ-off as before (no idle timer).
+TEST(comm_q11b_ssr_off_at_start_still_powers_off) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(6000ms);
+    auto log = base.log();
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    h.shutdown();
+    CHECK_EQ(countSetV(log, 0), size_t(1));
+    CHECK(!armed);
+}
+
+// A PC command takes the organ over: the idle timer is disarmed (no surprise off).
+TEST(comm_q11b_pc_command_disarms_the_idle_timer) {
+    FakeBase base;
+    base.ssr = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.organIdleOffMs = 4000;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(3000ms);
+    const bool armedBefore = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    h.organOn();                           // operator: on (e.g. web/console)
+    std::this_thread::sleep_for(6000ms);
+    auto log = base.log();
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    h.shutdown();
+    CHECK(armedBefore);
+    CHECK(!armed);
+    // only the shutdown's off may appear, none from the idle timer before it
+    CHECK(countSetV(log, 0) == 0);
+}
+
+// PCC-3: after the base link was lost and is back, the startup reset runs again: notes off, then the SSR rule
+// (here: the organ is on at the new link -> left on, idle timer armed). A symlink stands for the device node
+// so the pty behind it can disappear and come back.
+TEST(comm_pcc3_reconnect_reruns_the_startup_reset) {
+    status::StatusRegistry reg([] { return int64_t(0); });
+    mc::log::setRegistry(&reg);
+    Config cfg = testConfig();
+    const auto link = std::filesystem::path(cfg.playFolder) / "fake-base-tty";
+    std::filesystem::remove(link);
+    auto base1 = std::make_unique<FakeBase>();
+    std::filesystem::create_symlink(base1->path(), link);
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(link.string()));
+    std::this_thread::sleep_for(7000ms);   // first startup reset: SSR off -> power off, confirmed by a poll
+    auto countNotes = [&] {
+        int n = 0;
+        auto snap = reg.snapshot();
+        for (auto& e : snap.node(status::Node::Software).events)
+            if (e.text.find("Startup: All Notes Off") != std::string::npos) ++n;
+        return n;
+    };
+    const int notesFirst = countNotes();
+    base1.reset();                          // the base goes away (pty hung up)
+    std::filesystem::remove(link);
+    std::this_thread::sleep_for(1500ms);
+    FakeBase base2;
+    base2.ssr = true;                       // the organ is on when the link comes back
+    std::filesystem::create_symlink(base2.path(), link);
+    std::this_thread::sleep_for(9000ms);
+    auto log2 = base2.log();
+    const int notesTotal = countNotes();
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    h.shutdown();
+    mc::log::setRegistry(nullptr);
+    std::filesystem::remove(link);
+    std::cout << "  notes-off first=" << notesFirst << " total=" << notesTotal << " offs at base2="
+              << countSetV(log2, 0) << " armed=" << armed << " base2 rx=" << log2.size() << "\n";
+    CHECK_EQ(notesFirst, 1);
+    CHECK_EQ(notesTotal, 2);
+    CHECK_EQ(countSetV(log2, 0), size_t(0));
+    CHECK(armed);
+}
+
+// PCC-3 / PCC-2 across a link loss: an organ "on" the PC sent just before the loss and never saw confirmed
+// must not be re-sent after the reconnect (the player was stopped by the loss; the base's loss guard may have
+// switched the organ off on purpose).
+TEST(comm_pcc3_unconfirmed_on_is_not_reasserted_after_reconnect) {
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    const auto link = std::filesystem::path(cfg.playFolder) / "fake-base-tty2";
+    std::filesystem::remove(link);
+    auto base1 = std::make_unique<FakeBase>();
+    std::filesystem::create_symlink(base1->path(), link);
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(link.string()));
+    std::this_thread::sleep_for(300ms);
+    h.organOn();                            // e.g. a song starts ...
+    std::this_thread::sleep_for(300ms);
+    base1.reset();                          // ... and the link drops before a poll confirmed it
+    std::filesystem::remove(link);
+    std::this_thread::sleep_for(1500ms);
+    FakeBase base2;                         // the base's loss guard switched the organ off
+    std::filesystem::create_symlink(base2.path(), link);
+    std::this_thread::sleep_for(9000ms);
+    auto log2 = base2.log();
+    h.shutdown();
+    std::filesystem::remove(link);
+    std::cout << "  SET_CURRENT{01} at base2=" << countSetV(log2, 1) << " base2 rx=" << log2.size() << "\n";
+    CHECK(log2.size() > 0);
+    CHECK_EQ(countSetV(log2, 1), size_t(0));
 }

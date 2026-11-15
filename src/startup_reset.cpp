@@ -13,20 +13,32 @@ std::vector<std::vector<uint8_t>> allNotesOffMessages() {
     return out;
 }
 
-Actions StartupReset::due(int64_t msSinceBaseUp, bool midiPortFound) const {
+Actions StartupReset::due(int64_t msSinceBaseUp, bool midiPortFound, Ssr ssr) const {
     Actions a;
     if (_finished || msSinceBaseUp < 0) return a;
-    if (midiPortFound) {
-        a.allNotesOff = true;
-        a.organOff = true;
-    } else if (msSinceBaseUp >= _graceMs) {
-        a.organOff = true;  // no port to send the notes-off through; still power off
+    if (!_notesDone) {
+        if (midiPortFound) {
+            a.allNotesOff = true;
+        } else if (msSinceBaseUp >= _graceMs) {
+            a.notesSkipped = true;  // no port to send the notes-off through
+        } else {
+            return a;  // notes first: wait for the port
+        }
+    }
+    if (!_powerDone) {
+        if (ssr == Ssr::On) {
+            a.armIdleOff = true;
+        } else if (ssr == Ssr::Off || msSinceBaseUp >= _statusGraceMs) {
+            a.organOff = true;
+        }
     }
     return a;
 }
 
 void StartupReset::done(const Actions& performed) {
-    if (performed.organOff) _finished = true;
+    if (performed.allNotesOff || performed.notesSkipped) _notesDone = true;
+    if (performed.organOff || performed.armIdleOff) _powerDone = true;
+    if (_notesDone && _powerDone) _finished = true;
 }
 
 }  // namespace mc::startup

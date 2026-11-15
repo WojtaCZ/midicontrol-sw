@@ -145,7 +145,7 @@ private:
     };
 
     struct Command {
-        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset } kind;
+        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset, IdleOff } kind;
         std::string code;
         std::string path;
         uint64_t generation = 0;
@@ -303,6 +303,18 @@ private:
     std::atomic<bool> _startupResetQueued{false};
     std::atomic<bool> _organClaimed{false};  // organOn() ran: never power off at startup
     std::atomic<int64_t> _baseUpMs{-1};      // steady ms of the first keepalive ACK
+    std::atomic<int> _ssrReported{-1};       // last authoritative STATUS_RESP relay: -1 unknown, 0 off, 1 on
+
+    // Q1-1 b idle-off timer: armed when the startup reset finds the SSR on
+    // (manual organ-on survives a PC start). Disarmed when the PC switches the
+    // organ (organOn/organOff), a song starts, or the base reports it off.
+    // The keepalive thread posts Kind::IdleOff when it expires; the control
+    // thread re-checks and powers off.
+    void armIdleOff();
+    void disarmIdleOff();
+    void doIdleOff();
+    std::atomic<int64_t> _idleOffArmedMs{-1};  // steady ms when armed, -1 = not armed
+    std::atomic<bool> _idleOffQueued{false};
 
     std::mutex _recorderMutex;
     int _recorderPid = -1;
