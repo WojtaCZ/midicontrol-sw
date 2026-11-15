@@ -3,6 +3,7 @@
 #include <cctype>
 
 #include "midicontrol/protocol/constants.hpp"
+#include "midicontrol/songs.hpp"
 
 namespace mc::display {
 
@@ -93,6 +94,7 @@ Update fromSysEx(const mc::sysex::DisplayInfo& info) {
 }
 
 std::optional<CodeDisplay> fromSongCode(const std::string& code) {
+    if (!mc::songs::validCode(code)) return std::nullopt;  // PCW-1 / P1-4: same rule as everywhere (<= 1999)
     size_t n = 0;
     while (n < code.size() && std::isdigit(static_cast<unsigned char>(code[n]))) ++n;
     if (n == 0 || n > 4) return std::nullopt;

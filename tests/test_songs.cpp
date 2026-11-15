@@ -23,8 +23,9 @@ TEST(song_code_sanitize) {
     CHECK(sanitizeCode("406a") == std::optional<std::string>("406A"));
     CHECK(sanitizeCode(std::string("406A\0", 5)) == std::optional<std::string>("406A"));
     CHECK(sanitizeCode(" 401 ") == std::optional<std::string>("401"));
-    CHECK(sanitizeCode("12345678") == std::optional<std::string>("12345678"));
-    CHECK_FALSE(sanitizeCode("123456789").has_value());  // > 8 chars
+    CHECK(sanitizeCode("1234") == std::optional<std::string>("1234"));
+    CHECK_FALSE(sanitizeCode("12345678").has_value());   // PCW-1: 1-4 digits only
+    CHECK_FALSE(sanitizeCode("123456789").has_value());  // > 8 chars (frame bound)
     CHECK_FALSE(sanitizeCode("").has_value());
     CHECK_FALSE(sanitizeCode("../401").has_value());
     CHECK_FALSE(sanitizeCode("40 1").has_value());

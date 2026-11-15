@@ -17,7 +17,7 @@
 //                                          before the first note (e.g. 523.mid)
 //   "no display anchors"                   no display SysEx with a verse field at
 //                                          all (not repeated after an empty anchor)
-//   "file name is not a valid song code"   the name without .mid isn't [0-9A-Z]{1,8}
+//   "file name is not a valid song code"   the name without .mid is not 1-4 digits <= 1999 + optional A-D (PCW-1)
 //   kWarnSongShifted / kWarnVerseShifted   a display SysEx whose song or verse
 //                                          digits are not right-aligned (a blank
 //                                          after a digit, e.g. 513.mid "513 ",

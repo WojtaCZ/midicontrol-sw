@@ -130,7 +130,7 @@ The play folder is scanned at start and rescanned every 60 s on the web thread, 
 | `cannot parse: <reason>` | the MIDI file reader rejected it |
 | `empty display anchor` | an empty SysEx (`F0 F7`), or one with the MIDIControl header that doesn't decode, before the first note (e.g. `523.mid`) |
 | `no display anchors` | no display SysEx with a verse field at all (not repeated when an empty anchor was already reported) |
-| `file name is not a valid song code` | the name without `.mid` isn't `[0-9A-Z]{1,8}` (e.g. `072 - Lide muj.mid`) |
+| `file name is not a valid song code` | the name without `.mid` is not a song code: 1-4 digits, value <= 1999, optional A-D (e.g. `072 - Lide muj.mid`, `2000.mid`, `rejstriky.mid`) |
 
 ### JSON API
 
