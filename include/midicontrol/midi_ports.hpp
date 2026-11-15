@@ -14,9 +14,9 @@ struct MidiPorts {
     std::string inName;
 };
 
-// Find the input/output ports whose name contains "MIDIControl". Returns
+// Find the input/output ports whose name contains `key` (empty = mc::midiKey(): $MIDICONTROL_MIDI_KEY or "MIDIControl"). Returns
 // nullopt if either is missing.
-std::optional<MidiPorts> findMidiControlPorts(const std::string& key = "MIDIControl");
+std::optional<MidiPorts> findMidiControlPorts(const std::string& key = "");
 
 }  // namespace mc
 
