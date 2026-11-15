@@ -175,7 +175,8 @@ private:
     void handleSerialLoss();
     bool tryReopen();
     uint8_t nextPacketId();
-    uint8_t sendPacket(const mc::protocol::Packet& pkt);  // unreliable, id already set
+    // Unreliable, id already set; `sentOut` (optional) tells whether the frame was written.
+    uint8_t sendPacket(const mc::protocol::Packet& pkt, bool* sentOut = nullptr);
 
     // Status instrumentation.
     void noteTx(const mc::protocol::Packet& pkt, bool retransmit);
@@ -207,6 +208,9 @@ private:
     void doRemoteResync();
     bool releasePlayer();  // stop + destroy the player; false if there was none
     void displayClear();
+    // P1-10: true while the indicator shows something this PC sent (a non-clear NOW_PLAYING_INFO);
+    // displayClear() is a no-op otherwise. Kept across a serial loss: the base may still show the code.
+    std::atomic<bool> _displaySet{false};
     void stopRecorder();
     bool recorderAliveLocked();  // _recorderMutex held; forgets a recorder that exited on its own
 

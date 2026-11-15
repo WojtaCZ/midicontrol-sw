@@ -1001,3 +1001,40 @@ TEST(comm_p118_send_reliable_defaults_follow_the_protocol) {
     CHECK(ms >= (1 + mc::protocol::MAX_RETRIES) * mc::protocol::RETRY_TIMEOUT_MS - 50);
     CHECK(ms < (2 + mc::protocol::MAX_RETRIES) * mc::protocol::RETRY_TIMEOUT_MS);
 }
+
+// P1-10: the PC clears the indicator only when it set it. A Stop while nothing played (web/console/remote
+// Stop when idle) must not blank a code that another master (the remote's own song entry) put there.
+TEST(comm_p110_indicator_clear_only_after_the_pc_set_it) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    auto npi = [&](size_t from, bool clear) {
+        size_t n = 0;
+        auto log = base.log();
+        for (size_t i = from; i < log.size(); ++i)
+            if (log[i].type == MsgType::NOW_PLAYING_INFO && log[i].payload.empty() == clear) ++n;
+        return n;
+    };
+    const size_t m0 = base.log().size();
+    h.stopSong();                                     // idle Stop
+    std::this_thread::sleep_for(500ms);
+    const size_t idleClears = npi(m0, true);
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] { return h.isPlaying() && npi(m0, false) > 0; }, 15000));
+    const size_t m1 = base.log().size();
+    h.stopSong();
+    std::this_thread::sleep_for(500ms);
+    const size_t stopClears = npi(m1, true);
+    const size_t m2 = base.log().size();
+    h.stopSong();                                     // second Stop: the PC's code is already gone
+    std::this_thread::sleep_for(500ms);
+    const size_t againClears = npi(m2, true);
+    h.shutdown();
+    CHECK_EQ(idleClears, size_t(0));
+    CHECK_EQ(stopClears, size_t(1));
+    CHECK_EQ(againClears, size_t(0));
+}

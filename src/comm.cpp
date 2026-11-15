@@ -356,7 +356,7 @@ uint8_t CommHandler::send(uint8_t dest, MsgType type, const std::vector<uint8_t>
     return sendPacket(Packet(ADDR_PC, dest, nextPacketId(), type, payload));
 }
 
-uint8_t CommHandler::sendPacket(const Packet& pkt) {
+uint8_t CommHandler::sendPacket(const Packet& pkt, bool* sentOut) {
     auto raw = encode(pkt);
     bool sent = false;
     {
@@ -369,6 +369,7 @@ uint8_t CommHandler::sendPacket(const Packet& pkt) {
         }
     }
     if (sent) noteTx(pkt, false);
+    if (sentOut) *sentOut = sent;
     return pkt.packetId;
 }
 
@@ -1141,8 +1142,13 @@ void CommHandler::reconcileOrgan(bool relay, uint64_t statusGen) {
 }
 
 void CommHandler::displayClear() {
-    send(ADDR_BASE, MsgType::NOW_PLAYING_INFO,
-         mc::display::encodeNowPlaying(mc::display::clearUpdate()));
+    // P1-10: clear only a code this PC put on the indicator; an idle Stop must not blank the remote's entry.
+    // A clear that was not written (serial closed) leaves the flag set, so a later Stop still clears.
+    if (!_displaySet.exchange(false)) return;
+    bool sent = false;
+    sendPacket(Packet(ADDR_PC, ADDR_BASE, nextPacketId(), MsgType::NOW_PLAYING_INFO,
+                      mc::display::encodeNowPlaying(mc::display::clearUpdate())), &sent);
+    if (!sent) _displaySet.store(true);
 }
 
 bool CommHandler::recordSong() {
@@ -1494,6 +1500,7 @@ void CommHandler::doPlay(const Command& cmd) {
     auto player = std::make_unique<Player>(ports->outIndex, _midiSinkForTest);
     const uint64_t gen = ++_generation;
     player->onDisplay = [this](const mc::display::Update& u) {
+        _displaySet.store(!u.clear);
         send(ADDR_BASE, MsgType::NOW_PLAYING_INFO, mc::display::encodeNowPlaying(u));
     };
     player->onAnchor = [this](const std::string& label) {
