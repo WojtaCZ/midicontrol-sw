@@ -107,11 +107,11 @@ Each node keeps its last 200 events in memory. Nothing survives a restart: the j
 |---|---|---|---|---|
 | Software | otherwise | a Software WARN in the last 10 min, or a song file with a problem | a Software ERROR in the last 10 min | never |
 | Base | connected, keepalive OK | waiting for the base (unplugged), GET_STATUS not answered, or a firmware update in progress | serial open but keepalives lost | never |
-
-Base field **`in_bootloader`**: true while the serial port is closed, no update is running and the base shows up as its USB bootloader (ABCD:1235), i.e. a firmware update did not finish (P1-13). The player logs an ERROR once; the console `status` command then advises `update base <file>` to re-flash it. Nothing is re-flashed automatically.
 | Controller | the base's last STATUS_RESP (≤ 15 s old) says BLE connected | BLE reported disconnected, or the remote reports a critical battery | never: the PC can't tell a fault from "switched off" | base not connected, or no fresh STATUS_RESP |
 
 An unplugged base is a state, not an error: the dot is yellow "Waiting for the base" and the player reconnects on its own.
+
+Base field **`in_bootloader`**: true while the serial port is closed, no update is running and the base shows up as its USB bootloader (ABCD:1235), i.e. a firmware update did not finish (P1-13). The player logs an ERROR once; the console `status` command then advises `update base <file>` to re-flash it. Nothing is re-flashed automatically.
 
 ### Base status poll
 
