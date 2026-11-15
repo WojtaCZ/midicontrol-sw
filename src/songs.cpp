@@ -98,8 +98,10 @@ std::vector<std::string> listSongs(const std::string& folder) {
         if (!entry.is_regular_file(ec2)) continue;
         const fs::path& p = entry.path();
         if (!hasMidExtension(p)) continue;
-        auto code = sanitizeCode(p.stem().string());
-        if (code) codes.push_back(*code);
+        // Q1-2a: the stem itself must be the code (as for play and songcheck); " 12.mid" is not offered.
+        const std::string stem = p.stem().string();
+        auto code = sanitizeCode(stem);
+        if (code && *code == upper(stem)) codes.push_back(*code);
     }
     std::sort(codes.begin(), codes.end(), naturalLess);
     codes.erase(std::unique(codes.begin(), codes.end()), codes.end());

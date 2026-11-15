@@ -117,3 +117,21 @@ TEST(song_list_paging_past_end_and_empty) {
     CHECK_EQ(count, 2u);
     CHECK(page == (std::vector<uint8_t>{0x00, '4', '0', '1', ';', '4', '0', '3'}));
 }
+
+TEST(song_list_offers_only_codes_play_can_find) {
+    // Q1-2a: the song list (remote SONG_LIST paging, web /api/stops) must apply the same rule as play and
+    // songcheck. A file name with spaces around a valid code is flagged by songcheck and not found by play,
+    // so it must not be offered either.
+    fs::path dir = fs::temp_directory_path() / "mc_songs_test_list_rule";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::ofstream(dir / " 12.mid") << "x";
+    std::ofstream(dir / "13 .mid") << "x";
+    std::ofstream(dir / "14a.mid") << "x";
+
+    auto list = listSongs(dir.string());
+    for (const auto& code : list) CHECK(findSongFile(dir.string(), code).has_value());
+    CHECK_EQ(list.size(), 1u);
+    CHECK(list.size() == 1u && list[0] == "14A");
+    fs::remove_all(dir);
+}
