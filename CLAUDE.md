@@ -120,6 +120,8 @@ App layer (needs hardware):
 
 `tests/` uses a tiny built-in harness (`test_framework.hpp`, no external deps). Covers CRC vectors, codec/parser, SysEx, NOW_PLAYING_INFO encoding, both SMF SysEx framings, the SMF reader against the real files in `songs/`, song lookup/list paging, verse sequencing and the playback engine (fake clock), the dispatcher's ACK/NAK/duplicate logic, config (keys, path resolution, `[WEB]`), update-file validation, message names, the status registry and dot rules, JSON escaping/schema, the organ layout and preamble, per-song stop file parse/save/remove/store/PUT, HTTP parsing/routing incl. request bodies, the embedded page (self-contained, home/Advanced views, stops editor), the song-file check, console command parsing, the logger and child-process signal handling, the diagnostics core (port selection, store/cache, log ingest incl. reconnect and the replay window, DIAG polling, `/api/diag`, status schema 2). All deterministic: no real time, no ports. `MC_SONGS_DIR` is injected by CMake.
 
+**Test-only environment seam** (not user-visible, no config keys; used by `tools/systest/`): `MIDICONTROL_SYSFS_ROOT` replaces `/sys` in every sysfs lookup (`findMidiControlPort`, `findMidiControlLogPort`, `baseInBootloader`, `usbIdOf`), `MIDICONTROL_DEV_ROOT` replaces `/dev` in the paths they return (fake tree -> ptys), `MIDICONTROL_MIDI_KEY` replaces the `"MIDIControl"` ALSA port-name key (also picks the `arecordmidi` input). Unset = production behaviour. Unit tests: `port_select_env_*` in `tests/test_port_select.cpp`. `songcheck_real_files` fails on `rejstriky.mid` in a fresh worktree/build (pre-existing, unrelated).
+
 ## Protocol Details
 
 - Frame: `[SOH] [stuffed: length, src, dest, pkt_id, msg_type, payload..., crc8] [EOT]`

@@ -2,9 +2,12 @@
 
 #include <RtMidi.h>
 
+#include "midicontrol/serial_port.hpp"
+
 namespace mc {
 
-std::optional<MidiPorts> findMidiControlPorts(const std::string& key) {
+std::optional<MidiPorts> findMidiControlPorts(const std::string& keyArg) {
+    const std::string key = keyArg.empty() ? midiKey() : keyArg;
     MidiPorts ports;
     try {
         RtMidiOut out;

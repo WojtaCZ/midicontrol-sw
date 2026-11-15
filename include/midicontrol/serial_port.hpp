@@ -47,19 +47,28 @@ private:
     std::string _path;
 };
 
+// Test-only environment seam (not user-visible, documented in CLAUDE.md "Tests"): the system-test
+// harness points the real binary at a fake sysfs tree and fake /dev nodes (ptys) with these.
+//   MIDICONTROL_SYSFS_ROOT  replaces "/sys" for every lookup below (an empty `sysRoot` argument means this)
+//   MIDICONTROL_DEV_ROOT    replaces "/dev" in the device paths the lookups return
+//   MIDICONTROL_MIDI_KEY    replaces the "MIDIControl" ALSA port-name key
+std::string sysfsRoot();
+std::string devRoot();
+std::string midiKey();
+
 // Find the MIDIControl *protocol* serial device (USB interface 00 of the VID:PID, default abcd:1234)
 // using sysfs under `sysRoot` (a parameter for tests). The base also exposes a second CDC with the
 // text log; that one is never returned here. nullopt if not present.
 std::optional<std::string> findMidiControlPort(const std::string& vid = "abcd", const std::string& pid = "1234",
-                                               const std::string& sysRoot = "/sys");
+                                               const std::string& sysRoot = "");
 
 // P1-13: a MIDIControl base sitting in its USB bootloader (abcd:1235, any tty interface), e.g. after a
 // firmware update that did not finish. Read-only sysfs lookup under `sysRoot`.
-bool baseInBootloader(const std::string& sysRoot = "/sys");
+bool baseInBootloader(const std::string& sysRoot = "");
 
 // The base's "MIDIControl log" CDC: the interface whose string is "MIDIControl log", else interface 04.
 std::optional<std::string> findMidiControlLogPort(const std::string& vid = "abcd", const std::string& pid = "1234",
-                                                  const std::string& sysRoot = "/sys");
+                                                  const std::string& sysRoot = "");
 
 // Call `tryOpen` whenever `path` is readable and writable, until it returns true or `timeout` passes.
 // A freshly enumerated CDC shows in sysfs before its /dev node exists, and the node is root-only for a
