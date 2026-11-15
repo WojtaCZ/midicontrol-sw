@@ -158,14 +158,15 @@ bool ConsoleExecutor::runUpdate(const std::string& target, const Run& run, const
 ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, bool remote) {
     // Same refusals as the status page upload (startUpload): never reboot the base under a song.
     // The busy wording is unchanged ("busy: ...") for scripts that match it.
-    const bool busy = _updating.load();
-    const std::string why = mc::fwupload::updateRefusal(busy, _handler.isPlaying(), true);
+    // P1-14: the claim is taken under the same gate a Play takes when it is queued, so an update
+    // cannot start while a song warms up the organ (isPlaying() is still false then).
+    const auto claim = _handler.tryBeginUpdate();
+    const bool busy = claim == CommHandler::UpdateClaim::Busy;
+    const std::string why =
+        mc::fwupload::updateRefusal(busy, claim == CommHandler::UpdateClaim::Playing || _handler.isPlaying(), true);
     if (!why.empty()) {
+        if (claim == CommHandler::UpdateClaim::Granted) _handler.endUpdate();
         out((busy ? "busy: " : "refused: ") + why + "\n");
-        return ExecResult::Failed;
-    }
-    if (_updating.exchange(true)) {
-        out("busy: a firmware update is already running\n");
         return ExecResult::Failed;
     }
     auto progress = [&out](std::size_t done, std::size_t total) {
@@ -181,18 +182,24 @@ ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, 
     const bool ok = runUpdate(c.target, [&c](FirmwareUpdater& u, FirmwareUpdater::Progress p) {
         return c.target == "base" ? u.updateBase(c.arg, p) : u.updateRemote(c.arg, p);
     }, say, progress);
-    _updating.store(false);
+    _handler.endUpdate();
     out(std::string("\n") + (ok ? "Firmware update complete." : "Firmware update FAILED.") + "\n");
     return ok ? ExecResult::Ok : ExecResult::Failed;
 }
 
 std::string ConsoleExecutor::startUpload(mc::fwupload::Accepted upload) {
     // Busy, then playing, then base connection (see fwupload::updateRefusal).
-    const std::string why = mc::fwupload::updateRefusal(_updating.load(), _handler.isPlaying(), _handler.isBaseAlive());
-    if (!why.empty()) return why;
-    if (_updating.exchange(true)) return "a firmware update is already running";
+    // P1-14: claimed under the play gate (see update()).
+    const auto claim = _handler.tryBeginUpdate();
+    const std::string why = mc::fwupload::updateRefusal(
+        claim == CommHandler::UpdateClaim::Busy,
+        claim == CommHandler::UpdateClaim::Playing || _handler.isPlaying(), _handler.isBaseAlive());
+    if (!why.empty()) {
+        if (claim == CommHandler::UpdateClaim::Granted) _handler.endUpdate();
+        return why;
+    }
     std::lock_guard<std::mutex> lk(_workerMutex);
-    if (_worker.joinable()) _worker.join();  // the previous upload has finished: _updating was clear
+    if (_worker.joinable()) _worker.join();  // the previous upload has finished: the gate was free
     const bool base = upload.board == mc::protocol::ADDR_BASE;
     const std::string target = base ? "base" : "remote";
     mc::log::info(Node::Software, "status page: firmware update to " + target + " requested");
@@ -202,10 +209,10 @@ std::string ConsoleExecutor::startUpload(mc::fwupload::Accepted upload) {
             runUpdate(target, [&](FirmwareUpdater& u, FirmwareUpdater::Progress p) {
                 return base ? u.updateBase(image, name, p) : u.updateRemote(image, name, p);
             }, {}, {});
-            _updating.store(false);
+            _handler.endUpdate();
         });
     } catch (const std::exception& e) {
-        _updating.store(false);
+        _handler.endUpdate();
         return std::string("cannot start the update: ") + e.what();
     }
     return {};

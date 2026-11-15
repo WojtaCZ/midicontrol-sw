@@ -1244,9 +1244,41 @@ void CommHandler::stopRecorder() {
 void CommHandler::post(Command cmd) {
     {
         std::lock_guard<std::mutex> lk(_queueMutex);
+        if (cmd.kind == Command::Kind::Play) _playClaimed = true;
         _queue.push_back(std::move(cmd));
     }
     _queueCv.notify_all();
+}
+
+CommHandler::UpdateClaim CommHandler::tryBeginUpdate() {
+    std::lock_guard<std::mutex> lk(_queueMutex);
+    if (_updateClaimed) return UpdateClaim::Busy;
+    if (_playClaimed) return UpdateClaim::Playing;
+    _updateClaimed = true;
+    return UpdateClaim::Granted;
+}
+
+void CommHandler::endUpdate() {
+    std::lock_guard<std::mutex> lk(_queueMutex);
+    _updateClaimed = false;
+}
+
+bool CommHandler::updateClaimed() const {
+    std::lock_guard<std::mutex> lk(_queueMutex);
+    return _updateClaimed;
+}
+
+void CommHandler::releasePlayClaimIfIdle() {
+    bool havePlayer;
+    {
+        std::lock_guard<std::mutex> lk(_playerMutex);  // only this thread changes _player
+        havePlayer = _player != nullptr;
+    }
+    if (havePlayer) return;
+    std::lock_guard<std::mutex> lk(_queueMutex);
+    for (const auto& c : _queue)
+        if (c.kind == Command::Kind::Play) return;
+    _playClaimed = false;
 }
 
 bool CommHandler::waitInterruptible(int ms) {
@@ -1336,6 +1368,7 @@ void CommHandler::controlLoop() {
                 if (_organOn.load()) organOff();
                 return;
         }
+        releasePlayClaimIfIdle();
     }
 }
 

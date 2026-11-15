@@ -1075,3 +1075,80 @@ TEST(comm_p115_console_refuses_update_while_playing) {
     CHECK(idleOut.find("FAILED") != std::string::npos);
     CHECK_EQ(enterBl, size_t(0));
 }
+
+// P1-14: a Play is accepted before the player exists (queue + organ warm-up); an update asked
+// for in that window must be refused too, not only while isPlaying(). Missing image path: an
+// accepted update would fail reading it, before ENTER_BOOTLOADER or any USB lookup.
+TEST(comm_p114_update_refused_while_a_play_warms_up) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    cfg.warmupMs = 3000;                              // organ is off: Play waits here
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    const std::string missing = "/nonexistent/midicontrol-p114/base.bin";
+    std::string warmOut;
+    bool playingDuringWarmup = true;
+    {
+        ConsoleExecutor exec(h, reg);
+        CHECK(!h.playSong("406A").has_value());
+        std::this_thread::sleep_for(500ms);           // inside the warm-up
+        playingDuringWarmup = h.isPlaying();
+        exec.execute("update base " + missing, [&](const std::string& t) { warmOut += t; }, false);
+        h.stopSong();
+    }
+    h.shutdown();
+    CHECK(!playingDuringWarmup);                      // the window exists: isPlaying() is still false
+    CHECK(warmOut.find("refused") != std::string::npos);
+}
+
+// P1-14: the play claim is given back on every way a song ends, so updates are not locked out:
+// a Stop during the warm-up, a Play that fails after it was queued (file gone), a Stop while playing.
+TEST(comm_p114_play_claim_released_after_stop_failure_and_end) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    cfg.warmupMs = 1500;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    auto granted = [&] {
+        if (h.tryBeginUpdate() != CommHandler::UpdateClaim::Granted) return false;
+        h.endUpdate();
+        return true;
+    };
+    CHECK(granted());                                         // idle: free
+    CHECK(h.tryBeginUpdate() == CommHandler::UpdateClaim::Granted);
+    CHECK(h.tryBeginUpdate() == CommHandler::UpdateClaim::Busy);   // one update at a time
+    h.endUpdate();
+
+    // 1. Stop during the warm-up.
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(h.tryBeginUpdate() == CommHandler::UpdateClaim::Playing);
+    h.stopSong();
+    const bool afterWarmStop = waitFor(granted, 3000);
+    h.organOff();
+    std::this_thread::sleep_for(300ms);
+
+    // 2. Queued, then fails: the file disappears during the warm-up.
+    const auto song = std::filesystem::path(cfg.playFolder) / "406A.mid";
+    CHECK(!h.playSong("406A").has_value());
+    std::filesystem::remove(song);
+    CHECK(h.tryBeginUpdate() == CommHandler::UpdateClaim::Playing);
+    const bool afterFail = waitFor(granted, 5000);
+    std::filesystem::copy_file(MC_SONGS_DIR "/406A.mid", song, std::filesystem::copy_options::overwrite_existing);
+
+    // 3. Plays, then stopped.
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] { return h.isPlaying(); }, 15000));
+    CHECK(h.tryBeginUpdate() == CommHandler::UpdateClaim::Playing);
+    h.stopSong();
+    const bool afterStop = waitFor(granted, 3000);
+    h.shutdown();
+    CHECK(afterWarmStop);
+    CHECK(afterFail);
+    CHECK(afterStop);
+}

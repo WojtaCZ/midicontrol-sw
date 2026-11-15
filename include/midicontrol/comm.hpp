@@ -127,6 +127,15 @@ public:
     // heartbeat within `maxAge` (reader/keepalive only while they run).
     bool threadsAlive(std::chrono::milliseconds maxAge) const;
 
+    // P1-14: one gate for "a song is coming" and "an update runs". A Play claims it when it is queued
+    // (before the player exists, so also through the organ warm-up); the control thread releases it when
+    // no player is left and no Play is queued. tryBeginUpdate() takes the update side only when neither
+    // a song nor another update holds the gate; endUpdate() gives it back.
+    enum class UpdateClaim { Granted, Busy, Playing };
+    UpdateClaim tryBeginUpdate();
+    void endUpdate();
+    bool updateClaimed() const;
+
     // A base firmware update is running: the bootloader ignores KEEPALIVE and
     // GET_STATUS, so neither is sent and keepalive loss is not reported.
     void setUpdating(bool on);
@@ -312,9 +321,13 @@ private:
 
     // Control thread + queue.
     std::thread _controlThread;
-    std::mutex _queueMutex;
+    mutable std::mutex _queueMutex;
     std::condition_variable _queueCv;
     std::deque<Command> _queue;
+    // P1-14 gate, guarded by _queueMutex (a Play is claimed in the same lock that queues it).
+    bool _playClaimed = false;
+    bool _updateClaimed = false;
+    void releasePlayClaimIfIdle();  // control thread, after each command
 
     // Player: created/destroyed only on the control thread; _playerMutex
     // guards the pointer for readers on other threads.
