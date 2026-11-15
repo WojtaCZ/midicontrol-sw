@@ -23,6 +23,8 @@ namespace {
 constexpr int kStatusPollMs = 5000;     // GET_STATUS to the base while connected
 constexpr int kStatusAnswerMs = 2000;   // no STATUS_RESP by then = "not answered"
 constexpr int kMidiCheckMs = 10000;     // MIDI port re-discovery for the status page
+constexpr int kOrganReassertMax = 3;         // PCC-2: re-sends of a SET_CURRENT the base did not take
+constexpr int64_t kOrganIntentWindowMs = 30000;  // PCC-2: how long a PC organ command is defended
 
 // PM-13: reliable messages that carry a state, where only the newest one may reach the node.
 // 0 = no supersede; equal non-zero values supersede each other (same destination only).
@@ -610,17 +612,12 @@ void CommHandler::noteRx(const Packet& pkt) {
         if (_diagPoller) _diagPoller->setRemoteLink(st.ble, steadyMs(), _updating.load());  // remote reachable -> DIAG_GET
         _status.set(Node::Base, "status_relay", st.relay);
         _remoteLink.store(st.ble);
-        bool authoritative;
+        uint64_t statusGen;
         {
             std::lock_guard<std::mutex> lk(_routineMutex);
-            authoritative = _statusGen == _setCurrentGen.load();
+            statusGen = _statusGen;
         }
-        if (authoritative) {
-            // The base's SSR, whoever switched it (PC, base menu, remote): shown on the page and used to decide
-            // whether a song needs the warm-up.
-            _organOn.store(st.relay);
-            _status.set(Node::Base, "organ_power", st.relay);
-        }
+        reconcileOrgan(st.relay, statusGen);
         _status.set(Node::Base, "status_display", st.display);
         _status.set(Node::Base, "status_pc", st.pc);
         _status.setNow(Node::Base, "status_ms");
@@ -907,17 +904,79 @@ std::vector<std::string> CommHandler::songList() const {
 
 void CommHandler::organOn() {
     _organClaimed.store(true);
-    _organOn.store(true);
-    _status.set(Node::Base, "organ_power", true);
-    ++_setCurrentGen;  // STATUS_RESPs to earlier GET_STATUS no longer tell the SSR state
-    sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {0x01});
+    std::lock_guard<std::mutex> lk(_organMutex);
+    setOrganLocked(true);
 }
 
 void CommHandler::organOff() {
-    _organOn.store(false);
-    _status.set(Node::Base, "organ_power", false);
+    std::lock_guard<std::mutex> lk(_organMutex);
+    setOrganLocked(false);
+}
+
+void CommHandler::setOrganLocked(bool on) {
+    _organOn.store(on);
+    _status.set(Node::Base, "organ_power", on);
+    _organIntent = on ? 1 : 0;
+    _organIntentMs = steadyMs();
+    _organReasserts = 0;
+    ++_setCurrentGen;  // STATUS_RESPs to earlier GET_STATUS no longer tell the SSR state
+    sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {static_cast<uint8_t>(on ? 0x01 : 0x00)});
+}
+
+// PCC-2. An authoritative STATUS_RESP (its GET_STATUS went out after the last SET_CURRENT) tells the SSR state.
+// While the PC's last command is unconfirmed and young (kOrganIntentWindowMs), a different state means the
+// command was lost (all retries gone, or a stale frame won): re-send it with a new PacketId, at most
+// kOrganReassertMax times, then report loudly. A confirmed command, or one older than the window, is history:
+// whatever the base reports is adopted (someone switched the organ at the base or the remote; never fought).
+// Does not decide anything about KeepPowerOn: it only repeats what the PC itself last commanded.
+void CommHandler::reconcileOrgan(bool relay, uint64_t statusGen) {
+    std::lock_guard<std::mutex> lk(_organMutex);
+    if (statusGen != _setCurrentGen.load()) return;  // the answer may predate the last SET_CURRENT
+    // The base's SSR, whoever switched it (PC, base menu, remote): shown on the page and used to decide
+    // whether a song needs the warm-up.
+    _organOn.store(relay);
+    _status.set(Node::Base, "organ_power", relay);
+    if (_organFault >= 0 && (relay ? 1 : 0) != _organFault) {
+        _organFault = -1;
+        _status.set(Node::Base, "organ_power_fault", std::monostate{});
+    }
+    if (_organIntent < 0) return;
+    const bool want = _organIntent == 1;
+    const std::string wantText = want ? "on" : "off";
+    if (relay == want) {
+        if (_organReasserts > 0) {
+            mc::log::info(Node::Base, "Organ power: the base now reports " + wantText + " after " +
+                                          std::to_string(_organReasserts) + " re-send(s).");
+        }
+        _organIntent = -1;
+        return;
+    }
+    const int64_t age = steadyMs() - _organIntentMs;
+    if (_organReasserts == 0 && age > kOrganIntentWindowMs) {
+        _organIntent = -1;  // too old to be the PC's doing: adopt
+        return;
+    }
+    if (_organReasserts >= kOrganReassertMax || age > kOrganIntentWindowMs) {
+        _organIntent = -1;
+        _organFault = relay ? 1 : 0;
+        const std::string text =
+            "Organ power: the PC switched the organ " + wantText + " but the base still reports " +
+            (relay ? "ON" : "off") + " after " + std::to_string(_organReasserts) + " re-send(s); giving up" +
+            (relay ? ". THE ORGAN IS STILL POWERED." : ".");
+        _status.set(Node::Base, "organ_power_fault", text);
+        if (relay) {
+            mc::log::error(Node::Base, text);
+        } else {
+            mc::log::warn(Node::Base, text);
+        }
+        return;
+    }
+    ++_organReasserts;
+    mc::log::warn(Node::Base, "Organ power: the base reports " + std::string(relay ? "on" : "off") +
+                                  ", the PC switched it " + wantText + "; re-sending (" +
+                                  std::to_string(_organReasserts) + "/" + std::to_string(kOrganReassertMax) + ").");
     ++_setCurrentGen;
-    sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {0x00});
+    sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {static_cast<uint8_t>(want ? 0x01 : 0x00)});
 }
 
 void CommHandler::displayClear() {

@@ -283,6 +283,16 @@ private:
     std::unique_ptr<Player> _player;
     uint64_t _generation = 0;  // control thread only
     std::atomic<bool> _organOn{false};
+    // PCC-2: the organ state the PC last commanded and not yet confirmed by an authoritative STATUS_RESP.
+    // organOn/organOff set it and send under _organMutex, so a re-send can never overtake a newer command
+    // (the supersede rule makes the last sender win). Lock order: _organMutex before _mutex.
+    std::mutex _organMutex;
+    int _organIntent = -1;          // -1 none (adopt what the base reports), 0 off, 1 on
+    int64_t _organIntentMs = 0;     // steady ms of the command
+    int _organReasserts = 0;        // re-sends for this intent
+    int _organFault = -1;           // SSR state (0/1) shown as organ_power_fault after giving up; -1 none
+    void setOrganLocked(bool on);   // caller holds _organMutex
+    void reconcileOrgan(bool relay, uint64_t statusGen);  // authoritative STATUS_RESP (reader thread)
 
     // Startup reset (gap 2 / SYS-PWR-07 / SYS-NOTE-04): notes off + organ off
     // once the base link is up. The keepalive ACK posts Kind::StartupReset

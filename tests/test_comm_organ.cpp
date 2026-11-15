@@ -144,3 +144,93 @@ TEST(comm_pm13_superseded_on_retry_must_not_follow_off) {
     CHECK_EQ(onAfterOff, 0);
     CHECK(!ssrBeforeShutdown);            // organ must be unpowered after Stop
 }
+
+namespace {
+int countSet(const std::vector<Rx>& log, size_t from, uint8_t v) {
+    int n = 0;
+    for (size_t i = from; i < log.size(); ++i) if (isSet(log[i], v)) ++n;
+    return n;
+}
+std::string fieldText(status::StatusRegistry& reg, status::Node n, const std::string& key) {
+    auto snap = reg.snapshot();
+    auto& f = snap.node(n).fields;
+    auto it = f.find(key);
+    if (it == f.end()) return {};
+    if (auto* s = std::get_if<std::string>(&it->second)) return *s;
+    return {};
+}
+}  // namespace
+
+// PCC-2: organOff's SET_CURRENT{00} is lost on every try; the PC gives up. The next
+// authoritative STATUS_RESP reports SSR=1. Expected: the PC re-asserts its intent with a
+// new PacketId so the SSR ends off.
+TEST(comm_pcc2_status_mismatch_reasserts_off) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    h.organOn();
+    std::this_thread::sleep_for(300ms);
+    CHECK(base.ssr.load());
+    base.dropSetCurrentOff = true;
+    h.organOff();
+    for (int i = 0; i < 100 && base.droppedOff.load() < 4; ++i) std::this_thread::sleep_for(50ms);
+    CHECK_EQ(base.droppedOff.load(), 4);  // first send + 3 retries all lost -> PC gave up
+    base.dropSetCurrentOff = false;       // link healthy again
+    std::this_thread::sleep_for(9000ms);  // at least one authoritative 5 s status poll
+    auto log = base.log();
+    const bool ssrBeforeShutdown = base.ssr.load();  // Shutdown sends organOff itself
+    h.shutdown();
+    for (auto& r : log) if (r.type == MsgType::SET_CURRENT || r.type == MsgType::GET_STATUS)
+        std::cout << "  base rx " << msgTypeName(r.type) << " id=" << int(r.pid) << " [" << mc::test::toHex(r.payload) << "]\n";
+    CHECK(!ssrBeforeShutdown);            // SSR still on with nobody playing = S1
+}
+
+// PCC-2: once the base confirmed the PC's last command, a different state reported later
+// (organ switched on at the base / remote) is adopted, never fought.
+TEST(comm_pcc2_confirmed_then_manual_on_is_adopted) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    h.organOn();
+    std::this_thread::sleep_for(300ms);
+    h.organOff();
+    std::this_thread::sleep_for(6000ms);  // an authoritative poll confirms "off"
+    CHECK(!base.ssr.load());
+    const size_t mark = base.log().size();
+    base.ssr = true;                      // organist switches the organ on at the base
+    std::this_thread::sleep_for(11000ms); // two more polls report SSR=1
+    auto log = base.log();
+    const bool ssrBeforeShutdown = base.ssr.load();
+    h.shutdown();
+    CHECK_EQ(countSet(log, mark, 0), 0);  // the PC did not switch it back off
+    CHECK(ssrBeforeShutdown);
+}
+
+// PCC-2: the off never gets through. The PC re-sends a bounded number of times, then says
+// so loudly (status field + ERROR) instead of silently adopting "on".
+TEST(comm_pcc2_gives_up_loudly) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    h.organOn();
+    std::this_thread::sleep_for(300ms);
+    base.dropSetCurrentOff = true;        // every off is lost, for good
+    h.organOff();
+    std::this_thread::sleep_for(32000ms);
+    const int dropped = base.droppedOff.load();
+    const std::string fault = fieldText(reg, status::Node::Base, "organ_power_fault");
+    h.shutdown();
+    std::cout << "  dropped offs=" << dropped << " fault=\"" << fault << "\"\n";
+    CHECK(dropped > 4);                   // re-sent after the first give-up
+    CHECK(dropped <= 4 * 4 + 4);          // bounded (1 + 3 re-sends, 4 frames each; slack for shutdown)
+    CHECK(!fault.empty());
+}
