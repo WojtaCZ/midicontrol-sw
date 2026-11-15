@@ -100,7 +100,8 @@ public:
     std::optional<mc::protocol::NakReason> playSong(const std::string& code);
     void stopSong();
     bool requestAddVerse();
-    void recordSong();
+    // false: not started (already recording, no MIDI input port, no file, spawn failed, or cancelled).
+    bool recordSong();
     void organOn();
     void organOff();
     std::vector<std::string> songList() const;
@@ -322,6 +323,8 @@ private:
 
     std::mutex _recorderMutex;
     int _recorderPid = -1;
+    bool _recorderStarting = false;   // PCC-1: a Record is in its warm-up (guarded by _recorderMutex)
+    bool _recorderCancelled = false;  // stopRecorder ran during that warm-up
 };
 
 }  // namespace mc

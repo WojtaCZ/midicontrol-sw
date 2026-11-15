@@ -19,6 +19,8 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <csignal>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -451,4 +453,107 @@ TEST(comm_fast_restart_packet_ids_do_not_restart_at_the_same_value) {
     for (int id : firstIds) allSame = allSame && id == firstIds.front();
     CHECK(firstIds.front() >= 0);
     CHECK(!allSame);  // random seeds: all 4 equal by chance with p = 1/256^3
+}
+
+// ---- PCC-1: recording guard (fake arecordmidi on PATH; it logs "<pid> <file>" and sleeps) ----
+namespace {
+struct FakeRecorder {
+    std::filesystem::path dir, recDir, log;
+    std::string oldPath;
+    FakeRecorder() {
+        dir = std::filesystem::temp_directory_path() / ("mc_rec_test_" + std::to_string(getpid()));
+        std::filesystem::remove_all(dir);
+        recDir = dir / "rec";
+        std::filesystem::create_directories(recDir);
+        log = dir / "spawned.log";
+        auto script = dir / "arecordmidi";
+        {
+            std::ofstream s(script);
+            s << "#!/bin/sh\necho \"$$ $3\" >> '" << log.string() << "'\nexec sleep 30\n";
+        }
+        std::filesystem::permissions(script, std::filesystem::perms::owner_all);
+        const char* p = getenv("PATH");
+        oldPath = p ? p : "";
+        setenv("PATH", (dir.string() + ":" + oldPath).c_str(), 1);
+    }
+    ~FakeRecorder() {
+        for (auto& l : lines()) kill(std::stoi(l.substr(0, l.find(' '))), SIGKILL);  // no orphan survives a red run
+        setenv("PATH", oldPath.c_str(), 1);
+        std::filesystem::remove_all(dir);
+    }
+    std::vector<std::string> lines() const {
+        std::vector<std::string> out;
+        std::ifstream f(log);
+        for (std::string l; std::getline(f, l);) if (!l.empty()) out.push_back(l);
+        return out;
+    }
+};
+}  // namespace
+
+// A second Record while one runs must not start a second arecordmidi (the first would be orphaned).
+TEST(comm_pcc1_second_record_is_refused_while_recording) {
+    FakeRecorder fr;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.recFolder = fr.recDir.string();
+    cfg.warmupMs = 0;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.recordSong());
+    CHECK(!h.recordSong());  // refused: "Already recording"
+    std::this_thread::sleep_for(500ms);
+    auto spawned = fr.lines();
+    std::cout << "  arecordmidi started: " << spawned.size() << "\n";
+    CHECK_EQ(spawned.size(), size_t(1));
+    h.shutdown();
+}
+
+// Record, Stop, Record within one second: the second recording gets its own file.
+TEST(comm_pcc1_records_in_the_same_second_get_unique_files) {
+    FakeRecorder fr;
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.recFolder = fr.recDir.string();
+    cfg.warmupMs = 0;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(100ms);
+    // Start at the beginning of a wall-clock second so both records fall into the same one.
+    auto now = std::chrono::system_clock::now().time_since_epoch();
+    std::this_thread::sleep_for(1000ms - std::chrono::duration_cast<std::chrono::milliseconds>(now) % 1000ms + 20ms);
+    h.recordSong();
+    std::this_thread::sleep_for(100ms);
+    h.stopSong();
+    std::this_thread::sleep_for(150ms);
+    h.recordSong();
+    std::this_thread::sleep_for(150ms);
+    auto spawned = fr.lines();
+    std::vector<std::string> files;
+    for (auto& l : spawned) files.push_back(l.substr(l.find(' ') + 1));
+    for (auto& f : files) std::cout << "  file: " << f << "\n";
+    CHECK_EQ(files.size(), size_t(2));
+    CHECK(files.size() == 2 && files[0] != files[1]);
+    h.shutdown();
+}
+
+// Stop pressed while a Record waits for the organ warm-up: no recorder may start afterwards.
+TEST(comm_pcc1_stop_during_warmup_cancels_the_record) {
+    FakeRecorder fr;
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.recFolder = fr.recDir.string();
+    cfg.warmupMs = 1500;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(100ms);
+    std::thread rec([&] { h.recordSong(); });
+    std::this_thread::sleep_for(300ms);
+    h.stopSong();
+    rec.join();
+    std::this_thread::sleep_for(200ms);
+    auto spawned = fr.lines();
+    std::cout << "  arecordmidi started after Stop: " << spawned.size() << "\n";
+    CHECK_EQ(spawned.size(), size_t(0));
+    h.shutdown();
 }

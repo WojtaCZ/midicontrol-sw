@@ -60,8 +60,9 @@ ExecResult ConsoleExecutor::execute(const std::string& line, const console::Repl
             out("Nothing is playing\n");
             return ExecResult::Failed;
         case Kind::Record:
-            _handler.recordSong();
-            return ExecResult::Ok;
+            if (_handler.recordSong()) return ExecResult::Ok;
+            out("Recording not started (see the log)\n");
+            return ExecResult::Failed;
         case Kind::List: {
             auto songs = _handler.songList();
             std::string s = std::to_string(songs.size()) + " songs:";

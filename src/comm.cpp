@@ -9,6 +9,7 @@
 #include "midicontrol/diag_api.hpp"
 #include "midicontrol/log.hpp"
 #include "midicontrol/process.hpp"
+#include "midicontrol/recording.hpp"
 #include "midicontrol/protocol/codec.hpp"
 #include "midicontrol/protocol/constants.hpp"
 #include "midicontrol/songs.hpp"
@@ -1010,13 +1011,32 @@ void CommHandler::displayClear() {
          mc::display::encodeNowPlaying(mc::display::clearUpdate()));
 }
 
-void CommHandler::recordSong() {
+bool CommHandler::recordSong() {
+    // PCC-1: one recorder at a time. A second Record (web/console) while one runs or warms up is
+    // refused; overwriting _recorderPid would orphan the first arecordmidi (it keeps the ALSA port).
+    {
+        std::lock_guard<std::mutex> lk(_recorderMutex);
+        if (_recorderPid > 0 || _recorderStarting) {
+            mc::log::warn(Node::Software, "Already recording; Stop first.");
+            return false;
+        }
+        _recorderStarting = true;
+        _recorderCancelled = false;
+    }
+    struct StartingGuard {
+        CommHandler& h;
+        ~StartingGuard() {
+            std::lock_guard<std::mutex> lk(h._recorderMutex);
+            h._recorderStarting = false;
+        }
+    } startingGuard{*this};
+
     _organClaimed.store(true);  // the operator uses the organ: no startup power off
     if (_idleOffArmedMs.load() >= 0) armIdleOff();  // SYS-REC-05: recording restarts the idle timer
     auto ports = _midiFinder ? _midiFinder() : std::nullopt;
     if (!ports) {
         mc::log::error(Node::Software, "MIDIControl MIDI input port not found; cannot record.");
-        return;
+        return false;
     }
     // arecordmidi expects an ALSA client:port; use the trailing token of the name.
     std::string alsaPort;
@@ -1031,25 +1051,35 @@ void CommHandler::recordSong() {
         std::this_thread::sleep_for(std::chrono::milliseconds(_config.warmupMs));
     }
 
-    char buf[64];
-    std::time_t t = std::time(nullptr);
-    std::tm tm {};
-    localtime_r(&t, &tm);
-    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.mid", &tm);
-    std::string fullPath = _config.recFolder + "/" + buf;
+    // Unique per start, also within one second (the name has 1 s resolution).
+    const std::string fullPath = mc::recording::reservePath(_config.recFolder, std::time(nullptr));
+    if (fullPath.empty()) {
+        mc::log::error(Node::Software, "Cannot create a recording file in " + _config.recFolder);
+        return false;
+    }
 
+    // Spawn and store the pid under one lock: a Stop/SerialLost during the warm-up cancels the start,
+    // and stopRecorder can never miss a recorder that is being started.
+    std::lock_guard<std::mutex> lk(_recorderMutex);
+    if (_recorderCancelled) {
+        std::remove(fullPath.c_str());
+        mc::log::info(Node::Software, "Recording cancelled during the organ warm-up.");
+        return false;
+    }
     const int pid = mc::proc::spawn({"arecordmidi", "-p", alsaPort, fullPath});
     if (pid > 0) {
-        std::lock_guard<std::mutex> lk(_recorderMutex);
         _recorderPid = pid;
         mc::log::info(Node::Software, "Recording to " + fullPath);
-    } else {
-        mc::log::error(Node::Software, "Failed to start arecordmidi (rc=" + std::to_string(-pid) + ")");
+        return true;
     }
+    std::remove(fullPath.c_str());
+    mc::log::error(Node::Software, "Failed to start arecordmidi (rc=" + std::to_string(-pid) + ")");
+    return false;
 }
 
 void CommHandler::stopRecorder() {
     std::lock_guard<std::mutex> lk(_recorderMutex);
+    if (_recorderStarting) _recorderCancelled = true;  // a Record still in its warm-up must not start
     if (_recorderPid > 0) {
         // Bounded: a recorder that ignores SIGTERM can't hang the control thread.
         if (mc::proc::terminate(_recorderPid) == mc::proc::Ended::Killed) {
