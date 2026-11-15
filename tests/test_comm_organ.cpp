@@ -851,3 +851,49 @@ TEST(comm_item2_anchor_does_not_supersede_playing) {
     CHECK(firstAnchor < log.size());
     CHECK(countType(log, firstAnchor, MsgType::SIGNAL_PLAYING) >= size_t(1));  // the retry after the anchor
 }
+
+// Item 4a (advisor): the PC switched the organ off, then the serial link was lost; during the outage the
+// organist switched the organ on by hand. After the reconnect the PC must not switch it off again.
+// Two variants: the "off" was confirmed by a status poll before the loss, or it was still unconfirmed.
+namespace {
+size_t item4aOffsAfterReconnect(bool confirmBeforeLoss, const char* linkName) {
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    const auto link = std::filesystem::path(cfg.playFolder) / linkName;
+    std::filesystem::remove(link);
+    auto base1 = std::make_unique<FakeBase>();
+    std::filesystem::create_symlink(base1->path(), link);
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    if (!h.connect(link.string())) return size_t(999);
+    std::this_thread::sleep_for(300ms);
+    h.organOn();
+    std::this_thread::sleep_for(300ms);
+    h.organOff();
+    std::this_thread::sleep_for(confirmBeforeLoss ? 6000ms : 300ms);  // 5 s poll confirms "off", or not
+    base1.reset();                          // the base goes away
+    std::filesystem::remove(link);
+    std::this_thread::sleep_for(1500ms);
+    FakeBase base2;
+    base2.ssr = true;                       // switched on by hand during the outage
+    std::filesystem::create_symlink(base2.path(), link);
+    std::this_thread::sleep_for(9000ms);    // reconnect, startup reset, >= 1 status poll
+    auto log2 = base2.log();
+    h.shutdown();
+    std::filesystem::remove(link);
+    std::cout << "  confirmed=" << confirmBeforeLoss << " SET_CURRENT{00} at base2=" << countSetV(log2, 0)
+              << " base2 rx=" << log2.size() << "\n";
+    return log2.empty() ? size_t(998) : countSetV(log2, 0);
+}
+}  // namespace
+
+TEST(comm_item4a_confirmed_off_then_manual_on_during_outage_is_left_on) {
+    CHECK_EQ(item4aOffsAfterReconnect(true, "fake-base-tty4a1"), size_t(0));
+}
+
+// PINNED, pending an owner question (fix-pc.md, wave 2, item 4a): an "off" that was not yet confirmed by a
+// status poll is still defended across the loss (PCC-2, SerialLost case), so a manual "on" made during a short
+// outage is switched off once more if the first status after the reconnect arrives within the 30 s window.
+// From SSR=1 alone the PC cannot tell a lost "off" from a manual "on"; re-sending "off" is the safe side.
+TEST(comm_item4a_unconfirmed_off_is_still_defended_after_reconnect_pinned) {
+    CHECK_EQ(item4aOffsAfterReconnect(false, "fake-base-tty4a2"), size_t(1));
+}
