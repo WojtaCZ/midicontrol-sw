@@ -105,6 +105,7 @@ target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_definitions(midicontrol_tests
     PRIVATE MC_SONGS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/songs")
 add_test(NAME unit COMMAND midicontrol_tests)
+add_test(NAME sync_system_doc COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/sync_system_doc_test.sh)
 
 # ---------------------------------------------------------------------------
 # Application: needs RtMidi (playback) + pthreads + the serial layer. Built
