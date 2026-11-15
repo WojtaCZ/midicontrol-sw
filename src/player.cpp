@@ -55,7 +55,7 @@ bool sendMidiMessages(int outPortIndex, const std::vector<std::vector<uint8_t>>&
     }
 }
 
-Player::Player(int outPortIndex) : _outPortIndex(outPortIndex) {}
+Player::Player(int outPortIndex, MidiSink sink) : _outPortIndex(outPortIndex), _sink(std::move(sink)) {}
 
 Player::~Player() { stop(); }
 
@@ -65,18 +65,21 @@ void Player::play(const std::string& filepath, const std::string& code,
 
     auto file = mc::smf::load(filepath);  // throws on error
 
-    _midiOut = std::make_unique<RtMidiOut>();
-    _midiOut->openPort(static_cast<unsigned int>(_outPortIndex));  // throws RtMidiError
-
     PlaybackEngine::Callbacks cb;
-    cb.midi = [this](const std::vector<uint8_t>& bytes) {
-        std::vector<unsigned char> msg(bytes.begin(), bytes.end());
-        try {
-            _midiOut->sendMessage(&msg);
-        } catch (const RtMidiError& e) {
-            std::cerr << "MIDI output error: " << e.getMessage() << "\n";
-        }
-    };
+    if (_sink) {
+        cb.midi = _sink;  // no RtMidi port is opened
+    } else {
+        _midiOut = std::make_unique<RtMidiOut>();
+        _midiOut->openPort(static_cast<unsigned int>(_outPortIndex));  // throws RtMidiError
+        cb.midi = [this](const std::vector<uint8_t>& bytes) {
+            std::vector<unsigned char> msg(bytes.begin(), bytes.end());
+            try {
+                _midiOut->sendMessage(&msg);
+            } catch (const RtMidiError& e) {
+                std::cerr << "MIDI output error: " << e.getMessage() << "\n";
+            }
+        };
+    }
     cb.display = [this](const mc::display::Update& u) {
         if (onDisplay) onDisplay(u);
     };

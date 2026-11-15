@@ -31,7 +31,7 @@ using namespace std::chrono_literals;
 
 namespace {
 
-struct Rx { MsgType type; uint8_t pid; std::vector<uint8_t> payload; };
+struct Rx { MsgType type; uint8_t pid; std::vector<uint8_t> payload; uint8_t dest = ADDR_BASE; };
 
 class FakeBase {
 public:
@@ -49,6 +49,10 @@ public:
     std::atomic<bool> dropSetCurrentOff{false}; // true: SET_CURRENT{00} frame is lost (not executed, no ACK)
     std::atomic<bool> ssr{false};
     std::atomic<int> droppedOff{0};
+    std::atomic<bool> ble{false};               // STATUS_RESP ble byte
+    // Packets to the remote (P1-9): the remote ACKs, the base NAKs UNREACHABLE, or the frame is lost.
+    enum RemoteMode { RemoteAck, RemoteUnreachable, RemoteDrop };
+    std::atomic<int> remoteMode{RemoteAck};
 
     std::vector<Rx> log() { std::lock_guard<std::mutex> lk(_m); return _log; }
 
@@ -57,12 +61,19 @@ private:
     void ack(const Packet& p) { tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::ACK, {p.packetId})); }
 
     void handle(const Packet& p) {
-        { std::lock_guard<std::mutex> lk(_m); _log.push_back({p.msgType, p.packetId, p.payload}); }
+        { std::lock_guard<std::mutex> lk(_m); _log.push_back({p.msgType, p.packetId, p.payload, p.dest}); }
         switch (p.msgType) {
         case MsgType::KEEPALIVE:
             tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::KEEPALIVE_ACK)); return;
         case MsgType::KEEPALIVE_ACK: case MsgType::ACK: case MsgType::NAK: return;
         default: break;
+        }
+        if (p.dest == ADDR_REMOTE) {  // forwarded, never executed by the base (own dedup: the remote's)
+            if (remoteMode == RemoteAck) tx(Packet(ADDR_REMOTE, ADDR_PC, _id++, MsgType::ACK, {p.packetId}));
+            else if (remoteMode == RemoteUnreachable)
+                tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::NAK,
+                          {p.packetId, static_cast<uint8_t>(NakReason::UNREACHABLE)}));
+            return;
         }
         bool isSet = p.msgType == MsgType::SET_CURRENT && !p.payload.empty();
         if (isSet && p.payload[0] == 0 && dropSetCurrentOff) { ++droppedOff; return; }  // frame lost on the wire
@@ -77,7 +88,7 @@ private:
         if (p.msgType == MsgType::GET_STATUS) {
             ack(p);
             tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::STATUS_RESP,
-                      {0, static_cast<uint8_t>(ssr ? 1 : 0), 1, 1}));
+                      {static_cast<uint8_t>(ble ? 1 : 0), static_cast<uint8_t>(ssr ? 1 : 0), 1, 1}));
             return;
         }
         ack(p);
@@ -605,4 +616,178 @@ TEST(comm_pcc1_dead_recorder_does_not_block_idle_off) {
     std::cout << "  offs=" << countSetV(log, 0) << " ssr=" << ssr << "\n";
     CHECK_EQ(countSetV(log, 0), size_t(1));
     CHECK(!ssr);
+}
+
+// ---------------------------------------------------------------------------
+// P1-9 remote resync (shared design, PC side). Songs play into a MIDI sink: no
+// RtMidi port is ever opened. The fake base's remote ACKs / NAKs / drops.
+// ---------------------------------------------------------------------------
+namespace {
+bool isSignal(MsgType t) {
+    return t == MsgType::SIGNAL_PLAYING || t == MsgType::SIGNAL_STOPPED || t == MsgType::SIGNAL_ANCHOR ||
+           t == MsgType::SIGNAL_RECORDING;
+}
+size_t countType(const std::vector<Rx>& log, size_t from, MsgType t) {
+    size_t n = 0;
+    for (size_t i = from; i < log.size(); ++i) if (log[i].type == t && log[i].dest == ADDR_REMOTE) ++n;
+    return n;
+}
+size_t countSignals(const std::vector<Rx>& log, size_t from) {
+    size_t n = 0;
+    for (size_t i = from; i < log.size(); ++i) if (isSignal(log[i].type)) ++n;
+    return n;
+}
+void dumpSignals(const std::vector<Rx>& log, size_t from) {
+    for (size_t i = from; i < log.size(); ++i) if (isSignal(log[i].type))
+        std::cout << "  [" << i << "] " << msgTypeName(log[i].type) << " id=" << int(log[i].pid) << " \""
+                  << std::string(log[i].payload.begin(), log[i].payload.end()) << "\"\n";
+}
+std::vector<uint8_t> lastPayload(const std::vector<Rx>& log, size_t to, MsgType t) {
+    std::vector<uint8_t> out;
+    for (size_t i = 0; i < to && i < log.size(); ++i) if (log[i].type == t) out = log[i].payload;
+    return out;
+}
+Config songConfig() {
+    Config c = testConfig();
+    c.warmupMs = 0;
+    std::filesystem::copy_file(MC_SONGS_DIR "/406A.mid", std::filesystem::path(c.playFolder) / "406A.mid",
+                               std::filesystem::copy_options::overwrite_existing);
+    return c;
+}
+// One STATUS_RESP, then give the control thread time to act on it.
+void statusNow(CommHandler& h) {
+    CHECK(h.requestStatus().has_value());
+    std::this_thread::sleep_for(400ms);
+}
+template <class F> bool waitFor(F f, int ms) {
+    for (int i = 0; i < ms / 50; ++i) { if (f()) return true; std::this_thread::sleep_for(50ms); }
+    return f();
+}
+}  // namespace
+
+// Drop mid-song: ble 1 -> 0 -> 1 while a song plays. The PC re-sends SIGNAL_PLAYING <code> and the last
+// SIGNAL_ANCHOR once; the remote ACKs; a later ble=1 status sends nothing more.
+TEST(comm_p19_drop_mid_song_resends_playing_and_anchor_once) {
+    FakeBase base;
+    base.ble = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    statusNow(h);                                    // remote known up (and told "stopped" once at PC start)
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] { return h.isPlaying() && countType(base.log(), 0, MsgType::SIGNAL_ANCHOR) > 0; }, 15000));
+    base.ble = false;                                // remote drops out
+    base.remoteMode = FakeBase::RemoteUnreachable;
+    statusNow(h);
+    const size_t mark = base.log().size();
+    const auto anchorBefore = lastPayload(base.log(), mark, MsgType::SIGNAL_ANCHOR);
+    base.ble = true;                                 // back
+    base.remoteMode = FakeBase::RemoteAck;
+    statusNow(h);
+    const bool playing = h.isPlaying();
+    const size_t mark2 = base.log().size();
+    statusNow(h);                                    // clean now: nothing
+    auto log = base.log();
+    h.shutdown();
+    dumpSignals(log, 0);
+    CHECK(playing);                                  // the song really played (fail() would send STOPPED)
+    CHECK_EQ(countType(log, mark, MsgType::SIGNAL_PLAYING), size_t(1));
+    CHECK_EQ(countType(log, mark, MsgType::SIGNAL_STOPPED), size_t(0));
+    bool anchorResent = false;
+    for (size_t i = mark; i < mark2; ++i) if (log[i].type == MsgType::SIGNAL_ANCHOR && log[i].payload == anchorBefore) anchorResent = true;
+    CHECK(anchorResent);
+    CHECK_EQ(countType(log, mark2, MsgType::SIGNAL_PLAYING), size_t(0));
+}
+
+// NAK UNREACHABLE leaves the remote dirty: every further ble=1 status tries once more until it is ACKed.
+TEST(comm_p19_unreachable_is_retried_on_next_ble1) {
+    FakeBase base;
+    base.ble = true;
+    base.remoteMode = FakeBase::RemoteUnreachable;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    std::vector<size_t> perStatus;
+    for (int i = 0; i < 4; ++i) {
+        if (i == 2) base.remoteMode = FakeBase::RemoteAck;
+        const size_t m = base.log().size();
+        statusNow(h);
+        perStatus.push_back(countType(base.log(), m, MsgType::SIGNAL_STOPPED));
+    }
+    auto log = base.log();
+    h.shutdown();
+    dumpSignals(log, 0);
+    std::cout << "  STOPPED per status: " << perStatus[0] << " " << perStatus[1] << " " << perStatus[2] << " "
+              << perStatus[3] << "\n";
+    CHECK_EQ(perStatus[0], size_t(1));  // PC start: the remote may still show the old run's song
+    CHECK_EQ(perStatus[1], size_t(1));  // NAKed -> again
+    CHECK_EQ(perStatus[2], size_t(1));  // ACKed now
+    CHECK_EQ(perStatus[3], size_t(0));  // clean
+}
+
+// An idle remote that knows it is stopped gets nothing on a ble edge; a STOPPED lost on the air is re-sent once.
+TEST(comm_p19_idle_clean_gets_nothing_lost_stopped_is_resent) {
+    FakeBase base;
+    base.ble = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    statusNow(h);                                     // one STOPPED at PC start, ACKed
+    const size_t startStopped = countType(base.log(), 0, MsgType::SIGNAL_STOPPED);
+    base.ble = false;
+    statusNow(h);
+    const size_t m1 = base.log().size();
+    base.ble = true;                                  // edge, but idle and clean
+    statusNow(h);
+    const size_t idleSignals = countSignals(base.log(), m1);
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] { return h.isPlaying(); }, 5000));
+    std::this_thread::sleep_for(300ms);
+    base.remoteMode = FakeBase::RemoteDrop;          // STOPPED and its 3 retries are lost
+    h.stopSong();
+    std::this_thread::sleep_for(2800ms);
+    base.remoteMode = FakeBase::RemoteAck;
+    const size_t m2 = base.log().size();
+    statusNow(h);
+    const size_t m3 = base.log().size();
+    statusNow(h);
+    auto log = base.log();
+    h.shutdown();
+    dumpSignals(log, 0);
+    CHECK_EQ(startStopped, size_t(1));
+    CHECK_EQ(idleSignals, size_t(0));
+    CHECK_EQ(countType(log, m2, MsgType::SIGNAL_STOPPED), size_t(1));
+    CHECK_EQ(countSignals(log, m3), size_t(0));
+}
+
+// No resync while a firmware update runs; the first ble=1 status after it does it.
+TEST(comm_p19_no_resync_during_update) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    statusNow(h);                                     // ble=0
+    h.setUpdating(true);
+    base.ble = true;
+    statusNow(h);
+    statusNow(h);
+    const size_t during = countSignals(base.log(), 0);
+    h.setUpdating(false);
+    const size_t m = base.log().size();
+    statusNow(h);
+    auto log = base.log();
+    h.shutdown();
+    dumpSignals(log, 0);
+    CHECK_EQ(during, size_t(0));
+    CHECK_EQ(countType(log, m, MsgType::SIGNAL_STOPPED), size_t(1));
 }

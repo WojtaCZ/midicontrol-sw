@@ -164,6 +164,8 @@ if(RTMIDI_FOUND)
                           ${RTMIDI_LIBRARIES} util)
     target_include_directories(midicontrol_comm_tests PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}/tests ${RTMIDI_INCLUDE_DIRS})
+    target_compile_definitions(midicontrol_comm_tests
+        PRIVATE MC_SONGS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/songs")
     target_compile_options(midicontrol_comm_tests PRIVATE ${RTMIDI_CFLAGS_OTHER})
     if(RTMIDI_LIBRARY_DIRS)
         target_link_directories(midicontrol_comm_tests PRIVATE ${RTMIDI_LIBRARY_DIRS})

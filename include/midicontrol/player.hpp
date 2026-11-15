@@ -30,7 +30,9 @@ bool sendMidiMessages(int outPortIndex, const std::vector<std::vector<uint8_t>>&
 
 class Player {
 public:
-    explicit Player(int outPortIndex);
+    // Where the MIDI bytes go instead of an RtMidi port (tests: no real port is ever opened).
+    using MidiSink = std::function<void(const std::vector<uint8_t>&)>;
+    explicit Player(int outPortIndex, MidiSink sink = {});
     ~Player();
 
     Player(const Player&) = delete;
@@ -58,6 +60,7 @@ private:
     void playbackLoop();
 
     int _outPortIndex;
+    MidiSink _sink;
     std::unique_ptr<RtMidiOut> _midiOut;
     std::unique_ptr<PlaybackEngine> _engine;
     std::thread _thread;

@@ -134,6 +134,9 @@ public:
     // keepalive and GET_STATUS continue.
     void pauseDiag(bool on);
 
+    // Tests only: the player writes its MIDI bytes here instead of opening an RtMidi port.
+    void setMidiSinkForTest(Player::MidiSink sink) { _midiSinkForTest = std::move(sink); }
+
 private:
     using Clock = std::chrono::steady_clock;
 
@@ -146,7 +149,7 @@ private:
     };
 
     struct Command {
-        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset, IdleOff } kind;
+        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset, IdleOff, RemoteResync } kind;
         std::string code;
         std::string path;
         uint64_t generation = 0;
@@ -192,6 +195,14 @@ private:
     void doPlay(const Command& cmd);
     void doStop(bool signal);
     void finishPlayback();
+    // P1-9 remote resync: every SIGNAL_* to the remote goes through sendRemoteSignal().
+    void sendRemoteSignal(mc::protocol::MsgType type, const std::vector<uint8_t>& payload = {});
+    uint8_t sendRemoteSignalLocked(mc::protocol::MsgType type, const std::vector<uint8_t>& payload,
+                                   bool& registered);  // _resyncMutex held
+    uint8_t sendWithAckImpl(uint8_t dest, mc::protocol::MsgType type, const std::vector<uint8_t>& payload,
+                            bool* registered);
+    void noteRemoteSignalEnd(uint8_t pid, mc::protocol::MsgType type, bool acked);  // reader thread
+    void doRemoteResync();
     bool releasePlayer();  // stop + destroy the player; false if there was none
     void displayClear();
     void stopRecorder();
@@ -270,6 +281,17 @@ private:
     std::atomic<bool> _remoteLink{false};    // last STATUS_RESP said ble=1
     std::atomic<bool> _remotePaused{false};  // remote firmware update running (pauseDiag)
     std::atomic<int64_t> _reconnects{0};
+
+    // P1-9: "remote state dirty" until the remote ACKs a re-sent state. Lock order: _resyncMutex before
+    // _mutex (sendRemoteSignal holds it across sendWithAck so an ACK cannot be matched before it is awaited).
+    // A new PC process starts dirty and "may play": the remote can still show a song from the previous run.
+    std::mutex _resyncMutex;
+    bool _remoteDirty = true;
+    bool _remoteMayPlay = true;      // the remote may think a song plays (cleared by an ACKed SIGNAL_STOPPED)
+    std::set<uint8_t> _resyncAwait;  // pids of the current resync attempt
+    std::string _lastAnchor;         // last SIGNAL_ANCHOR label of the current song
+    std::atomic<bool> _resyncQueued{false};
+    Player::MidiSink _midiSinkForTest;
 
     // Song being played: sections visited (playback thread appends, control
     // thread reads after the player has been joined).

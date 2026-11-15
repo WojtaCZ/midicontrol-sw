@@ -43,6 +43,11 @@ int supersedeGroup(MsgType t) {
     }
 }
 
+bool isRemoteSignal(MsgType t) {
+    return t == MsgType::SIGNAL_PLAYING || t == MsgType::SIGNAL_RECORDING || t == MsgType::SIGNAL_STOPPED ||
+           t == MsgType::SIGNAL_ANCHOR;
+}
+
 std::string hexByte(uint8_t b) {
     char buf[8];
     std::snprintf(buf, sizeof(buf), "0x%02X", b);
@@ -351,6 +356,12 @@ uint8_t CommHandler::sendPacket(const Packet& pkt) {
 }
 
 uint8_t CommHandler::sendWithAck(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload) {
+    return sendWithAckImpl(dest, type, payload, nullptr);
+}
+
+uint8_t CommHandler::sendWithAckImpl(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload,
+                                     bool* registered) {
+    if (registered) *registered = false;
     // Register before writing so a fast ACK cannot arrive before the entry exists.
     uint8_t pid = nextPacketId();
     Packet pkt(ADDR_PC, dest, pid, type, payload);
@@ -377,6 +388,7 @@ uint8_t CommHandler::sendWithAck(uint8_t dest, MsgType type, const std::vector<u
         }
         _pending[pid] = Pending{Clock::now(), 0, type, dest, payload};
         _serial.write(raw);
+        if (registered) *registered = true;
     }
     if (superseded > 0) {
         for (Node n : mc::status::nodesForPeer(dest)) {
@@ -391,6 +403,83 @@ uint8_t CommHandler::sendWithAck(uint8_t dest, MsgType type, const std::vector<u
     }
     noteTx(pkt, false);
     return pid;
+}
+
+// P1-9: the single send point for SIGNAL_* to the remote. Holding _resyncMutex across the send keeps the
+// last anchor and the resync bookkeeping in step with what went on the wire (an ACK waits for it).
+uint8_t CommHandler::sendRemoteSignalLocked(MsgType type, const std::vector<uint8_t>& payload, bool& registered) {
+    const uint8_t pid = sendWithAckImpl(ADDR_REMOTE, type, payload, &registered);
+    if (type == MsgType::SIGNAL_PLAYING) {
+        _remoteMayPlay = true;
+        _lastAnchor.clear();
+    } else if (type == MsgType::SIGNAL_ANCHOR) {
+        _lastAnchor.assign(payload.begin(), payload.end());
+    }
+    if (!registered) _remoteDirty = true;  // no link: the remote did not get it
+    return pid;
+}
+
+void CommHandler::sendRemoteSignal(MsgType type, const std::vector<uint8_t>& payload) {
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    bool registered = false;
+    sendRemoteSignalLocked(type, payload, registered);
+}
+
+void CommHandler::noteRemoteSignalEnd(uint8_t pid, MsgType type, bool acked) {
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    if (!acked) {
+        // NAK (UNREACHABLE, BUSY, ...) or no answer after the retries: the remote's state is unknown.
+        _remoteDirty = true;
+        _resyncAwait.clear();  // the running attempt failed; a late ACK of its other packets proves nothing
+        return;
+    }
+    if (type == MsgType::SIGNAL_STOPPED) _remoteMayPlay = false;
+    if (_resyncAwait.erase(pid) > 0 && _resyncAwait.empty()) {
+        _remoteDirty = false;
+        mc::log::info(Node::Controller, "Remote state resynced (ACKed).");
+    }
+}
+
+void CommHandler::doRemoteResync() {
+    _resyncQueued.store(false);
+    // No send during a firmware update (base or remote); the next STATUS_RESP with ble=1 tries again.
+    if (_updating.load() || _remotePaused.load() || !_remoteLink.load()) return;
+    const bool playing = isPlaying();
+    std::string code;
+    {
+        std::lock_guard<std::mutex> lk(_songMutex);
+        code = _songCode;
+    }
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    if (!_remoteDirty) return;
+    _resyncAwait.clear();
+    std::vector<std::pair<uint8_t, bool>> sent;
+    std::string what;
+    if (playing) {
+        bool reg = false;
+        const std::vector<uint8_t> anchor(_lastAnchor.begin(), _lastAnchor.end());  // PLAYING clears it
+        sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_PLAYING,
+                                                 std::vector<uint8_t>(code.begin(), code.end()), reg), reg);
+        what = "SIGNAL_PLAYING " + code;
+        if (!anchor.empty()) {
+            sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_ANCHOR, anchor, reg), reg);
+            what += " + SIGNAL_ANCHOR";
+        }
+    } else if (_remoteMayPlay) {
+        bool reg = false;
+        sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_STOPPED, {}, reg), reg);
+        what = "SIGNAL_STOPPED";
+    } else {
+        _remoteDirty = false;  // idle and known to be stopped: nothing to tell it
+        return;
+    }
+    bool all = true;
+    for (const auto& [pid, reg] : sent) {
+        if (reg) _resyncAwait.insert(pid);
+        all = all && reg;
+    }
+    if (!all) _resyncAwait.clear();  // part of it never went out: stay dirty
+    mc::log::info(Node::Controller, "Remote resync: " + what);
 }
 
 bool CommHandler::sendReliable(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload,
@@ -469,6 +558,9 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
         _status.set(Node::Controller, "last_tx_result",
                     nak ? "NAK " + std::string(nakReasonName(reason)) : std::string("ACK"));
     }
+    if (pending && pending->dest == ADDR_REMOTE && isRemoteSignal(pending->msgType)) {
+        noteRemoteSignalEnd(pid, pending->msgType, !nak);
+    }
     std::lock_guard<std::mutex> lk(_ackMutex);
     if (_awaitActive && pid == _awaitPid) {
         _awaitResult = nak ? 2 : 1;
@@ -532,6 +624,7 @@ void CommHandler::checkTimeouts() {
             }
         }
         if (p.dest == ADDR_REMOTE && !background) _status.set(Node::Controller, "last_tx_result", std::string("no answer"));
+        if (p.dest == ADDR_REMOTE && isRemoteSignal(p.msgType)) noteRemoteSignalEnd(pid, p.msgType, false);
     }
 }
 
@@ -629,7 +722,17 @@ void CommHandler::noteRx(const Packet& pkt) {
         _status.set(Node::Base, "status_ble", st.ble);
         if (_diagPoller) _diagPoller->setRemoteLink(st.ble, steadyMs(), _updating.load());  // remote reachable -> DIAG_GET
         _status.set(Node::Base, "status_relay", st.relay);
-        _remoteLink.store(st.ble);
+        const bool wasLink = _remoteLink.exchange(st.ble);
+        if (st.ble) {
+            // P1-9: a ble 0->1 edge makes the remote's state suspect; while dirty every ble=1 status tries once.
+            bool dirty;
+            {
+                std::lock_guard<std::mutex> lk(_resyncMutex);
+                if (!wasLink) _remoteDirty = true;
+                dirty = _remoteDirty;
+            }
+            if (dirty && !_resyncQueued.exchange(true)) post({Command::Kind::RemoteResync, {}, {}, 0});
+        }
         uint64_t statusGen;
         {
             std::lock_guard<std::mutex> lk(_routineMutex);
@@ -1120,7 +1223,7 @@ bool CommHandler::waitInterruptible(int ms) {
             for (const auto& c : _queue) {
                 // Stale Finished, the startup check and the idle check don't interrupt a warm-up.
                 if (c.kind != Command::Kind::Finished && c.kind != Command::Kind::StartupReset &&
-                    c.kind != Command::Kind::IdleOff) return true;
+                    c.kind != Command::Kind::IdleOff && c.kind != Command::Kind::RemoteResync) return true;
             }
             return false;
         });
@@ -1184,10 +1287,13 @@ void CommHandler::controlLoop() {
                 _idleOffQueued.store(false);
                 doIdleOff();
                 break;
+            case Command::Kind::RemoteResync:
+                doRemoteResync();
+                break;
             case Command::Kind::Shutdown:
                 if (releasePlayer()) {
                     displayClear();
-                    sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_STOPPED);
+                    sendRemoteSignal(MsgType::SIGNAL_STOPPED);
                 }
                 stopRecorder();
                 if (_organOn.load()) organOff();
@@ -1326,7 +1432,7 @@ void CommHandler::doPlay(const Command& cmd) {
         mc::log::error(Node::Software, "Cannot play " + cmd.code + ": " + why);
         playbackEnded("failed: " + why, nullptr);
         displayClear();
-        sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_STOPPED);
+        sendRemoteSignal(MsgType::SIGNAL_STOPPED);
         if (!_config.keepPowerOn) organOff();
     };
 
@@ -1354,7 +1460,7 @@ void CommHandler::doPlay(const Command& cmd) {
         return;
     }
 
-    auto player = std::make_unique<Player>(ports->outIndex);
+    auto player = std::make_unique<Player>(ports->outIndex, _midiSinkForTest);
     const uint64_t gen = ++_generation;
     player->onDisplay = [this](const mc::display::Update& u) {
         send(ADDR_BASE, MsgType::NOW_PLAYING_INFO, mc::display::encodeNowPlaying(u));
@@ -1370,13 +1476,12 @@ void CommHandler::doPlay(const Command& cmd) {
         std::vector<uint8_t> payload(label.begin(), label.end());
         if (payload.size() > MAX_PAYLOAD_SIZE - 1) payload.resize(MAX_PAYLOAD_SIZE - 1);
         payload.push_back(0x00);
-        sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_ANCHOR, payload);
+        sendRemoteSignal(MsgType::SIGNAL_ANCHOR, payload);  // remembered for a resync
     };
     player->onFinished = [this, gen]() { post({Command::Kind::Finished, {}, {}, gen}); };
 
     // SIGNAL_PLAYING goes out before the first SIGNAL_ANCHOR.
-    sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_PLAYING,
-                std::vector<uint8_t>(cmd.code.begin(), cmd.code.end()));
+    sendRemoteSignal(MsgType::SIGNAL_PLAYING, std::vector<uint8_t>(cmd.code.begin(), cmd.code.end()));
     try {
         player->play(cmd.path, cmd.code, opts);
     } catch (const std::exception& e) {
@@ -1396,7 +1501,7 @@ void CommHandler::doPlay(const Command& cmd) {
 void CommHandler::finishPlayback() {
     if (!releasePlayer()) return;  // already stopped by a Stop that raced the end
     displayClear();
-    sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_STOPPED);
+    sendRemoteSignal(MsgType::SIGNAL_STOPPED);
     if (!_config.keepPowerOn) organOff();
     playbackEnded("ended normally", "songs_ended");
     mc::log::info(Node::Software, "Playback finished" +
@@ -1407,7 +1512,7 @@ void CommHandler::doStop(bool signal) {
     bool wasPlaying = releasePlayer();
     stopRecorder();
     displayClear();
-    if (signal) sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_STOPPED);
+    if (signal) sendRemoteSignal(MsgType::SIGNAL_STOPPED);
     if (!_config.keepPowerOn) organOff();
     if (wasPlaying) {
         playbackEnded("stopped", "songs_stopped");
