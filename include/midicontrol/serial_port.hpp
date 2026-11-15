@@ -53,6 +53,10 @@ private:
 std::optional<std::string> findMidiControlPort(const std::string& vid = "abcd", const std::string& pid = "1234",
                                                const std::string& sysRoot = "/sys");
 
+// P1-13: a MIDIControl base sitting in its USB bootloader (abcd:1235, any tty interface), e.g. after a
+// firmware update that did not finish. Read-only sysfs lookup under `sysRoot`.
+bool baseInBootloader(const std::string& sysRoot = "/sys");
+
 // The base's "MIDIControl log" CDC: the interface whose string is "MIDIControl log", else interface 04.
 std::optional<std::string> findMidiControlLogPort(const std::string& vid = "abcd", const std::string& pid = "1234",
                                                   const std::string& sysRoot = "/sys");

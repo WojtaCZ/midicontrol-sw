@@ -83,6 +83,10 @@ ExecResult ConsoleExecutor::execute(const std::string& line, const console::Repl
             auto label = _handler.sectionLabel();
             if (!label.empty()) os << " section=\"" << label << "\"";
             out(os.str() + "\n");
+            if (_handler.baseInBootloader()) {
+                out("Base is in its USB bootloader (ABCD:1235): a firmware update did not finish; "
+                    "re-flash it with: update base <file>\n");
+            }
             if (auto st = _handler.requestStatus()) {
                 std::ostringstream bs;
                 bs << "Base: BLE=" << st->ble << ", relay=" << st->relay << ", display=" << st->display

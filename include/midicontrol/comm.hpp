@@ -136,6 +136,13 @@ public:
     void endUpdate();
     bool updateClaimed() const;
 
+    // P1-13: while the base is not connected, the reader asks `probe` once a second whether the base sits
+    // in its USB bootloader (an update that did not finish); not during a base update, where that is
+    // expected. Reported once per edge: log, status field Base/in_bootloader, console `status`. Set
+    // before start()/connect(). No probe (the default, and in tests unless given): never looked for.
+    void setBootloaderProbe(std::function<bool()> probe) { _bootloaderProbe = std::move(probe); }
+    bool baseInBootloader() const { return _inBootloader.load(); }
+
     // A base firmware update is running: the bootloader ignores KEEPALIVE and
     // GET_STATUS, so neither is sent and keepalive loss is not reported.
     void setUpdating(bool on);
@@ -227,6 +234,9 @@ private:
     mc::status::StatusRegistry& _status;
     MidiPortFinder _midiFinder;
     SerialFinder _serialFinder;
+    std::function<bool()> _bootloaderProbe;
+    std::atomic<bool> _inBootloader{false};
+    void noteBootloader(bool in);  // reader thread
     std::string _devicePath;
 
     SerialPort _serial;

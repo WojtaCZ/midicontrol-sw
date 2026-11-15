@@ -305,6 +305,17 @@ void CommHandler::handleSerialLoss() {
     post({Command::Kind::SerialLost, {}, {}, 0});
 }
 
+void CommHandler::noteBootloader(bool in) {
+    if (_inBootloader.exchange(in) == in) return;
+    _status.set(Node::Base, "in_bootloader", in);
+    if (in) {
+        mc::log::error(Node::Base, "The base is in its USB bootloader (ABCD:1235): a firmware update did not "
+                                   "finish. Re-flash the base (console: update base <file>).");
+    } else {
+        mc::log::info(Node::Base, "The base left its bootloader.");
+    }
+}
+
 bool CommHandler::tryReopen() {
     std::optional<std::string> path;
     if (_serialFinder) {
@@ -914,7 +925,11 @@ void CommHandler::readerLoop() {
             auto now = Clock::now();
             if (now - lastReopen >= std::chrono::seconds(1)) {
                 lastReopen = now;
-                if (tryReopen()) continue;
+                if (tryReopen()) {
+                    noteBootloader(false);
+                    continue;
+                }
+                if (_bootloaderProbe && !_updating.load()) noteBootloader(_bootloaderProbe());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;

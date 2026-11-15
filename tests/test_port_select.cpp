@@ -83,3 +83,16 @@ TEST(port_select_protocol_never_the_log_cdc) {
 TEST(port_select_no_sysfs) {
     CHECK(!mc::findMidiControlPort("abcd", "1234", "/nonexistent-sysfs").has_value());
 }
+
+// P1-13: the bootloader (abcd:1235) is seen; the running application (abcd:1234) and other CDCs are not.
+TEST(port_select_base_in_bootloader_is_detected) {
+    FakeSys app;
+    app.usbTty("1-1", "ttyACM0", "abcd", "1234", "00", "");
+    app.usbTty("1-2", "ttyACM1", "0483", "5740", "00", "");
+    CHECK(!mc::baseInBootloader(app.root));
+    FakeSys bl;
+    bl.usbTty("1-1", "ttyACM0", "abcd", "1235", "00", "");
+    CHECK(mc::baseInBootloader(bl.root));
+    FakeSys none;
+    CHECK(!mc::baseInBootloader(none.root));
+}

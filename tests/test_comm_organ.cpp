@@ -1152,3 +1152,32 @@ TEST(comm_p114_play_claim_released_after_stop_failure_and_end) {
     CHECK(afterFail);
     CHECK(afterStop);
 }
+
+// P1-13: a base left in its bootloader is reported (status field, console `status`) while it is not
+// connected, and not during a base update. The probe is a fake: no real USB is scanned.
+TEST(comm_p113_base_in_bootloader_is_reported) {
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    std::atomic<bool> inBl{false};
+    h.setBootloaderProbe([&] { return inBl.load(); });
+    h.setUpdating(true);                              // during a base update the bootloader is expected
+    CHECK(!h.connect("/nonexistent/midicontrol-p113-tty"));
+    inBl = true;
+    std::this_thread::sleep_for(2500ms);
+    const bool reportedDuringUpdate = h.baseInBootloader();
+    h.setUpdating(false);
+    const bool reported = waitFor([&] { return fieldBool(reg, status::Node::Base, "in_bootloader"); }, 3000);
+    std::string statusOut;
+    {
+        ConsoleExecutor exec(h, reg);
+        exec.execute("status", [&](const std::string& t) { statusOut += t; }, false);
+    }
+    inBl = false;
+    const bool cleared = waitFor([&] { return !fieldBool(reg, status::Node::Base, "in_bootloader"); }, 3000);
+    h.shutdown();
+    CHECK(!reportedDuringUpdate);
+    CHECK(reported);
+    CHECK(statusOut.find("USB bootloader") != std::string::npos);
+    CHECK(cleared);
+}

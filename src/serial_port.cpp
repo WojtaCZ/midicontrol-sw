@@ -215,6 +215,10 @@ std::optional<std::string> findMidiControlPort(const std::string& vid, const std
     return std::nullopt;
 }
 
+bool baseInBootloader(const std::string& sysRoot) {
+    return !candidates("abcd", "1235", sysRoot).empty();
+}
+
 std::optional<std::string> findMidiControlLogPort(const std::string& vid, const std::string& pid, const std::string& sysRoot) {
     const auto all = candidates(vid, pid, sysRoot);
     for (const auto& t : all) {
