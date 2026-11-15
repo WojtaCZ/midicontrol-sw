@@ -158,6 +158,8 @@ if(RTMIDI_FOUND)
         tests/test_main.cpp
         tests/test_comm_organ.cpp
         src/comm.cpp
+        src/console_exec.cpp
+        src/firmware_update.cpp
         src/player.cpp
         src/midi_ports.cpp
     )

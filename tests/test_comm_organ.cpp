@@ -4,6 +4,7 @@
 // PacketId per source) and answers GET_STATUS with STATUS_RESP [ble, ssr, disp, pc].
 #include "test_framework.hpp"
 #include "midicontrol/comm.hpp"
+#include "midicontrol/console_exec.hpp"
 #include "midicontrol/config.hpp"
 #include "midicontrol/status.hpp"
 #include "midicontrol/log.hpp"
@@ -1037,4 +1038,40 @@ TEST(comm_p110_indicator_clear_only_after_the_pc_set_it) {
     CHECK_EQ(idleClears, size_t(0));
     CHECK_EQ(stopClears, size_t(1));
     CHECK_EQ(againClears, size_t(0));
+}
+
+// P1-15: the console refuses "update" while a song plays, through the real ConsoleExecutor
+// (not just fwupload::updateRefusal). The image path never exists: an accepted update
+// fails reading it, before ENTER_BOOTLOADER or any USB lookup.
+TEST(comm_p115_console_refuses_update_while_playing) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    const std::string missing = "/nonexistent/midicontrol-p115/base.bin";
+    std::string playingOut, idleOut;
+    {
+        ConsoleExecutor exec(h, reg);
+        CHECK(!h.playSong("406A").has_value());
+        CHECK(waitFor([&] { return h.isPlaying(); }, 15000));
+        const auto r1 = exec.execute("update base " + missing, [&](const std::string& t) { playingOut += t; }, false);
+        CHECK(r1 == console::ExecResult::Failed);
+        h.stopSong();
+        CHECK(waitFor([&] { return !h.isPlaying(); }, 5000));
+        const auto r2 = exec.execute("update base " + missing, [&](const std::string& t) { idleOut += t; }, false);
+        CHECK(r2 == console::ExecResult::Failed);
+    }
+    const size_t enterBl = [&] {
+        size_t n = 0;
+        for (const auto& m : base.log()) if (m.type == MsgType::ENTER_BOOTLOADER) ++n;
+        return n;
+    }();
+    h.shutdown();
+    CHECK(playingOut.find("refused: a song is playing") != std::string::npos);
+    CHECK(idleOut.find("refused") == std::string::npos);      // idle: accepted, then the file is missing
+    CHECK(idleOut.find("FAILED") != std::string::npos);
+    CHECK_EQ(enterBl, size_t(0));
 }
