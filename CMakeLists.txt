@@ -189,3 +189,6 @@ else()
     message(WARNING "RtMidi not found - skipping the 'midicontrol' app target "
                     "(core library and tests will still build).")
 endif()
+
+# Fuzz targets + seeded fallback (tests/fuzz); libFuzzer binaries only with -DMIDICONTROL_FUZZ=ON.
+add_subdirectory(tests/fuzz)
