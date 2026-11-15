@@ -69,7 +69,7 @@ class Rig:
         self.units = {}
         self.state = {"api": {}, "swd": {}, "screen": {}}
         self._seq = 0
-        self.key_stats = {"keys": 0, "timeouts": 0, "rejected": 0, "ack_ms": []}
+        self.key_stats = {"keys": 0, "timeouts": 0, "rejected": 0, "wakes": 0, "ack_ms": []}
 
     # ---------------------------------------------------------------- timeline
     def _file(self, name):
@@ -409,12 +409,29 @@ class Rig:
             self.ev("tap_counts", **self.tap.counts, notes_on=len(self.tap.notes_on))
 
     # ---------------------------------------------------------------- inputs
+    def oled_sleeping(self):
+        """Remote OLED asleep (30 s idle). The firmware then takes the next key as a wake press only and drops it."""
+        a = swd.symbols("remote")["Oled::sleeping"][0]
+        return bool((self.units["remote"].read32(a & ~3) >> (8 * (a & 3))) & 0xFF)
+
     def key(self, name, timeout=2.0):
+        """One remote key; wakes the OLED first (with BACK, which a sleeping remote swallows) so `name` is not lost."""
+        if self.units.get("remote") is None:
+            raise RuntimeError("key() needs SWD (swd_mode != off)")
+        if self.oled_sleeping():
+            self.key_stats["wakes"] += 1
+            self.ev("oled_wake", key=name)
+            self._key("BACK", timeout)
+            end = time.monotonic() + 1.0
+            while self.oled_sleeping() and time.monotonic() < end:
+                time.sleep(0.01)
+            time.sleep(0.05)
+        return self._key(name, timeout)
+
+    def _key(self, name, timeout=2.0):
         """One remote key through the RAM mailbox; True when the firmware echoed the word."""
         k = KEYS[name] if isinstance(name, str) else name
-        rem = self.units.get("remote")
-        if rem is None:
-            raise RuntimeError("key() needs SWD (swd_mode != off)")
+        rem = self.units["remote"]
         a_key, a_ack = swd.symbols("remote")["mcTestKey"][0], swd.symbols("remote")["mcTestKeyAck"][0]
         self._seq = (self._seq + 1) & 0xFFFF or 1
         w = 0xA5000000 | (self._seq << 8) | k

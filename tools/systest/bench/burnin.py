@@ -44,7 +44,7 @@ class Monitor(threading.Thread):
 
     def __init__(self, r):
         super().__init__(daemon=True, name="monitor")
-        self.r, self.stop_ev = r, threading.Event()
+        self.r, self.stop_ev, self.ready = r, threading.Event(), threading.Event()
         self.windows = []
         self.c = {"kicks_total": 0, "kicks_outside_windows": 0, "restarts": 0, "restarts_in_window": 0,
                   "unexpected_resets": 0, "expected_resets": 0, "zombies": 0, "zombie_s_max": 0.0, "pc_died": 0,
@@ -122,6 +122,8 @@ class Monitor(threading.Thread):
                         self.c["restarts"] += dr
                         self.note("restart", n=dr)
             last[u] = {k: d.get(k) for k in ("ticks", "staleKicks", "staleRestarts")}
+        if "base" in last and "remote" in last:
+            self.ready.set()  # reset detection needs one sample of each unit before the first action
 
     def zombie(self, since):
         b, rm = self.r.state["swd"].get("base", {}), self.r.state["swd"].get("remote", {})
@@ -402,6 +404,8 @@ class Burn:
             self.mon.start()
             if not r.pc_line("Remote state resynced", 40, 0):
                 print("WARN: no resync seen at start", flush=True)
+            if not self.mon.ready.wait(15):
+                print("WARN: monitor has no SWD baseline of both units", flush=True)
             A.cleanup(self.ctx)
             self.summary()
             next_ck = time.monotonic() + 1800
