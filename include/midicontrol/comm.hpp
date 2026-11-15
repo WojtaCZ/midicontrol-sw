@@ -83,10 +83,12 @@ public:
     // Synchronous reliable send: transmits the packet and blocks until a matching
     // ACK arrives (true) or a NAK / the retry budget is exhausted (false). Used by
     // the firmware-update flow, which needs per-chunk confirmation. Does not use
-    // the background _pending retry machinery.
+    // the background _pending retry machinery. The defaults are the protocol's retry budget
+    // (RETRY_TIMEOUT_MS, MAX_RETRIES retries after the first send); the firmware updater passes its own.
     bool sendReliable(uint8_t dest, mc::protocol::MsgType type,
-                      const std::vector<uint8_t>& payload, int timeoutMs = 600,
-                      int maxRetries = 5);
+                      const std::vector<uint8_t>& payload,
+                      int timeoutMs = mc::protocol::RETRY_TIMEOUT_MS,
+                      int maxRetries = mc::protocol::MAX_RETRIES);
 
     // FW_UPDATE_STATUS mailbox (firmware updater). Status packets are ACKed by
     // the dispatcher; the latest code is kept here until taken.

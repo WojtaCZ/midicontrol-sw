@@ -976,3 +976,28 @@ TEST(comm_item4b_two_status_resps_after_one_resend_count_once) {
     CHECK_EQ(pairs, 1);
     CHECK_EQ(ids, size_t(3));             // original + re-send 1 + exactly one re-send for the pair
 }
+
+// P1-18: sendReliable's defaults are the protocol's retry budget (RETRY_TIMEOUT_MS x MAX_RETRIES retries), not
+// 600 ms x 5. Every production caller (firmware_update.cpp) passes explicit values, so only the defaults change.
+TEST(comm_p118_send_reliable_defaults_follow_the_protocol) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    base.remoteMode = FakeBase::RemoteDrop;           // every frame to the remote is lost
+    const size_t mark = base.log().size();
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ok = h.sendReliable(ADDR_REMOTE, MsgType::KEEPALIVE, {});
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    auto log = base.log();
+    h.shutdown();
+    size_t sends = 0;
+    for (size_t i = mark; i < log.size(); ++i)
+        if (log[i].dest == ADDR_REMOTE && log[i].type == MsgType::KEEPALIVE) ++sends;
+    CHECK(!ok);
+    CHECK_EQ(sends, size_t(1 + mc::protocol::MAX_RETRIES));
+    CHECK(ms >= (1 + mc::protocol::MAX_RETRIES) * mc::protocol::RETRY_TIMEOUT_MS - 50);
+    CHECK(ms < (2 + mc::protocol::MAX_RETRIES) * mc::protocol::RETRY_TIMEOUT_MS);
+}
