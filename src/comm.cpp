@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <ctime>
+#include <random>
 #include <sstream>
 
 #include "midicontrol/diag_api.hpp"
@@ -317,6 +318,19 @@ bool CommHandler::tryReopen() {
 // ---------------------------------------------------------------------------
 // Sending
 // ---------------------------------------------------------------------------
+
+uint8_t CommHandler::initialPacketId() {
+    uint32_t seed = 0;
+    try {
+        std::random_device rd;
+        seed = rd();
+    } catch (...) {
+        // no entropy source: the clock below still differs between restarts
+    }
+    seed ^= static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+    seed ^= static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count() >> 10);
+    return static_cast<uint8_t>(seed ^ (seed >> 8) ^ (seed >> 16) ^ (seed >> 24));
+}
 
 uint8_t CommHandler::nextPacketId() { return _packetId.fetch_add(1); }
 

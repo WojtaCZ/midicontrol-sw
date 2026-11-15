@@ -204,7 +204,11 @@ private:
     SerialPort _serial;
     mc::protocol::Parser _parser;
     std::unique_ptr<Dispatcher> _dispatcher;
-    std::atomic<uint8_t> _packetId{0};
+    // Fast PC restart: the base de-duplicates by the last PacketId per source, so every
+    // process starts at a random id (a restart repeating the old ids could have its first
+    // command dropped as a duplicate). Two processes still collide with p = 1/256.
+    std::atomic<uint8_t> _packetId{initialPacketId()};
+    static uint8_t initialPacketId();
 
     std::mutex _mutex;  // guards _serial, _pending
     std::map<uint8_t, Pending> _pending;

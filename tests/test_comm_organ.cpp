@@ -427,3 +427,28 @@ TEST(comm_pcc3_unconfirmed_on_is_not_reasserted_after_reconnect) {
     CHECK(log2.size() > 0);
     CHECK_EQ(countSetV(log2, 1), size_t(0));
 }
+
+// Fast PC restart: the base de-duplicates by the last PacketId per source. If every PC process starts its ids
+// at 0, a restarted PC repeats the old process's ids and the base can drop its first real command as a
+// "duplicate" (ACK, not executed). The first id must differ between processes (random seed).
+TEST(comm_fast_restart_packet_ids_do_not_restart_at_the_same_value) {
+    std::vector<int> firstIds;
+    for (int i = 0; i < 4; ++i) {
+        FakeBase base;
+        status::StatusRegistry reg([] { return int64_t(0); });
+        Config cfg = testConfig();
+        CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+        CHECK(h.connect(base.path()));
+        std::this_thread::sleep_for(300ms);
+        auto log = base.log();
+        h.shutdown();
+        firstIds.push_back(log.empty() ? -1 : log.front().pid);
+    }
+    std::cout << "  first PacketIds:";
+    for (int id : firstIds) std::cout << " " << id;
+    std::cout << "\n";
+    bool allSame = true;
+    for (int id : firstIds) allSame = allSame && id == firstIds.front();
+    CHECK(firstIds.front() >= 0);
+    CHECK(!allSame);  // random seeds: all 4 equal by chance with p = 1/256^3
+}
