@@ -828,10 +828,27 @@ void CommHandler::noteRx(const Packet& pkt) {
             bool dirty;
             {
                 std::lock_guard<std::mutex> lk(_resyncMutex);
-                if (!wasLink) _remoteDirty = true;
+                if (!wasLink) {
+                    _remoteDirty = true;
+                    _lastRemoteBootId.reset();  // a new stretch: the first id is only stored
+                }
+                // A2 (protocol v2): a 7 B STATUS_RESP (v1 base: 4 B, so this never fires) carries the remote's boot id.
+                // A changed id is a reboot shorter than the status poll (no ble 0->1 edge): resync like an edge.
+                if (pkt.payload.size() >= 7 && (pkt.payload[4] & 0x01) != 0) {
+                    const uint16_t id = static_cast<uint16_t>(pkt.payload[5] | (pkt.payload[6] << 8));
+                    if (_lastRemoteBootId && *_lastRemoteBootId != id) {
+                        mc::log::info(Node::Controller, "Remote rebooted (boot id " + std::to_string(*_lastRemoteBootId) + " -> " +
+                                                            std::to_string(id) + ")");
+                        _remoteDirty = true;
+                    }
+                    _lastRemoteBootId = id;
+                }
                 dirty = _remoteDirty;
             }
             if (dirty && !_resyncQueued.exchange(true)) post({Command::Kind::RemoteResync, {}, {}, 0});
+        } else {
+            std::lock_guard<std::mutex> lk(_resyncMutex);
+            _lastRemoteBootId.reset();
         }
         // Item 4b: judged by the generation of the GET_STATUS it answers (FIFO; the base answers in order).
         // A repeat of the last STATUS_RESP (same PacketId) or an answer with no request left is not authoritative.
@@ -938,6 +955,10 @@ void CommHandler::clearInfo(Node node) {
 
 void CommHandler::clearBaseReport() {
     _remoteLink.store(false);
+    {
+        std::lock_guard<std::mutex> lk(_resyncMutex);
+        _lastRemoteBootId.reset();
+    }
     _ssrReported.store(-1);
     for (const char* key : {"status_ble", "status_relay", "status_display", "status_pc", "status_ms"}) {
         _status.set(Node::Base, key, std::monostate{});

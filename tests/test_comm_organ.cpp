@@ -53,6 +53,8 @@ public:
     std::atomic<bool> ssr{false};
     std::atomic<int> droppedOff{0};
     std::atomic<bool> ble{false};               // STATUS_RESP ble byte
+    std::atomic<int> bootId{-1};                // >= 0: STATUS_RESP is 7 B (protocol v2) with this remote boot id; -1: 4 B (v1 base)
+    std::atomic<bool> bootIdValid{true};        // flags bit0 of the 7 B form
     // Packets to the remote (P1-9): the remote ACKs, the base NAKs UNREACHABLE, or the frame is lost.
     enum RemoteMode { RemoteAck, RemoteUnreachable, RemoteDrop };
     std::atomic<int> remoteMode{RemoteAck};
@@ -114,6 +116,11 @@ private:
         if (p.msgType == MsgType::GET_STATUS) {
             ack(p);
             std::vector<uint8_t> st{static_cast<uint8_t>(ble ? 1 : 0), static_cast<uint8_t>(ssr ? 1 : 0), 1, 1};
+            if (bootId >= 0) {
+                st.push_back(bootIdValid ? 1 : 0);
+                st.push_back(static_cast<uint8_t>(bootId & 0xFF));
+                st.push_back(static_cast<uint8_t>(bootId >> 8));
+            }
             if (holdStatus) {
                 if (!_held) { _held = st; return; }
                 tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::STATUS_RESP, *_held));
@@ -1327,4 +1334,81 @@ TEST(comm_a1_peer_protocol_version_defaults_to_1_and_follows_info) {
     CHECK_EQ(h.peerProtocolVersion(status::Node::Base), 2);
     CHECK_EQ(h.peerProtocolVersion(status::Node::Controller), 1);  // no INFO from the remote
     h.shutdown();
+}
+
+// A2: remote boot id in STATUS_RESP (protocol v2). A reboot shorter than the status poll shows no ble 0->1 edge; the
+// changed id makes the PC resync the remote exactly once. The resync only has something to say while a song plays
+// (an idle PC already told the remote "stopped"), so the rig plays a song and counts SIGNAL_PLAYING.
+namespace {
+struct BootIdRig {
+    FakeBase base;
+    status::StatusRegistry reg{[] { return int64_t(0); }};
+    Config cfg = songConfig();
+    std::unique_ptr<CommHandler> h;
+    BootIdRig() {
+        base.ble = true;
+        h = std::make_unique<CommHandler>(cfg, [] { return fakePorts(); }, reg);
+        h->setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+        CHECK(h->connect(base.path()));
+        std::this_thread::sleep_for(300ms);
+        statusNow(*h);  // first ble=1 status: the PC-start resync, ACKed
+        CHECK(!h->playSong("406A").has_value());
+        CHECK(waitFor([&] { return h->isPlaying() && countType(base.log(), 0, MsgType::SIGNAL_ANCHOR) > 0; }, 15000));
+    }
+    // SIGNAL_PLAYING resends caused by the status that follows `setup`
+    size_t resendsAfter(const std::function<void()>& setup) {
+        const size_t m = base.log().size();
+        setup();
+        statusNow(*h);
+        return countType(base.log(), m, MsgType::SIGNAL_PLAYING);
+    }
+};
+}  // namespace
+
+TEST(comm_a2_old_base_four_bytes_never_resyncs) {
+    BootIdRig r;
+    CHECK_EQ(r.resendsAfter([] {}), size_t(0));
+    CHECK_EQ(r.resendsAfter([] {}), size_t(0));
+    r.h->shutdown();
+}
+TEST(comm_a2_same_boot_id_no_resync) {
+    BootIdRig r;
+    r.base.bootId = 0x1234;
+    CHECK_EQ(r.resendsAfter([] {}), size_t(0));  // first id: stored
+    CHECK_EQ(r.resendsAfter([] {}), size_t(0));  // same id
+    r.h->shutdown();
+}
+TEST(comm_a2_changed_boot_id_resyncs_exactly_once) {
+    BootIdRig r;
+    r.base.bootId = 0x1234;
+    CHECK_EQ(r.resendsAfter([] {}), size_t(0));
+    CHECK_EQ(r.resendsAfter([&] { r.base.bootId = 0x4321; }), size_t(1));  // reboot: SIGNAL_PLAYING again
+    CHECK_EQ(r.resendsAfter([] {}), size_t(0));                           // the new id is the reference now
+    r.h->shutdown();
+}
+TEST(comm_a2_first_id_after_link_up_only_stored) {
+    BootIdRig r;
+    r.base.bootId = 0x1111;
+    CHECK_EQ(r.resendsAfter([] {}), size_t(0));
+    r.h->shutdown();
+}
+TEST(comm_a2_id_change_with_ble0_does_nothing_and_forgets_reference) {
+    BootIdRig r;
+    r.base.bootId = 0x1234;
+    statusNow(*r.h);                                                       // stored
+    r.base.remoteMode = FakeBase::RemoteUnreachable;
+    r.base.ble = false;
+    CHECK_EQ(r.resendsAfter([&] { r.base.bootId = 0x4321; }), size_t(0));  // ble=0: ignored
+    r.base.remoteMode = FakeBase::RemoteAck;
+    CHECK_EQ(r.resendsAfter([&] { r.base.ble = true; }), size_t(1));       // the 0->1 edge resyncs (not the id change)
+    CHECK_EQ(r.resendsAfter([] {}), size_t(0));                           // id was just stored: no second resync
+    r.h->shutdown();
+}
+TEST(comm_a2_invalid_flag_ignores_the_id) {
+    BootIdRig r;
+    r.base.bootId = 0x1234;
+    r.base.bootIdValid = false;
+    CHECK_EQ(r.resendsAfter([] {}), size_t(0));
+    CHECK_EQ(r.resendsAfter([&] { r.base.bootId = 0x4321; }), size_t(0));  // valid=0: the id means nothing
+    r.h->shutdown();
 }

@@ -324,6 +324,7 @@ private:
     // A new PC process starts dirty and "may play": the remote can still show a song from the previous run.
     std::mutex _resyncMutex;
     bool _remoteDirty = true;
+    std::optional<uint16_t> _lastRemoteBootId;  // A2: remote boot id of the current ble=1 stretch (under _resyncMutex)
     bool _remoteMayPlay = true;      // the remote may think a song plays (cleared by an ACKed SIGNAL_STOPPED)
     std::set<uint8_t> _resyncAwait;  // pids of the current resync attempt
     std::string _lastAnchor;         // last SIGNAL_ANCHOR label of the current song
