@@ -24,6 +24,7 @@ namespace {
 
 constexpr int kStatusPollMs = 5000;     // GET_STATUS to the base while connected
 constexpr int kStatusAnswerMs = 2000;   // no STATUS_RESP by then = "not answered"
+constexpr int64_t kInfoWaitMs = 4000;  // A5: how long the "found on" startup decision waits for the base INFO_RESP
 constexpr int kMidiCheckMs = 10000;     // MIDI port re-discovery for the status page
 constexpr uint64_t kNoStatusGen = UINT64_MAX;     // Item 4b: a STATUS_RESP that answers no known GET_STATUS
 constexpr int64_t kStatusGenMaxAgeMs = 15000;     // Item 4b: a request unanswered this long is not answered later
@@ -1481,6 +1482,21 @@ void CommHandler::doStartupReset() {
     const int rep = _ssrReported.load();
     const auto ssr = rep < 0 ? mc::startup::Ssr::Unknown : (rep ? mc::startup::Ssr::On : mc::startup::Ssr::Off);
     auto due = _startupReset.due(since, ports.has_value(), ssr);
+    // A5: who switched the SSR on is in the base's INFO_RESP (ORGAN_SRC), polled once at link-up. Decide the
+    // "found on" case only after it arrived (or the base answered NAK / never answers within kInfoWaitMs).
+    int organSrc = -1;  // -1: unknown (v1 base, no tag, or no INFO yet)
+    if (due.armIdleOff) {
+        const auto snap = _status.snapshot();
+        const auto& bf = snap.node(Node::Base).fields;
+        const bool infoKnown = bf.count("info_ms") != 0 && !std::holds_alternative<std::monostate>(bf.at("info_ms"));
+        const auto unsup = bf.find("info_unsupported");
+        const bool infoNak = unsup != bf.end() && std::holds_alternative<bool>(unsup->second) && std::get<bool>(unsup->second);
+        if (!infoKnown && !infoNak && since < kInfoWaitMs) {
+            due.armIdleOff = false;  // try again on the next pass; the notes part (if due) goes ahead
+        } else if (const auto it = bf.find("organ_src"); it != bf.end()) {
+            if (const auto* v = std::get_if<int64_t>(&it->second)) organSrc = static_cast<int>(*v);
+        }
+    }
     mc::startup::Actions performed;
     if (due.allNotesOff) {
         std::string err;
@@ -1502,8 +1518,14 @@ void CommHandler::doStartupReset() {
     } else if (due.armIdleOff) {
         // Q1-1 b (owner 2026-11-14): a manual organ-on survives a PC start.
         armIdleOff();
-        mc::log::info(Node::Software, "Startup: organ found switched on; left on, idle power-off in " +
-                                          idleText(_config.organIdleOffMs) + ".");
+        // A5 (Q2-33): organ_src 1 = the PC's own power-on from a session that crashed (BE-4): not a manual switch-on,
+        // but _organClaimed stays false (nothing plays now). Today both cases use the same idle timer; the owner keys
+        // of B1/B3 split them (TODO B1/B3: PC-owned vs manual idle rule).
+        const char* srcName = organSrc == 1 ? "pc" : organSrc == 2 ? "menu" : organSrc == 3 ? "unknown" : "v1";
+        _status.set(Node::Base, "organ_start_source", std::string(srcName));
+        mc::log::info(Node::Software, std::string("Startup: organ found switched on ") +
+                                          (organSrc == 1 ? "by the PC (previous session)" : "(by hand or unknown)") +
+                                          "; left on, idle power-off in " + idleText(_config.organIdleOffMs) + ".");
         performed.armIdleOff = true;
     }
     _startupReset.done(performed);

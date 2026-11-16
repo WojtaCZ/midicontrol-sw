@@ -70,6 +70,7 @@ public:
     std::atomic<int> statusAnswers{0};
     std::atomic<int> statusPairs{0};
     std::atomic<int> protoVer{0};      // > 0: GET_INFO is answered with an INFO_RESP carrying PROTO_VER
+    std::atomic<int> organSrc{-1};     // >= 0: that INFO_RESP also carries ORGAN_SRC (A5); -1 = a v1 base (SSR tag only)
 
     std::vector<Rx> log() { std::lock_guard<std::mutex> lk(_m); return _log; }
 
@@ -133,9 +134,13 @@ private:
             ++statusAnswers;
             return;
         }
-        if (p.msgType == MsgType::GET_INFO && protoVer > 0) {
+        if (p.msgType == MsgType::GET_INFO) {
             ack(p);
-            tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::INFO_RESP, {0x08, 1, static_cast<uint8_t>(protoVer.load())}));
+            // A v1 base answers GET_INFO too (no PROTO_VER, no ORGAN_SRC); the SSR tag keeps the payload non-empty
+            std::vector<uint8_t> info{0x21, 1, static_cast<uint8_t>(ssr ? 1 : 0)};
+            if (protoVer > 0) info.insert(info.end(), {0x08, 1, static_cast<uint8_t>(protoVer.load())});
+            if (organSrc >= 0) info.insert(info.end(), {0x22, 1, static_cast<uint8_t>(organSrc.load())});
+            tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::INFO_RESP, info));
             return;
         }
         ack(p);
@@ -355,6 +360,81 @@ TEST(comm_q11b_ssr_on_at_start_notes_off_no_power_off_idle_armed) {
     CHECK_EQ(countSetV(log, 0), size_t(0));
     CHECK(ssr);
     CHECK(armed);
+}
+
+// A5 (Q2-33): ORGAN_SRC tells a PC-owned power-on (crashed session) from a manual one; a v1 base has no tag.
+namespace {
+std::string startSource(status::StatusRegistry& reg) {
+    auto snap = reg.snapshot();
+    auto& f = snap.node(status::Node::Base).fields;
+    auto it = f.find("organ_start_source");
+    if (it == f.end()) return {};
+    const auto* s = std::get_if<std::string>(&it->second);
+    return s ? *s : std::string{};
+}
+}  // namespace
+
+TEST(comm_a5_organ_src_pc_is_treated_as_own_idle_off_armed_not_claimed) {
+    FakeBase base;
+    base.ssr = true;
+    base.protoVer = 2;
+    base.organSrc = 1;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    mc::log::setRegistry(&reg);
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(8000ms);
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    const bool byPc = hasEvent(reg, status::Node::Software, "by the PC (previous session)");
+    const std::string src = startSource(reg);
+    auto log = base.log();
+    h.shutdown();
+    mc::log::setRegistry(nullptr);
+    CHECK(armed);
+    CHECK(byPc);
+    CHECK_EQ(src, std::string("pc"));
+    CHECK_EQ(countSetV(log, 0), size_t(0));
+}
+
+TEST(comm_a5_organ_src_menu_is_a_manual_switch_on_as_today) {
+    FakeBase base;
+    base.ssr = true;
+    base.protoVer = 2;
+    base.organSrc = 2;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    mc::log::setRegistry(&reg);
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(8000ms);
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    const bool byPc = hasEvent(reg, status::Node::Software, "by the PC (previous session)");
+    const std::string src = startSource(reg);
+    h.shutdown();
+    mc::log::setRegistry(nullptr);
+    CHECK(armed);
+    CHECK(!byPc);
+    CHECK_EQ(src, std::string("menu"));
+}
+
+TEST(comm_a5_v1_base_without_the_tag_behaves_as_before) {
+    FakeBase base;
+    base.ssr = true;   // protoVer 0, organSrc -1: INFO_RESP without PROTO_VER / ORGAN_SRC
+    status::StatusRegistry reg([] { return int64_t(0); });
+    mc::log::setRegistry(&reg);
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(8000ms);
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    const bool byPc = hasEvent(reg, status::Node::Software, "by the PC (previous session)");
+    const std::string src = startSource(reg);
+    h.shutdown();
+    mc::log::setRegistry(nullptr);
+    CHECK(armed);
+    CHECK(!byPc);
+    CHECK_EQ(src, std::string("v1"));
 }
 
 // The idle-off timer switches the organ off once it expires (short timer for the test).
