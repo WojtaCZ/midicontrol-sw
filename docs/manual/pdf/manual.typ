@@ -19,6 +19,11 @@
 }
 #show raw.where(block: true): set block(fill: luma(245), inset: 8pt, width: 100%)
 #set table(stroke: 0.5pt + luma(160), inset: 6pt, fill: (_, y) => if y == 0 { luma(235) })
+// OLED screenshots are 128x64 px: keep them small. Wider pictures set { width=... } in the Markdown.
+#set image(width: 45%)
+// pandoc wraps every table in a figure; let long tables run over page breaks.
+#show figure.where(kind: table): set block(breakable: true)
+#show table.cell: set par(justify: false)
 #show table.cell: set align(left)
 #show table.cell.where(y: 0): strong
 #set page(
@@ -47,11 +52,11 @@
   #v(28%)
   #text(28pt, weight: "bold", title)
   #v(4pt)
-  #text(15pt)[User manual]
+  #text(15pt)[Uživatelská příručka]
   // #v(2cm)
   // #image("/manual/docs/img/product.svg", width: 60%)
   #v(1fr)
-  #text(10pt)[Version #version #h(1fr) #date]
+  #text(10pt)[Verze #version #h(1fr) #date]
 ]
 
 #outline(depth: 2)
