@@ -1232,6 +1232,50 @@ TEST(comm_p110_indicator_clear_only_after_the_pc_set_it) {
     CHECK_EQ(againClears, size_t(0));
 }
 
+// A3: a v2 base gets the conditional clear [NPI_CLEAR_IF_OWN] (clear only if the base still shows our number),
+// a v1 base keeps the empty payload (it would ignore a 1-byte NPI and never clear).
+namespace {
+// Plays and stops once against a base answering GET_INFO with `protoVer` (0 = v1, no tag). Returns the payloads of
+// the NOW_PLAYING_INFO clears the base received after the first play update.
+std::vector<std::vector<uint8_t>> clearPayloadsAfterStop(int protoVer) {
+    FakeBase base;
+    base.protoVer = protoVer;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(1500ms);              // the INFO poll has answered
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] {
+        if (!h.isPlaying()) return false;
+        for (const auto& m : base.log()) if (m.type == MsgType::NOW_PLAYING_INFO && m.payload.size() == 5) return true;
+        return false;
+    }, 15000));
+    const size_t m1 = base.log().size();
+    h.stopSong();
+    std::this_thread::sleep_for(500ms);
+    std::vector<std::vector<uint8_t>> out;
+    auto log = base.log();
+    for (size_t i = m1; i < log.size(); ++i)
+        if (log[i].type == MsgType::NOW_PLAYING_INFO && log[i].payload.size() < 5) out.push_back(log[i].payload);
+    h.shutdown();
+    return out;
+}
+}  // namespace
+
+TEST(comm_a3_v2_base_gets_the_conditional_clear) {
+    const auto clears = clearPayloadsAfterStop(2);
+    CHECK_EQ(clears.size(), size_t(1));
+    if (clears.size() == 1) CHECK(clears[0] == std::vector<uint8_t>{0x01});
+}
+
+TEST(comm_a3_v1_base_keeps_the_empty_clear) {
+    const auto clears = clearPayloadsAfterStop(0);
+    CHECK_EQ(clears.size(), size_t(1));
+    if (clears.size() == 1) CHECK(clears[0].empty());
+}
+
 // P1-15: the console refuses "update" while a song plays, through the real ConsoleExecutor
 // (not just fwupload::updateRefusal). The image path never exists: an accepted update
 // fails reading it, before ENTER_BOOTLOADER or any USB lookup.

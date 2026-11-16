@@ -8,6 +8,7 @@
 namespace mc::display {
 
 using mc::protocol::NPI_BLANK;
+using mc::protocol::NPI_CLEAR_IF_OWN;
 using mc::protocol::NPI_DIGIT_BLANK;
 using mc::protocol::NPI_NO_CHANGE;
 
@@ -27,7 +28,7 @@ uint8_t encodeLetter(char c) {
 }  // namespace
 
 std::vector<uint8_t> encodeNowPlaying(const Update& u) {
-    if (u.clear) return {};
+    if (u.clear) return u.conditional ? std::vector<uint8_t>{NPI_CLEAR_IF_OWN} : std::vector<uint8_t>{};
 
     std::vector<uint8_t> out(5, NPI_NO_CHANGE);
 
@@ -66,9 +67,10 @@ std::vector<uint8_t> encodeNowPlaying(const Update& u) {
     return out;
 }
 
-Update clearUpdate() {
+Update clearUpdate(bool conditional) {
     Update u;
     u.clear = true;
+    u.conditional = conditional;
     return u;
 }
 

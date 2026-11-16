@@ -60,6 +60,8 @@ inline constexpr uint8_t MAX_SONG_CODE_LEN = 8;
 inline constexpr uint8_t NPI_NO_CHANGE   = 0xFF;  // field unchanged
 inline constexpr uint8_t NPI_BLANK       = 0xFE;  // blank the field (song number / verse)
 inline constexpr uint8_t NPI_DIGIT_BLANK = 0x0F;  // BCD nibble: blank digit
+// One-byte payload (protocol v2): clear the indicator only if this system wrote the number last.
+inline constexpr uint8_t NPI_CLEAR_IF_OWN = 0x01;
 
 }  // namespace mc::protocol
 

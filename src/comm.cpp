@@ -1241,8 +1241,11 @@ void CommHandler::displayClear() {
     // A clear that was not written (serial closed) leaves the flag set, so a later Stop still clears.
     if (!_displaySet.exchange(false)) return;
     bool sent = false;
+    // A3: a v2 base clears only if its number is still on the bus (a manual controller may have written after us);
+    // a v1 base would ignore the 1-byte form and never clear, so it keeps the empty payload.
+    const bool conditional = peerProtocolVersion(Node::Base) >= 2;
     sendPacket(Packet(ADDR_PC, ADDR_BASE, nextPacketId(), MsgType::NOW_PLAYING_INFO,
-                      mc::display::encodeNowPlaying(mc::display::clearUpdate())), &sent);
+                      mc::display::encodeNowPlaying(mc::display::clearUpdate(conditional))), &sent);
     if (!sent) _displaySet.store(true);
 }
 
