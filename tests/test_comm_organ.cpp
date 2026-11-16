@@ -67,6 +67,7 @@ public:
     std::atomic<int> lostStatusPid{-1};
     std::atomic<int> statusAnswers{0};
     std::atomic<int> statusPairs{0};
+    std::atomic<int> protoVer{0};      // > 0: GET_INFO is answered with an INFO_RESP carrying PROTO_VER
 
     std::vector<Rx> log() { std::lock_guard<std::mutex> lk(_m); return _log; }
 
@@ -123,6 +124,11 @@ private:
             }
             tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::STATUS_RESP, st));
             ++statusAnswers;
+            return;
+        }
+        if (p.msgType == MsgType::GET_INFO && protoVer > 0) {
+            ack(p);
+            tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::INFO_RESP, {0x08, 1, static_cast<uint8_t>(protoVer.load())}));
             return;
         }
         ack(p);
@@ -1279,4 +1285,46 @@ TEST(comm_p113_base_in_bootloader_is_reported) {
     CHECK(reported);
     CHECK(statusOut.find("USB bootloader") != std::string::npos);
     CHECK(cleared);
+}
+
+// Protocol v2 (A1): the first frame the PC sends after the port opens is a KEEPALIVE with its session nonce, before any
+// reliable frame; the nonce is non-zero and stays the same for the whole process.
+TEST(comm_a1_hello_keepalive_with_nonce_precedes_everything) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    h.organOn();                       // a reliable frame right after open
+    std::this_thread::sleep_for(2600ms);  // one more periodic KEEPALIVE
+    auto log = base.log();
+    h.shutdown();
+    CHECK(!log.empty());
+    CHECK(log[0].type == MsgType::KEEPALIVE);
+    CHECK_EQ(log[0].payload.size(), size_t(2));
+    const unsigned nonce = log[0].payload.size() == 2 ? (log[0].payload[0] | (log[0].payload[1] << 8)) : 0;
+    CHECK(nonce != 0);
+    int keepalives = 0;
+    for (auto& r : log) {
+        if (r.type != MsgType::KEEPALIVE) continue;
+        ++keepalives;
+        CHECK_EQ(r.payload.size(), size_t(2));
+        if (r.payload.size() == 2) CHECK_EQ(unsigned(r.payload[0] | (r.payload[1] << 8)), nonce);
+    }
+    CHECK(keepalives >= 2);
+}
+
+TEST(comm_a1_peer_protocol_version_defaults_to_1_and_follows_info) {
+    FakeBase base;
+    base.protoVer = 2;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK_EQ(h.peerProtocolVersion(status::Node::Base), 1);       // nothing known yet: v1
+    CHECK_EQ(h.peerProtocolVersion(status::Node::Controller), 1);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(1200ms);
+    CHECK_EQ(h.peerProtocolVersion(status::Node::Base), 2);
+    CHECK_EQ(h.peerProtocolVersion(status::Node::Controller), 1);  // no INFO from the remote
+    h.shutdown();
 }

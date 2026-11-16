@@ -28,6 +28,10 @@ inline constexpr uint8_t ESC_PERCENT     = 0x27;  // ESC 0x27 -> 0x25 (%)
 inline constexpr uint8_t FORBIDDEN_DOLLAR  = 0x24;  // $ - RN4870 command mode
 inline constexpr uint8_t FORBIDDEN_PERCENT = 0x25;  // % - RN4870 status delimiter
 
+// Protocol version (INFO tag PROTO_VER). Version 1 is implicit: a node without PROTO_VER is v1.
+// 2: PROTO_VER in INFO_RESP, KEEPALIVE session nonce, 8-id duplicate window.
+inline constexpr uint8_t PROTOCOL_VERSION = 2;
+
 // Node addresses.
 inline constexpr uint8_t ADDR_PC        = 0x01;
 inline constexpr uint8_t ADDR_BASE      = 0x02;

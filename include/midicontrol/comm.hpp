@@ -111,6 +111,8 @@ public:
     bool isPlaying() const;
     std::string sectionLabel() const;
     bool isConnected() const;
+    // Protocol version the node reported in its INFO_RESP (PROTO_VER); 1 while unknown or when the node does not send it.
+    int peerProtocolVersion(mc::status::Node node) const;
     bool isBaseAlive() const;
 
     // STATUS_RESP flags as the base reports them.
@@ -247,6 +249,11 @@ private:
     // command dropped as a duplicate). Two processes still collide with p = 1/256.
     std::atomic<uint8_t> _packetId{initialPacketId()};
     static uint8_t initialPacketId();
+    // Protocol v2: session nonce (non-zero, random per process) sent in every KEEPALIVE to the base. A restarted PC shows a
+    // different nonce, so base and remote forget the old PC's duplicate window even when the new PacketIds collide.
+    const uint16_t _sessionNonce{makeSessionNonce()};
+    static uint16_t makeSessionNonce();
+    void sendKeepalive();
 
     std::mutex _mutex;  // guards _serial, _pending
     std::map<uint8_t, Pending> _pending;

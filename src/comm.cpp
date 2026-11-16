@@ -160,12 +160,17 @@ CommHandler::~CommHandler() { shutdown(); }
 
 void CommHandler::start(SerialFinder finder, const std::string& devicePath) {
     _serialFinder = std::move(finder);
+    bool opened = false;
     if (!devicePath.empty()) {
         std::lock_guard<std::mutex> lk(_mutex);
         if (_serial.open(devicePath, 115200)) {
             _devicePath = devicePath;
-            _connected.store(true);
+            opened = true;
         }
+    }
+    if (opened) {
+        sendKeepalive();  // hello with the session nonce, before any reliable frame (_connected is still false)
+        _connected.store(true);
     }
     if (_connected.load()) {
         noteConnected(devicePath, false);
@@ -188,6 +193,7 @@ bool CommHandler::connect(const std::string& devicePath) {
         }
         _devicePath = devicePath;
     }
+    sendKeepalive();  // hello with the session nonce, before any reliable frame (_connected is still false)
     _connected.store(true);
     noteConnected(devicePath, false);
     startIoThreads();
@@ -331,6 +337,7 @@ bool CommHandler::tryReopen() {
     }
     _parser.reset();
     _dispatcher->reset();
+    sendKeepalive();  // hello with the session nonce, before any reliable frame
     _lastBaseKeepalive.store(Clock::now());
     _baseLostReported.store(false);
     _connected.store(true);
@@ -359,6 +366,34 @@ void CommHandler::noteStatusRequestLocked() {
     const int64_t now = steadyMs();
     while (!_statusGens.empty() && now - _statusGens.front().first > kStatusGenMaxAgeMs) _statusGens.pop_front();
     _statusGens.emplace_back(now, _setCurrentGen.load());
+}
+
+uint16_t CommHandler::makeSessionNonce() {
+    uint32_t seed = 0;
+    try {
+        std::random_device rd;
+        seed = rd();
+    } catch (...) {
+        // no entropy source: the clocks below still differ between restarts
+    }
+    seed ^= static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+    seed ^= static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count() >> 7);
+    const uint16_t n = static_cast<uint16_t>(seed ^ (seed >> 16));
+    return n == 0 ? uint16_t(1) : n;  // 0 means "no nonce" on the wire
+}
+
+void CommHandler::sendKeepalive() {
+    send(ADDR_BASE, MsgType::KEEPALIVE,
+         {static_cast<uint8_t>(_sessionNonce & 0xFF), static_cast<uint8_t>(_sessionNonce >> 8)});
+}
+
+int CommHandler::peerProtocolVersion(Node node) const {
+    const auto snap = _status.snapshot();
+    const auto& f = snap.node(node).fields;
+    const auto it = f.find("proto_ver");
+    if (it == f.end()) return 1;
+    const auto* v = std::get_if<int64_t>(&it->second);
+    return v && *v >= 1 ? static_cast<int>(*v) : 1;
 }
 
 uint8_t CommHandler::nextPacketId() { return _packetId.fetch_add(1); }
@@ -999,7 +1034,7 @@ void CommHandler::keepaliveLoop() {
     while (_running.load()) {
         _hbKeepalive.store(steadyMs());
         if (_connected.load() && !_updating.load()) {
-            send(ADDR_BASE, MsgType::KEEPALIVE);
+            sendKeepalive();
             auto silent = Clock::now() - _lastBaseKeepalive.load();
             if (silent > std::chrono::milliseconds(KEEPALIVE_LOSS_MS) &&
                 !_baseLostReported.exchange(true)) {
