@@ -228,5 +228,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 ### Cross-repo index
 - Protocol batch A1-A9 + version bump: midicontrol-protocol/TODO.md. Base C1-C11 + bench: midicontrol-fw/TODO.md.
   Remote D1-D12 + bench: midicontroller-fw/TODO.md. PC B1-B12, E1, E2, E4: this file. E3: both fw TODO.md.
-- Owner questions still open (asked by the agents, see VERIFY marks): D6 which remote action needs confirmation; A7 does STOP_SONG end a recording;
-  A3 should the PC-lost indicator clear also be conditional; C7 "Servis" submenu name.
+- Owner questions answered 2026-11-16 (follow-up, also in audit/OWNER-ANSWERS.md): D6 = confirm turning the organ off on the base
+  while playing/recording -> new base task C12 (nothing on the remote); A7 = base and remote behave as one (both show playing and
+  recording screens, both control playback, recording only from the base, remote Stop does not end a recording); A3 = PC-lost clear
+  is conditional too; C7 = "Servis" approved.
