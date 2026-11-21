@@ -172,6 +172,19 @@ TEST(dispatch_song_list_replies_to_requester_after_ack) {
     CHECK(isAck(r.sent.back(), ADDR_BASE, 9));
 }
 
+TEST(dispatch_song_list_offset_is_u16_le) {
+    // A9: 2-byte offset [lo, hi]; 1 byte and empty stay valid; more than 2 bytes is invalid
+    Rig r;
+    r.rx(ADDR_REMOTE, 1, MsgType::GET_SONG_LIST, {0x2C, 0x01});  // 300
+    r.rx(ADDR_REMOTE, 2, MsgType::GET_SONG_LIST, {0x00, 0x02});  // 512
+    r.rx(ADDR_REMOTE, 3, MsgType::GET_SONG_LIST, {0xFF});        // 255 (1 byte)
+    r.rx(ADDR_REMOTE, 4, MsgType::GET_SONG_LIST, {0xFF, 0xFF});  // 65535
+    CHECK(r.sink.listOffsets == (std::vector<size_t>{300, 512, 255, 65535}));
+    r.rx(ADDR_REMOTE, 5, MsgType::GET_SONG_LIST, {1, 0, 0});
+    CHECK_EQ(r.sink.listOffsets.size(), 4u);
+    CHECK(isNak(r.sent.back(), ADDR_REMOTE, 5, NakReason::INVALID_PAYLOAD));
+}
+
 TEST(dispatch_unknown_and_unsupported_types_nak_unknown_msg) {
     Rig r;
     r.rx(ADDR_BASE, 1, static_cast<MsgType>(0x7F));

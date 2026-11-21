@@ -103,12 +103,15 @@ void Dispatcher::handle(const Packet& pkt) {
             answer(_sink.addVerse());
             return;
         case MsgType::GET_SONG_LIST: {
-            if (pkt.payload.size() > 1) {
+            if (pkt.payload.size() > 2) {
                 answer(NakReason::INVALID_PAYLOAD);
                 return;
             }
             answer(std::nullopt);
-            size_t offset = pkt.payload.empty() ? 0 : pkt.payload[0];
+            // A9: offset is u16 LE; 1 byte (< 256) and empty (0) stay valid
+            size_t offset = pkt.payload.size() == 2
+                                ? static_cast<size_t>(pkt.payload[0] | (pkt.payload[1] << 8))
+                                : pkt.payload.empty() ? 0 : pkt.payload[0];
             auto page = _sink.songListPage(offset);
             if (!broadcast && _out.sendWithAck) {
                 _out.sendWithAck(pkt.source, MsgType::SONG_LIST_RESP, page);
