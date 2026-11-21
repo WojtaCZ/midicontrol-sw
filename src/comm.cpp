@@ -1186,6 +1186,11 @@ std::vector<uint8_t> CommHandler::songListPage(size_t offset) {
 // ---------------------------------------------------------------------------
 
 std::optional<NakReason> CommHandler::playSong(const std::string& rawCode) {
+    // A8: no song starts while a device is being updated (the sender gets NAK BUSY, the same code path as any busy PC)
+    if (auto busy = busyReason()) {
+        mc::log::info(Node::Software, "PLAY_SONG refused: firmware update in progress (BUSY)");
+        return busy;
+    }
     auto code = mc::songs::sanitizeCode(rawCode);
     if (!code) {
         mc::log::warn(Node::Software, "Invalid song code: \"" + rawCode + "\"");

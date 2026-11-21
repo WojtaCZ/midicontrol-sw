@@ -156,6 +156,15 @@ public:
     // keepalive and GET_STATUS continue.
     void pauseDiag(bool on);
 
+    // A8: a firmware update of ANY device (base: setUpdating, remote: pauseDiag) is running. The single check behind
+    // the BUSY refusal of playSong(); A7 (RECORD_SONG) extends busyReason() for its own refusals.
+    bool updateInProgress() const { return _updating.load() || _remotePaused.load(); }
+    // NakReason::BUSY while a command that starts playback or recording must be refused, otherwise empty.
+    std::optional<mc::protocol::NakReason> busyReason() const {
+        if (updateInProgress()) return mc::protocol::NakReason::BUSY;
+        return std::nullopt;
+    }
+
     // Tests only: the player writes its MIDI bytes here instead of opening an RtMidi port.
     void setMidiSinkForTest(Player::MidiSink sink) { _midiSinkForTest = std::move(sink); }
 

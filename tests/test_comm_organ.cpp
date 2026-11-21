@@ -1645,6 +1645,27 @@ TEST(comm_a4_no_transfer_nak_fails_at_once_with_a_clear_text) {
     CHECK(clear);
 }
 
+// A8: Play is refused with NAK BUSY while any device is updated (base: setUpdating, remote: pauseDiag), and works again
+// once the update has ended.
+TEST(comm_a8_play_refused_busy_during_update) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    CHECK(!h.updateInProgress());
+    h.setUpdating(true);
+    CHECK(h.updateInProgress());
+    CHECK(h.playSong("406A") == std::optional<NakReason>(NakReason::BUSY));
+    h.setUpdating(false);
+    h.pauseDiag(true);
+    CHECK(h.playSong("406A") == std::optional<NakReason>(NakReason::BUSY));
+    h.pauseDiag(false);
+    CHECK(!h.updateInProgress());
+    CHECK(!h.playSong("406A").has_value());
+    h.stopSong();
+    h.shutdown();
+}
 
 // ---- A6: SIGNAL_INFO [flags], SONG_HAS_SECTIONS ----
 namespace {
