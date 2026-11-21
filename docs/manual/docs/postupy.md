@@ -208,8 +208,7 @@ TODO: Jak dlouho trvá nabití a jak dlouho baterie vydrží? Jaká nabíječka?
 
 ## Po výpadku proudu { #postup-po-vypadku-proudu }
 
-1. Počkejte, až se zapne počítač a program `midicontrol`.
-   TODO: Spouští se program po zapnutí počítače sám (systemd, linger)? Ověřit u správce a doplnit.
+1. Počkejte, až se zapne počítač. Program `midicontrol` se v kontejneru Docker spustí sám, nikdo se nemusí přihlásit.
 2. Základna se po obnově napájení spustí sama. Ukáže úvodní obrazovku a za 3 s hlavní menu. Nastavení a spárovaný ovladač zůstanou. Nemusíte párovat.
    Dokud počítač neběží, je přes menu `Odpojeno`.
 3. **Napájení varhan je po výpadku vždy vypnuto.** Zapne ho počítač při přehrání další písně, nebo ručně v `Nastaveni`, `Napajeni varhan`.

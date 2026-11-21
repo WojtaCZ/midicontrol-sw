@@ -13,43 +13,62 @@ Varhaník ji ke službě nepotřebuje.
 
 ## Instalace programu na počítači { #instalace }
 
-Program běží jako uživatelská služba systemd. Základna se k počítači připojuje
-USB kabelem. Počítač zároveň vidí základnu jako sériový port a jako MIDI port
-„MIDIControl“. Pro nahrávání se používá program `arecordmidi`.
+Program běží vždy jako kontejner Docker. Samostatně přeložený program
+(uživatelská služba systemd) slouží jen vývojářům a nesmí běžet současně
+s kontejnerem: oba by držely sériový port základny i port 50118.
 
-Před začátkem: program je přeložený (`cmake --build build`). Uživatel, pod kterým
-služba poběží, musí patřit do skupiny pro sériový port (`uucp` nebo `dialout`)
-a do skupiny `audio`.
+Základna se k počítači připojuje USB kabelem. Počítač ji vidí jako sériový port
+a jako MIDI port „MIDIControl“. Kontejner používá síť počítače, `/dev` a zvukové
+zařízení ALSA.
 
-1. Nainstalujte program: `cmake --install build`. Do instalačního adresáře
-   (prefixu) se uloží `bin/midicontrol`, `share/midicontrol/config.conf.example`
-   a `lib/systemd/user/midicontrol.service`.
-2. Vytvořte složku pro konfiguraci: `mkdir -p ~/.config/midicontrol`.
-3. Zkopírujte vzorový soubor do ní, například
-   `cp /usr/local/share/midicontrol/config.conf.example ~/.config/midicontrol/config.conf`
-   (cesta závisí na prefixu).
-4. Upravte `config.conf`: nastavte `PlayFolder` a `RecordFolder`. Obě složky musí
-   existovat.
-5. Načtěte službu: `systemctl --user daemon-reload`.
-6. Spusťte a povolte službu: `systemctl --user enable --now midicontrol.service`.
-7. Povolte start bez přihlášení: `loginctl enable-linger $USER`.
-   Bez tohoto kroku se služba po zapnutí počítače sama nespustí.
-8. Zkontrolujte: `systemctl --user status midicontrol`. Webová stránka odpovídá na
+Před začátkem: na počítači (Linux, x86_64 nebo aarch64) je Docker Engine a
+plugin Docker Compose (`docker compose version` musí fungovat). Uživatel smí
+používat `docker` (skupina `docker`), nebo instalaci spustí přes `sudo`.
+
+1. Nainstalujte program jedním příkazem:
+   `curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-py/main/install.sh | sh`
+   Instalace vytvoří složku `/opt/midicontrol`, stáhne obraz a spustí dva
+   kontejnery: `midicontrol` (program) a `updater` (noční aktualizace).
+2. Zkontrolujte: `docker ps` ukazuje oba kontejnery. Webová stránka odpovídá na
    `http://<adresa počítače>:50118/`. Základna nemusí být při startu připojena.
+3. Písně (`.mid`) nakopírujte do `/opt/midicontrol/data/songs/`.
 
-Po úpravě konfigurace službu restartujte: `systemctl --user restart midicontrol`.
+Kontejnery se spouštějí samy po zapnutí počítače (`restart: always`), nikdo se
+nemusí přihlásit. Po pádu nebo zaseknutí Docker program spustí znovu. Při
+zastavení kontejneru čeká Docker až 5 minut, aby nepřerušil probíhající
+aktualizaci firmwaru.
 
-Služba se spouští příkazem `midicontrol --headless`. Systemd ji hlídá
-(`WatchdogSec=30`), po pádu nebo zaseknutí ji po 5 s spustí znovu
-(`Restart=always`, `RestartSec=5`).
+Co je kde:
 
-!!! warning
-    Docker zatím není součástí hlavní verze. Instalace přes Docker existuje jen na
-    nesloučené větvi `docker-deployment` a může se změnit. Tato kapitola ji
-    nepopisuje. TODO: Až bude větev sloučena, doplnit postup (instalace, aktualizace, zálohy).
-    Otázka pro majitele: kdy bude Docker sloučen a bude výchozí instalací?
+| Cesta | Obsah |
+|---|---|
+| `/opt/midicontrol/data/config.conf` | konfigurace (při prvním startu se zkopíruje vzor) |
+| `/opt/midicontrol/data/songs/` | písně a soubory rejstříků písní |
+| `/opt/midicontrol/data/recordings/` | nahrávky |
+| `/opt/midicontrol/data/firmware/` | soubory firmwaru pro příkaz `update` |
+| `/opt/midicontrol/data/diag/` | diagnostika a výsledek poslední aktualizace (`update-status.json`) |
+| `/opt/midicontrol/.env` | značka obrazu (`IMAGE_TAG`), okno aktualizací (`UPDATE_WINDOW`), `UPDATE_ENABLED` |
+
+Uvnitř kontejneru je složka `data` vidět jako `/data`. Cesty v příkazech konzole
+jsou cesty v kontejneru, například `update base /data/firmware/fw-update.bin`.
+
+Po úpravě konfigurace program restartujte: `docker restart midicontrol`.
+
+**Aktualizace.** Kontejner `updater` hledá nový obraz jen v nočním okně
+(výchozí 02:00 až 04:00). Program aktualizuje jen tehdy, když nehraje píseň,
+neběží nahrávání ani aktualizace firmwaru a varhany jsou vypnuté. Když nový
+program neprojde kontrolou zdraví, vrátí se předchozí verze. Hned aktualizovat:
+`docker exec updater midicontrol-updater --once`. Při `KeepPowerOn = true`
+zůstávají varhany zapnuté a noční aktualizace neproběhne.
+
+Podrobnosti (volby instalace, připnutí verze, ruční návrat, odinstalace, řešení
+potíží) jsou v souboru `docs/deployment.md` v repozitáři programu.
 
 ## Konfigurační soubor { #konfigurace }
+
+V kontejneru Docker program vždy používá `/opt/midicontrol/data/config.conf`
+(v kontejneru `/data/config.conf`, předává se parametrem `--config`). Pořadí
+hledání níže platí jen pro samostatně spuštěný program (vývoj).
 
 Program hledá soubor `config.conf` v tomto pořadí:
 
@@ -183,12 +202,12 @@ dnešní program to neumí. Který stav má příručka popisovat?
 
 ## Logy, konzole a diagnostika { #logy }
 
-**Log služby.** `journalctl --user -u midicontrol -f`. Každý příkaz z konzole se
-zapíše jako „console: <příkaz>“.
+**Log programu.** `docker logs -f midicontrol`. Každý příkaz z konzole se
+zapíše jako „console: <příkaz>“. Log aktualizací: `docker logs updater`.
 
-**Interaktivní konzole.** Spusťte `midicontrol` v terminálu. Program se připojí
-ke běžící službě přes řídicí soket `$XDG_RUNTIME_DIR/midicontrol.sock` (přístup
-jen pro vlastníka; záložní umístění `/tmp/midicontrol-<uid>/`). Zobrazí se
+**Interaktivní konzole.** Spusťte `midicontrol` v terminálu. Příkaz spustí
+konzoli uvnitř kontejneru a ta se připojí k běžícímu programu. Jeden příkaz
+bez interaktivní konzole: `midicontrol --cmd "status"`. Zobrazí se
 „MIDIControl - interactive control“ a výzva `> `. Příkaz `quit` konzoli odpojí, služba běží dál.
 Jedna instance programu smí běžet jen jednou (zámek `midicontrol.lock`).
 
@@ -231,10 +250,10 @@ Našel-li program při svém startu varhany zapnuté, nechá je zapnuté a vypne
 Repozitář neobsahuje žádný postup ani skript zálohování. Veškerý stav programu leží
 v těchto místech, a stačí tedy zálohovat je:
 
-- konfigurační soubor `config.conf`,
-- `PlayFolder` (soubory `.mid` a `.conf`; soubory `.conf` zapisuje webová stránka),
-- `RecordFolder` (nahrávky),
-- složku `Dir` z `[DIAG]` jen tehdy, chcete-li zachovat historii poruch.
+- konfigurační soubor `/opt/midicontrol/data/config.conf`,
+- `/opt/midicontrol/data/songs/` (soubory `.mid` a `.conf`; soubory `.conf` zapisuje webová stránka),
+- `/opt/midicontrol/data/recordings/` (nahrávky),
+- `/opt/midicontrol/data/diag/` jen tehdy, chcete-li zachovat historii poruch.
 
 TODO: Chce majitel doporučený postup nebo skript pro zálohování, a kam se má
 zálohovat? Otázka pro majitele.

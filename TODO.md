@@ -39,7 +39,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Goal: a service stop or reboot never kills an update in progress (remote update measured 152 s, base 13 s, docs/FAULTS.md:82).
 - Current code: packaging/midicontrol.service.in has no TimeoutStopSec (systemd default 90 s). src/main.cpp ~276-281: `control.stop()`, `web->stop()`, `exec.waitForUpload()`, then `handler.shutdown()`; ControlServer::stop (src/control_socket.cpp:77-87) waits for client commands, so a running update finishes.
 - Change: add `TimeoutStopSec=180` to the [Service] section (>= 180 s as owner said; VERIFY: 180 s is 18% over the 152 s measured; 300 s matches the manual's "up to 5 minutes" and is safer). Keep the wait in main.cpp. Make sure the wait is not bounded by a shorter internal timeout (VERIFY in exec.waitForUpload). Update docs/status-web-and-service.md:404 (mentions 90 s).
-- Depends on: nothing. Docker variant: VERIFY the worktree midicontrolpy-sw-docker compose file; it has no `stop_grace_period` (audit docker finding DK-1); add `stop_grace_period: 300s` there when that branch is merged.
+- Depends on: nothing. Docker variant: VERIFY the worktree midicontrolpy-sw-docker compose file; it has no `stop_grace_period` (audit docker finding DK-1); DONE 2026-11-21: `stop_grace_period: 300s` added to docker/compose.template.yaml at the merge.
 - Tests: no unit test. Add a check to a packaging test if one exists (VERIFY: grep tests/ for midicontrol.service); otherwise a smoke grep in tests/ that the unit contains TimeoutStopSec >= 180. Bench: stop the service during a remote update.
 - Manual/facts: postupy.md:190 and ovladac.md:360 (M-update-time: "up to 5 minutes", see E1); sprava.md service chapter (stop waits for update).
 - Risk / open points: SIGKILL after the timeout still kills a hung update; the bootloader recovery stays the fallback.
@@ -179,8 +179,8 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
   - zakladna.md:333 and postupy.md:146 -> M-recording-start: recording starts only from the base (`Nahraj`); no remote record button.
   - zakladna.md:405 and :417 -> M-update-risk: organists are told not to unplug; the PB1 recovery steps go only into sprava.
   - postupy.md:144 and sprava.md:179 -> M-recording-to-song: the admin copies/renames the recording into the songs folder under a song code (example uses B9).
-  - postupy.md:212 -> M-autostart: yes, describe the systemd user service + linger (sprava).
-  - sprava.md:49 -> M-docker: write the Docker procedure after the merge (Q2-31); marker STAYS until then.
+  - postupy.md:212 -> M-autostart: DONE 2026-11-21, the Docker container starts by itself (restart: always).
+  - sprava.md:49 -> M-docker: DONE 2026-11-21, Docker procedure written at the merge; Docker is the only production install.
   - sprava.md:95 -> M-programoffset: marker STAYS (bench check of ProgramOffset -1).
   - sprava.md:156 -> M-default-registration: replace with the default-registration behaviour after B8.
   - sprava.md:239 -> M-backups: delete the TODO; do not document backups.

@@ -5,7 +5,7 @@ The PC player (`midicontrol`) runs unattended, serves a status page with a Stops
 - Design (the binding spec): [`superpowers/specs/2026-10-19-status-web-design.md`](superpowers/specs/2026-10-19-status-web-design.md)
 - Implementation plan: [`superpowers/plans/2026-10-19-status-web.md`](superpowers/plans/2026-10-19-status-web.md)
 
-> **Status (2026-11-14):** implemented and merged to `main`. The web firmware update, its busy answers and the base reconnect were re-tested on the bench on 2026-11-12 (`FAULTS.md` 2.1). The rest of the [Bench checklist](#bench-checklist-not-run-yet) (systemd watchdog kill, port squatter, `record`) has not been run. On `main` the service is the systemd user unit described here; the unmerged branch `docker-deployment` proposes a Docker container as production instead (see `CLAUDE.md`).
+> **Status (2026-11-14):** implemented and merged to `main`. The web firmware update, its busy answers and the base reconnect were re-tested on the bench on 2026-11-12 (`FAULTS.md` 2.1). The rest of the [Bench checklist](#bench-checklist-not-run-yet) (systemd watchdog kill, port squatter, `record`) has not been run. Production runs the daemon as the Docker deployment (`docs/deployment.md`, merged 2026-11-21); the systemd user unit described here is for developers only. The status page, console and behaviour are the same in both.
 
 ---
 

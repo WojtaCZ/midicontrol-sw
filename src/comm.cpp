@@ -1189,7 +1189,9 @@ void CommHandler::stopSong(uint8_t requester) {
 std::optional<NakReason> CommHandler::startRecording(uint8_t requester) {
     mc::log::info(Node::Software, "RECORD_SONG start from " + nodeName(requester));
     if (auto busy = busyReason()) {
-        mc::log::info(Node::Software, "RECORD_SONG refused (BUSY)");
+        mc::log::info(Node::Software, std::string("RECORD_SONG refused: ") +
+                                          (updateInProgress() ? "firmware update in progress" : "recording in progress") +
+                                          " (BUSY)");
         return busy;
     }
     bool playBusy = isPlaying();
@@ -1279,7 +1281,10 @@ std::vector<uint8_t> CommHandler::songListPage(size_t offset) {
 std::optional<NakReason> CommHandler::playSong(const std::string& rawCode) {
     // A8: no song starts while a device is being updated (the sender gets NAK BUSY, the same code path as any busy PC)
     if (auto busy = busyReason()) {
-        mc::log::info(Node::Software, "PLAY_SONG refused: firmware update in progress (BUSY)");
+        // Name the real cause: a recording blocks a song as well as an update does (owner: never both at once).
+        mc::log::info(Node::Software, std::string("PLAY_SONG refused: ") +
+                                          (updateInProgress() ? "firmware update in progress" : "recording in progress") +
+                                          " (BUSY)");
         return busy;
     }
     auto code = mc::songs::sanitizeCode(rawCode);

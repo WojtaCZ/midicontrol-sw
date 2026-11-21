@@ -174,7 +174,7 @@ the details.
 
 - The `lib/protocol` submodule is not bumped in either firmware repo. The new `INDICATOR-BUS.md` is on protocol `main`
   only.
-- The `docker-deployment` branch of `midicontrolpy-sw` (worktree `midicontrolpy-sw-docker`) is not merged. CI first run
-  and the bench test are pending.
+- The `docker-deployment` branch of `midicontrolpy-sw` is merged into `main` (2026-11-21); Docker is the production
+  deployment. CI first run and the bench test (`docs/bench-acceptance-docker.md`) are pending.
 - Several repos have uncommitted changes that are not part of the doc work: generated `inc/git.hpp`, submodule pointers,
   KiCad caches, and `songs/406B.conf`. Ask the owner before you commit or discard them.

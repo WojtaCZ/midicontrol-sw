@@ -32,7 +32,7 @@ Re-running the installer is safe for your files: an existing `.env` and `data/co
 
 | Path | Content |
 |---|---|
-| `/opt/midicontrol/compose.yaml` | two services: `midicontrol` (the player) and `updater` (`container_name: updater`, runs `midicontrol-updater`, host network, Docker socket mounted); both `restart: always` |
+| `/opt/midicontrol/compose.yaml` | two services: `midicontrol` (the player) and `updater` (`container_name: updater`, runs `midicontrol-updater`, host network, Docker socket mounted); both `restart: always`; the player has `stop_grace_period: 300s` so `docker stop` does not kill a running firmware update |
 | `/opt/midicontrol/.env` | `IMAGE_TAG`, `UPDATE_WINDOW=02:00-04:00`, `UPDATE_ENABLED` |
 | `/opt/midicontrol/data/` | `songs/`, `recordings/`, `diag/`, `firmware/`, `config.conf` (seeded from the image on first start); the container sees it as `/data` |
 | `/usr/local/bin/midicontrol` | wrapper that runs the console inside the container |
@@ -140,8 +140,9 @@ This runs `docker compose down` and removes `compose.yaml`, `.env` and the wrapp
 
 - **GHCR visibility (one time, by hand):** the first push creates the package as private. In GitHub (package settings, Change visibility) set `midicontrol-sw-py` to public, otherwise `docker pull` on the mini PC fails. The image carries the `org.opencontainers.image.source` label (set in the `Dockerfile`), which links the package to the repository; check that the package page shows the repository link after the first publish.
 - **Image tags** (CI, `.github/workflows/ci.yml`): pull request builds push nothing; push to `main` publishes `edge`; a tag `v1.2.3` publishes `stable`, `1.2.3` and `sha-<short>`.
+- **First release:** the installer's default tag is `stable`, which exists only after the first `v*` git tag is pushed (the repository has none yet). Until then install with `--tag edge`.
 - **Known limitation:** `--exit-on-stall` detects a stalled or deadlocked worker thread, NOT a frozen or SIGSTOPped whole process (the watchdog runs inside the process). The image HEALTHCHECK is informational; nothing restarts a frozen process. Spec section 6's `kill -STOP` test therefore does not apply to this design.
-- If `arecordmidi` dies by itself, `recording` stays true until a Stop; the updater then stays busy (the safe direction).
+- If `arecordmidi` dies by itself, `recording` turns false at the next recorder check (the player polls it), so the updater is not blocked forever.
 - `recording` and `fw_update_state` are in the status JSON under `nodes.software.fields` (`recording` is the player's recording state, `fw_update_state` is `running`, `done` or `failed`).
 - The image installs the Debian `docker-compose` package for the updater's `docker compose` calls; that this provides a working `docker compose` plugin is assumed and still to be verified on the bench.
 - Whether stopping the container ever powers the organ off is an open bench question (`docs/bench-acceptance-docker.md`).
