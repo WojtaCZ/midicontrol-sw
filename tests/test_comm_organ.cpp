@@ -81,6 +81,10 @@ public:
     std::atomic<int> remoteFw{0};
 
     std::vector<Rx> log() { std::lock_guard<std::mutex> lk(_m); return _log; }
+    // A7: a packet to the PC from the base or (forwarded by the base) from the remote.
+    void inject(uint8_t src, MsgType t, uint8_t pid, std::vector<uint8_t> payload = {}) {
+        tx(Packet(src, ADDR_PC, pid, t, std::move(payload)));
+    }
 
 private:
     void tx(const Packet& p) { auto b = encode(p); (void)!write(_master, b.data(), b.size()); }
@@ -1844,4 +1848,198 @@ TEST(comm_a6_signal_info_not_sent_when_version_becomes_known_v1) {
     h.stopSong();
     h.shutdown();
     CHECK_EQ(countType(log, 0, MsgType::SIGNAL_INFO), size_t(0));
+}
+
+// ---- A7: RECORD_SONG / SIGNAL_RECORDING ----
+namespace {
+size_t cntTo(const std::vector<Rx>& log, size_t from, MsgType t, uint8_t dest) {
+    size_t n = 0;
+    for (size_t i = from; i < log.size(); ++i) if (log[i].type == t && log[i].dest == dest) ++n;
+    return n;
+}
+// The PC's answer (ACK / NAK) to the packet with this id, or nullopt.
+std::optional<Rx> answerTo(const std::vector<Rx>& log, uint8_t pid) {
+    for (auto& r : log)
+        if ((r.type == MsgType::ACK || r.type == MsgType::NAK) && (r.dest == ADDR_BASE || r.dest == ADDR_REMOTE) && !r.payload.empty() &&
+            r.payload[0] == pid) return r;
+    return std::nullopt;
+}
+bool isAck(const std::optional<Rx>& r) { return r && r->type == MsgType::ACK; }
+bool isNakBusy(const std::optional<Rx>& r) {
+    return r && r->type == MsgType::NAK && r->payload.size() >= 2 && r->payload[1] == uint8_t(NakReason::BUSY);
+}
+struct RecRig {
+    FakeRecorder fr;
+    FakeBase base;
+    status::StatusRegistry reg{[] { return int64_t(0); }};
+    Config cfg;
+    std::unique_ptr<CommHandler> h;
+    uint8_t pid = 100;
+    explicit RecRig(int remoteVer, bool recorderExits = false, int baseVer = 2) : fr(recorderExits) {
+        cfg = infoConfig("401.mid");
+        cfg.recFolder = fr.recDir.string();
+        base.protoVer = baseVer;
+        base.ble = true;
+        h = std::make_unique<CommHandler>(cfg, [] { return recPorts(); }, reg);
+        h->setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+        CHECK(h->connect(base.path()));
+        CHECK(waitFor([&] { return h->peerProtocolVersion(status::Node::Base) == baseVer; }, 5000));
+        remoteKnown(*h, base, remoteVer);
+    }
+    uint8_t send(MsgType t, std::vector<uint8_t> payload = {}, uint8_t src = ADDR_BASE) {
+        base.inject(src, t, ++pid, std::move(payload));
+        return pid;
+    }
+    std::optional<Rx> answer(uint8_t id) {
+        waitFor([&] { return answerTo(base.log(), id).has_value(); }, 3000);
+        return answerTo(base.log(), id);
+    }
+};
+}  // namespace
+
+// Start: ACK first, then SIGNAL_RECORDING to the base and to a v2 remote.
+TEST(comm_a7_record_start_acks_then_signals_base_and_remote) {
+    RecRig r(2);
+    const size_t m = r.base.log().size();
+    const uint8_t id = r.send(MsgType::RECORD_SONG, {0x01});
+    CHECK(isAck(r.answer(id)));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), m, MsgType::SIGNAL_RECORDING, ADDR_REMOTE) > 0 &&
+                               cntTo(r.base.log(), m, MsgType::SIGNAL_RECORDING, ADDR_BASE) > 0; }, 5000));
+    CHECK_EQ(r.fr.lines().size(), size_t(1));
+    r.h->shutdown();
+}
+
+// An empty payload means start as well.
+TEST(comm_a7_record_empty_payload_is_start) {
+    RecRig r(2);
+    const uint8_t id = r.send(MsgType::RECORD_SONG);
+    CHECK(isAck(r.answer(id)));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), 0, MsgType::SIGNAL_RECORDING, ADDR_BASE) > 0; }, 5000));
+    r.h->shutdown();
+}
+
+TEST(comm_a7_record_invalid_payload_is_nak) {
+    RecRig r(2);
+    const uint8_t id = r.send(MsgType::RECORD_SONG, {0x05});
+    auto a = r.answer(id);
+    CHECK(a && a->type == MsgType::NAK && a->payload.size() >= 2 && a->payload[1] == uint8_t(NakReason::INVALID_PAYLOAD));
+    CHECK_EQ(r.fr.lines().size(), size_t(0));
+    r.h->shutdown();
+}
+
+// One recording at a time: the second start is NAK BUSY and spawns nothing; PLAY_SONG is BUSY too.
+TEST(comm_a7_second_start_and_play_are_busy_while_recording) {
+    RecRig r(2);
+    const uint8_t a = r.send(MsgType::RECORD_SONG, {0x01});
+    CHECK(isAck(r.answer(a)));
+    const uint8_t b = r.send(MsgType::RECORD_SONG, {0x01});
+    CHECK(isNakBusy(r.answer(b)));
+    CHECK(r.h->playSong("401") == std::optional<NakReason>(NakReason::BUSY));
+    std::this_thread::sleep_for(500ms);
+    CHECK_EQ(r.fr.lines().size(), size_t(1));
+    r.h->shutdown();
+}
+
+// No recording while a song plays.
+TEST(comm_a7_start_while_playing_is_busy) {
+    RecRig r(2);
+    CHECK(!r.h->playSong("401").has_value());
+    CHECK(waitFor([&] { return r.h->isPlaying(); }, 5000));
+    const uint8_t id = r.send(MsgType::RECORD_SONG, {0x01});
+    CHECK(isNakBusy(r.answer(id)));
+    CHECK_EQ(r.fr.lines().size(), size_t(0));
+    r.h->stopSong();
+    r.h->shutdown();
+}
+
+// RECORD_SONG [0] ends the recording: STOPPED to the base and the remote, the recorder is gone.
+TEST(comm_a7_record_stop_signals_stopped_to_both) {
+    RecRig r(2);
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x01}))));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), 0, MsgType::SIGNAL_RECORDING, ADDR_REMOTE) > 0; }, 5000));
+    const size_t m = r.base.log().size();
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x00}))));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_REMOTE) > 0 &&
+                               cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_BASE) > 0; }, 5000));
+    // a new recording is possible again
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x01}))));
+    CHECK(waitFor([&] { return r.fr.lines().size() == 2; }, 5000));
+    r.h->shutdown();
+}
+
+// RECORD_SONG [0] with nothing recording: ACK, nothing signalled.
+TEST(comm_a7_record_stop_without_recording_is_a_noop) {
+    RecRig r(2);
+    const size_t m = r.base.log().size();
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x00}))));
+    std::this_thread::sleep_for(500ms);
+    CHECK_EQ(cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_BASE), size_t(0));
+    CHECK_EQ(cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_REMOTE), size_t(0));
+    r.h->shutdown();
+}
+
+// A recorder that dies on its own ends the recording for the base and the remote.
+TEST(comm_a7_dead_recorder_signals_stopped) {
+    RecRig r(2, true);
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x01}))));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), 0, MsgType::SIGNAL_STOPPED, ADDR_BASE) > 0 &&
+                               cntTo(r.base.log(), 0, MsgType::SIGNAL_STOPPED, ADDR_REMOTE) > 0; }, 15000));
+    r.h->shutdown();
+}
+
+// A v1 remote gets no SIGNAL_RECORDING (it would NAK UNKNOWN_MSG); the base still does.
+TEST(comm_a7_v1_remote_gets_no_signal_recording) {
+    RecRig r(1);
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x01}))));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), 0, MsgType::SIGNAL_RECORDING, ADDR_BASE) > 0; }, 5000));
+    std::this_thread::sleep_for(500ms);
+    CHECK_EQ(cntTo(r.base.log(), 0, MsgType::SIGNAL_RECORDING, ADDR_REMOTE), size_t(0));
+    r.h->shutdown();
+}
+
+// Owner rule: a STOP_SONG from the remote does not end a recording (ACKed, ignored); only the base ends it.
+TEST(comm_a7_remote_stop_song_does_not_end_the_recording) {
+    RecRig r(2);
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x01}))));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), 0, MsgType::SIGNAL_RECORDING, ADDR_REMOTE) > 0; }, 5000));
+    const size_t m = r.base.log().size();
+    const uint8_t id = r.send(MsgType::STOP_SONG, {}, ADDR_REMOTE);
+    CHECK(waitFor([&] { return answerTo(r.base.log(), id).has_value(); }, 3000));
+    std::this_thread::sleep_for(800ms);
+    CHECK_EQ(cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_REMOTE), size_t(0));
+    CHECK_EQ(cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_BASE), size_t(0));
+    // still recording: a second start is BUSY
+    CHECK(isNakBusy(r.answer(r.send(MsgType::RECORD_SONG, {0x01}))));
+    // the base can end it
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x00}))));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_REMOTE) > 0; }, 5000));
+    r.h->shutdown();
+}
+
+// A STOP_SONG from the base (or the console) still ends a recording.
+TEST(comm_a7_base_stop_song_ends_the_recording) {
+    RecRig r(2);
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x01}))));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), 0, MsgType::SIGNAL_RECORDING, ADDR_REMOTE) > 0; }, 5000));
+    const size_t m = r.base.log().size();
+    r.send(MsgType::STOP_SONG, {}, ADDR_BASE);
+    CHECK(waitFor([&] { return cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_REMOTE) > 0 &&
+                               cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_BASE) > 0; }, 5000));
+    r.h->shutdown();
+}
+
+// Resync: the remote NAKed SIGNAL_RECORDING (unreachable); on the next ble=1 status the PC sends it again.
+TEST(comm_a7_resync_resends_signal_recording) {
+    RecRig r(2);
+    r.base.remoteMode = FakeBase::RemoteUnreachable;
+    CHECK(isAck(r.answer(r.send(MsgType::RECORD_SONG, {0x01}))));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), 0, MsgType::SIGNAL_RECORDING, ADDR_REMOTE) > 0; }, 5000));
+    std::this_thread::sleep_for(500ms);
+    r.base.remoteMode = FakeBase::RemoteAck;
+    const size_t m = r.base.log().size();
+    CHECK(waitFor([&] {
+        statusNow(*r.h);
+        return cntTo(r.base.log(), m, MsgType::SIGNAL_RECORDING, ADDR_REMOTE) > 0;
+    }, 10000));
+    r.h->shutdown();
 }

@@ -99,6 +99,20 @@ void Dispatcher::handle(const Packet& pkt) {
             answer(std::nullopt);
             _sink.stopSong(pkt.source);  // pause (0x01) is treated as stop
             return;
+        case MsgType::RECORD_SONG: {
+            // A7 (protocol v2, Base -> PC): [0x01] or empty starts, [0x00] stops. The PC enforces "one recording".
+            if (pkt.payload.size() > 1 || (pkt.payload.size() == 1 && pkt.payload[0] > 0x01)) {
+                answer(NakReason::INVALID_PAYLOAD);
+                return;
+            }
+            if (!pkt.payload.empty() && pkt.payload[0] == 0x00) {
+                answer(std::nullopt);
+                _sink.stopRecording(pkt.source);
+                return;
+            }
+            answer(_sink.startRecording(pkt.source));
+            return;
+        }
         case MsgType::REPLAY_ANCHOR:
             answer(_sink.addVerse());
             return;

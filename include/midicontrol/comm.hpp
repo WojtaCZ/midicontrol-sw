@@ -160,10 +160,8 @@ public:
     // the BUSY refusal of playSong(); A7 (RECORD_SONG) extends busyReason() for its own refusals.
     bool updateInProgress() const { return _updating.load() || _remotePaused.load(); }
     // NakReason::BUSY while a command that starts playback or recording must be refused, otherwise empty.
-    std::optional<mc::protocol::NakReason> busyReason() const {
-        if (updateInProgress()) return mc::protocol::NakReason::BUSY;
-        return std::nullopt;
-    }
+    // A7: also BUSY while a recording runs or starts (PLAY_SONG and RECORD_SONG both use it).
+    std::optional<mc::protocol::NakReason> busyReason();
 
     // Tests only: the player writes its MIDI bytes here instead of opening an RtMidi port.
     void setMidiSinkForTest(Player::MidiSink sink) { _midiSinkForTest = std::move(sink); }
@@ -180,16 +178,19 @@ private:
     };
 
     struct Command {
-        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset, IdleOff, RemoteResync } kind;
+        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset, IdleOff, RemoteResync, StopRecording } kind;
         std::string code;
         std::string path;
         uint64_t generation = 0;
+        uint8_t source = 0;  // Stop: the packet's source address (0 = local/console); A7: a remote Stop does not end a recording
     };
 
     // CommandSink (reader thread).
     std::optional<mc::protocol::NakReason> playSong(const std::string& code,
                                                     uint8_t requester) override;
     void stopSong(uint8_t requester) override;
+    std::optional<mc::protocol::NakReason> startRecording(uint8_t requester) override;
+    void stopRecording(uint8_t requester) override;
     std::optional<mc::protocol::NakReason> addVerse() override;
     std::vector<uint8_t> songListPage(size_t offset) override;
 
@@ -243,6 +244,18 @@ private:
     // displayClear() is a no-op otherwise. Kept across a serial loss: the base may still show the code.
     std::atomic<bool> _displaySet{false};
     void stopRecorder();
+    // A7: recordSong() = claimRecorder() + runRecorderClaimed(). startRecording() claims synchronously (so a second
+    // RECORD_SONG sees BUSY at once) and runs the warm-up and the spawn on _recordThread.
+    bool claimRecorder();
+    bool runRecorderClaimed();  // clears _recorderStarting when done
+    bool recordingActive();     // starting or alive
+    void signalRecordingStarted();
+    void signalRecordingEnded(bool remoteToo);  // idempotent
+    void sendBaseSignal(mc::protocol::MsgType type);  // SIGNAL_* straight to a protocol v2 base
+    std::atomic<bool> _recordingSignalled{false};  // SIGNAL_RECORDING went out and its end is still owed
+    bool _recordingRemoteSent = false;             // _resyncMutex: the remote got that SIGNAL_RECORDING
+    std::mutex _recordThreadMutex;
+    std::thread _recordThread;
     bool recorderAliveLocked();  // _recorderMutex held; forgets a recorder that exited on its own
 
     Config _config;
