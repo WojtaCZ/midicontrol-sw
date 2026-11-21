@@ -1,16 +1,16 @@
 # Bench acceptance: Docker deployment
 
-Run on the real mini PC with the real MIDIControl device, in this order (the first ones are the real risks). Fill the Result column (pass/fail, date, notes). Nothing here has been run yet.
+Run on the real mini PC with the real MIDIControl device, in this order (the first ones are the real risks). Fill the Result column (pass/fail, date, notes). Partly run on 2026-11-21 (see the Result column).
 
 ## Acceptance checks
 
 | # | Check | How | Result |
 |---|---|---|---|
-| 1 | Fresh install | Fresh Ubuntu + Docker (with the Compose plugin). Run the one-line installer. Status page up at `http://<host>:50118/`, device found (Base dot green). | |
+| 1 | Fresh install | Fresh Ubuntu + Docker (with the Compose plugin). Run the one-line installer. Status page up at `http://<host>:50118/`, device found (Base dot green). | PASS 2026-11-21, partial: owner's Manjaro dev PC (host Docker 29.8), not a fresh Ubuntu. Published `install.sh --tag edge` (image ba221f4, anonymous GHCR pull) with MC_PREFIX under the workspace and MC_WAIT_SECONDS=0. Both containers healthy, Base and Controller green, serial + log CDC + ALSA + remote resync work in the container. |
 | 2 | USB replug | Unplug and replug the USB cable. Device recovered without a container restart (`docker ps` uptime unchanged, `reconnects` +1). | |
-| 3 | Base firmware update | Update the base from the status page. It re-enumerates as `ABCD:1235` and the update completes inside the container; device returns as `ABCD:1234`. | |
-| 4 | Recording | `midicontrol --cmd record`, play, `stop`. `arecordmidi` writes a complete file to `/opt/midicontrol/data/recordings` (`/data/recordings`). | |
-| 5 | Stall restart (one worker thread) | Stall ONE worker thread while the process keeps running; see the method below. The container restarts within about 45 s (10 s heartbeat age + 5 s watchdog tick + 30 s limit); `docker inspect -f '{{.State.ExitCode}}' midicontrol` or `docker logs midicontrol` shows exit 70 and "a worker thread stalled for 30 s; exiting for a restart". | |
+| 3 | Base firmware update | Update the base from the status page. It re-enumerates as `ABCD:1235` and the update completes inside the container; device returns as `ABCD:1234`. | PASS 2026-11-21: `POST /api/firmware/base` (78144 B). ABCD:1234 -> 1235 -> 1234 in ~14 s, `fw_update_state` done, container not restarted. Controller dot briefly yellow (BLE link lost during the base reboot, reconnected and secured). |
+| 4 | Recording | `midicontrol --cmd record`, play, `stop`. `arecordmidi` writes a complete file to `/opt/midicontrol/data/recordings` (`/data/recordings`). | Partial 2026-11-21: `--cmd record` / `stop` through the wrapper wrote `/data/recordings/<time>.mid` (292 B, nothing played). Contents with real notes: owner's hands. File is `root:dev` 0644 (deletable over SSH, not editable). |
+| 5 | Stall restart (one worker thread) | Stall ONE worker thread while the process keeps running; see the method below. The container restarts within about 45 s (10 s heartbeat age + 5 s watchdog tick + 30 s limit); `docker inspect -f '{{.State.ExitCode}}' midicontrol` or `docker logs midicontrol` shows exit 70 and "a worker thread stalled for 30 s; exiting for a restart". || Not run 2026-11-21: freezing one thread from the dev container (ptrace from a privileged helper container) was refused by the session's permission policy. Needs the owner: host gdb method below, or allow the helper. |
 | 6 | Reboot | Reboot the PC without logging in. Both containers start, status page reachable. | |
 | 7 | Update guard and window | Publish a `stable` image while a song plays: nothing restarts. After playback ends, the organ is off and the window opens (or `docker exec updater midicontrol-updater --once`): it updates once. Check `update-status.json`. | |
 | 8 | Rollback | Publish a broken image. The health gate fails, the player returns to `:previous`, `update-status.json` shows `rolled_back` and the bad digest is not retried. | |
@@ -36,7 +36,7 @@ Attach in non-stop mode so only the chosen thread is stopped: start `sudo gdb`, 
 |---|---|---|
 | Device access | `device_cgroup_rules` (`c 166:*`, `c 188:*`, `c 116:*`, as in `docker/compose.template.yaml`) versus `privileged: true`; whether a host udev rule is also needed for stable `/dev/serial/by-id` names. Test with the bench kernel, including after a replug. | |
 | Lock and socket location | Does the container need `/run` or `XDG_RUNTIME_DIR` set? The player falls back to `/tmp/midicontrol-<uid>/` (lock and control socket). Code finding below. | |
-| Stopping the player and the organ | Does stopping the container (SIGTERM, `docker stop`, update recreate) ever power the organ off? If yes, the idle guard needs "organ off or not kept on" and the spec needs a user decision. | |
+| Stopping the player and the organ | Does stopping the container (SIGTERM, `docker stop`, update recreate) ever power the organ off? If yes, the idle guard needs "organ off or not kept on" and the spec needs a user decision. || Observation 2026-11-21: the player logs "Startup: organ power off" on every container start (so also after an update recreate or a stall restart). Shutdown behaviour on SIGTERM not yet checked. Owner decision needed. |
 
 ### Finding: stale control socket after `_Exit(70)` (code read, not run)
 
@@ -44,7 +44,6 @@ Attach in non-stop mode so only the chosen thread is stopped: start `sudo gdb`, 
 
 ## Not verified in CI or the dev container
 
-- The image build was never run locally (no Docker in the dev container); only CI will run it. The Dockerfile's `ctest` step is untested.
 - That the Debian `docker-compose` package provides a working `docker compose` plugin inside the image (used by the updater).
 - Self-update of the updater through the one-shot helper container (`docker run -d --rm --entrypoint docker ... compose up -d updater`).
 - The installer's port-ownership check with real `docker ps` and `ss` output (tests use fakes).
