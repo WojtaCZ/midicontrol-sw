@@ -51,7 +51,7 @@ world() {
     mkstatus idle false - false true > "$FAKE_DIR/status_rollback"
 }
 # shellcheck disable=SC2031 # loop() sets its own MC_SLEEP in a subshell on purpose
-export IMAGE=ghcr.io/wojtacz/midicontrol-sw-py IMAGE_TAG=stable MC_SLEEP=: MC_GATE_SECONDS=60 MC_GATE_POLL=5
+export IMAGE=ghcr.io/wojtacz/midicontrol-sw IMAGE_TAG=stable MC_SLEEP=: MC_GATE_SECONDS=60 MC_GATE_POLL=5
 
 run_update() { lib update_once > "$FAKE_DIR/log" 2>&1; echo $?; }
 calls_matching() { grep -c -- "$1" "$FAKE_DIR/calls"; }
@@ -137,7 +137,7 @@ check guard_tolerates_string_bools_and_garbage $r
 world; echo "sha256:old" > "$FAKE_DIR/registry_id"
 r=ok; rc=$(run_update)
 [ "$rc" = 10 ] || r=bad
-[ "$(calls_matching ' pull ghcr.io/wojtacz/midicontrol-sw-py:stable')" = 1 ] || r=bad
+[ "$(calls_matching ' pull ghcr.io/wojtacz/midicontrol-sw:stable')" = 1 ] || r=bad
 no_calls ' compose ' || r=bad; no_calls ' tag ' || r=bad; no_calls ' run ' || r=bad
 [ "$(ustat .result)" = nothing_new ] || r=bad
 [ "$r" = ok ] || { echo "  rc=$rc"; cat "$FAKE_DIR/calls"; }
@@ -189,7 +189,7 @@ check update_no_container_proceeds $r
 world; rm "$FAKE_DIR/status_after"   # new image never answers
 r=ok; rc=$(run_update)
 [ "$rc" = 13 ] || r=bad
-[ "$(calls_matching ' tag sha256:old ghcr.io/wojtacz/midicontrol-sw-py:previous$')" = 1 ] || r=bad
+[ "$(calls_matching ' tag sha256:old ghcr.io/wojtacz/midicontrol-sw:previous$')" = 1 ] || r=bad
 [ "$(calls_matching 'IMAGE_TAG=previous compose .* up -d midicontrol$')" = 1 ] || r=bad
 no_calls ' run ' || r=bad; no_calls 'up -d updater' || r=bad
 [ "$(cat "$FAKE_DIR/container")" = "sha256:old|true|0" ] || r=bad
@@ -250,11 +250,11 @@ r=ok; rc=$(run_update)
 order=$(grep -n -e ' pull ' -e ' tag ' -e 'up -d midicontrol$' -e ' run ' "$FAKE_DIR/calls" | cut -d: -f1 | tr '\n' ' ')
 [ "$(echo "$order" | wc -w)" = 4 ] || r=bad
 [ "$order" = "$(echo "$order" | tr ' ' '\n' | grep . | sort -n | tr '\n' ' ')" ] || r=bad
-[ "$(calls_matching ' tag sha256:old ghcr.io/wojtacz/midicontrol-sw-py:previous$')" = 1 ] || r=bad
+[ "$(calls_matching ' tag sha256:old ghcr.io/wojtacz/midicontrol-sw:previous$')" = 1 ] || r=bad
 [ "$(calls_matching "IMAGE_TAG=stable compose -p midicontrol --project-directory $MC_PREFIX -f $MC_PREFIX/compose.yaml up -d midicontrol$")" = 1 ] || r=bad
 no_calls 'IMAGE_TAG=previous' || r=bad
 selfup=$(grep ' run ' "$FAKE_DIR/calls")
-case "$selfup" in *"--entrypoint docker"*"/var/run/docker.sock:/var/run/docker.sock"*"$MC_PREFIX:$MC_PREFIX"*"ghcr.io/wojtacz/midicontrol-sw-py:stable compose -p midicontrol --project-directory $MC_PREFIX -f $MC_PREFIX/compose.yaml up -d updater") ;; *) r=bad ;; esac
+case "$selfup" in *"--entrypoint docker"*"/var/run/docker.sock:/var/run/docker.sock"*"$MC_PREFIX:$MC_PREFIX"*"ghcr.io/wojtacz/midicontrol-sw:stable compose -p midicontrol --project-directory $MC_PREFIX -f $MC_PREFIX/compose.yaml up -d updater") ;; *) r=bad ;; esac
 [ "$(tail -n 1 "$FAKE_DIR/calls")" = "$selfup" ] || r=bad
 [ "$(jq -r .result "$FAKE_DIR/status_at_selfupdate" 2>/dev/null)" = updated ] || r=bad
 [ "$(ustat .digest)" = sha256:new ] || r=bad

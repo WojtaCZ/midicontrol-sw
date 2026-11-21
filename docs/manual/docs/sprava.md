@@ -26,7 +26,7 @@ plugin Docker Compose (`docker compose version` musí fungovat). Uživatel smí
 používat `docker` (skupina `docker`), nebo instalaci spustí přes `sudo`.
 
 1. Nainstalujte program jedním příkazem:
-   `curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-py/main/install.sh | sh`
+   `curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw/main/install.sh | sh`
    Instalace vytvoří složku `/opt/midicontrol`, stáhne obraz a spustí dva
    kontejnery: `midicontrol` (program) a `updater` (noční aktualizace).
 2. Zkontrolujte: `docker ps` ukazuje oba kontejnery. Webová stránka odpovídá na

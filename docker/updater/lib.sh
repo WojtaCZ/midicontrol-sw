@@ -4,7 +4,7 @@
 # docker/tests/test_updater.sh. Installed as /usr/local/lib/midicontrol/lib.sh.
 #
 # Environment:
-#   IMAGE, IMAGE_TAG          image the app runs (default ghcr.io/wojtacz/midicontrol-sw-py:stable)
+#   IMAGE, IMAGE_TAG          image the app runs (default ghcr.io/wojtacz/midicontrol-sw:stable)
 #   UPDATE_WINDOW             "HH:MM-HH:MM" local time (default 02:00-04:00; may cross midnight)
 #   MC_PREFIX                 compose directory (default /opt/midicontrol)
 #   MC_DATA_DIR               data directory; the result goes to $MC_DATA_DIR/diag/update-status.json
@@ -183,7 +183,7 @@ write_status() {
     esac
     if jq -n --arg result "$1" --arg digest "${2:-}" --arg detail "${3:-}" \
         --arg failed "$wr_failed" --arg time "$(date -Iseconds)" \
-        --arg image "${IMAGE:-ghcr.io/wojtacz/midicontrol-sw-py}" --arg tag "${IMAGE_TAG:-stable}" \
+        --arg image "${IMAGE:-ghcr.io/wojtacz/midicontrol-sw}" --arg tag "${IMAGE_TAG:-stable}" \
         '{result: $result, time: $time, image: $image, tag: $tag,
           digest: (if $digest == "" then null else $digest end),
           failed_digest: (if $failed == "" then null else $failed end),
@@ -234,7 +234,7 @@ self_update() {
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v "${MC_PREFIX:-/opt/midicontrol}:${MC_PREFIX:-/opt/midicontrol}" \
         -w "${MC_PREFIX:-/opt/midicontrol}" \
-        -e IMAGE="${IMAGE:-ghcr.io/wojtacz/midicontrol-sw-py}" -e IMAGE_TAG="${IMAGE_TAG:-stable}" \
+        -e IMAGE="${IMAGE:-ghcr.io/wojtacz/midicontrol-sw}" -e IMAGE_TAG="${IMAGE_TAG:-stable}" \
         "$1" compose -p "$MC_PROJECT" --project-directory "${MC_PREFIX:-/opt/midicontrol}" \
         -f "${MC_PREFIX:-/opt/midicontrol}/compose.yaml" up -d updater >/dev/null \
         || log "self-update helper failed to start (the updater keeps its current image)"
@@ -259,7 +259,7 @@ update_once() {
 # update_locked: one update attempt (spec 5.5 steps 2-5). Returns 0 updated,
 # 10 nothing new, 11 busy, 12 pull failed, 13 rolled back.
 update_locked() {
-    uo_image=${IMAGE:-ghcr.io/wojtacz/midicontrol-sw-py}
+    uo_image=${IMAGE:-ghcr.io/wojtacz/midicontrol-sw}
     uo_tag=${IMAGE_TAG:-stable}
     uo_ref="$uo_image:$uo_tag"
 
@@ -345,7 +345,7 @@ update_locked() {
 run_loop() {
     rl_w=$(parse_window "${UPDATE_WINDOW:-02:00-04:00}")
     rl_start=${rl_w% *}; rl_len=${rl_w#* }
-    log "update window $rl_start for $rl_len min, image ${IMAGE:-ghcr.io/wojtacz/midicontrol-sw-py}:${IMAGE_TAG:-stable}"
+    log "update window $rl_start for $rl_len min, image ${IMAGE:-ghcr.io/wojtacz/midicontrol-sw}:${IMAGE_TAG:-stable}"
     while :; do
         rl_now=$(now_epoch)
         if [ -n "${MC_LOOP_UNTIL:-}" ] && [ "$rl_now" -ge "$MC_LOOP_UNTIL" ]; then return 0; fi

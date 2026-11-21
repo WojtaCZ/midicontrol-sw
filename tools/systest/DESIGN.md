@@ -18,7 +18,7 @@ Device UI simulation and fuzzing are separate host builds in the firmware / PC r
 
 ## 1. Location and reuse (decision)
 
-`midicontrolpy-sw/tools/systest/`, Python + pytest.
+`midicontrol-sw/tools/systest/`, Python + pytest.
 
 - The PC repo holds the system spec (`docs/SYSTEM.md`), so requirement IDs and tests live next to each other.
 - basetest modules (`usblink`, `loglink`, `dbg`, `proto`, `fwclient`) are imported **by path**, not copied:

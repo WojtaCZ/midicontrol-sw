@@ -1,4 +1,4 @@
-# midicontrolpy-sw: MIDIcontrol PC player
+# midicontrol-sw: MIDIcontrol PC player
 
 The PC part of the MIDIcontrol system. `midicontrol` talks to the MIDIcontrol base (USB serial, VID:PID ABCD:1234) and
 plays and records MIDI files, switches the organ power, shows the song on the indicator and keeps the remote
@@ -23,7 +23,7 @@ The daemon always runs as the Docker deployment; never run a standalone build al
 serial port and port 50118).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-py/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw/main/install.sh | sh
 midicontrol                    # console inside the running container
 ```
 

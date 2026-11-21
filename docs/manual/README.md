@@ -9,8 +9,8 @@
 
 ```sh
 M=/workspaces/MIDICONTROL-b81bba4a          # repos side by side
-$M/midicontroller-fw/tools/screens/export.sh $M/midicontrolpy-sw/docs/manual/docs/img/screens/remote
-$M/midicontrol-fw/tools/screens/export.sh    $M/midicontrolpy-sw/docs/manual/docs/img/screens/base
+$M/midicontroller-fw/tools/screens/export.sh $M/midicontrol-sw/docs/manual/docs/img/screens/remote
+$M/midicontrol-fw/tools/screens/export.sh    $M/midicontrol-sw/docs/manual/docs/img/screens/base
 ```
 
 The export runs the real GUI code on the host (scenarios in `tools/screens/main.cpp` of each firmware repo) and

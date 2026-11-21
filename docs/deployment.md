@@ -2,7 +2,7 @@
 
 The supported production path is a container on the mini PC: one command installs it, it starts at boot without anyone logging in, and a night-window updater keeps it current. The systemd user unit (`packaging/midicontrol.service.in`) is for developers only.
 
-Image: `ghcr.io/wojtacz/midicontrol-sw-py` (linux/amd64 and linux/arm64).
+Image: `ghcr.io/wojtacz/midicontrol-sw` (linux/amd64 and linux/arm64).
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ Image: `ghcr.io/wojtacz/midicontrol-sw-py` (linux/amd64 and linux/arm64).
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-py/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw/main/install.sh | sh
 ```
 
 Options (put them after `sh -s --` when piping):
@@ -118,8 +118,8 @@ The player started by the container runs with `--exit-on-stall` (env `MIDICONTRO
 ## Uninstall
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-py/main/install.sh | sh -s -- --uninstall          # keeps data/
-curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-py/main/install.sh | sh -s -- --uninstall --purge  # also deletes data/
+curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw/main/install.sh | sh -s -- --uninstall          # keeps data/
+curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw/main/install.sh | sh -s -- --uninstall --purge  # also deletes data/
 ```
 
 This runs `docker compose down` and removes `compose.yaml`, `.env` and the wrapper.
@@ -138,7 +138,7 @@ This runs `docker compose down` and removes `compose.yaml`, `.env` and the wrapp
 
 ### Notes and known caveats
 
-- **GHCR visibility (one time, by hand):** the first push creates the package as private. In GitHub (package settings, Change visibility) set `midicontrol-sw-py` to public, otherwise `docker pull` on the mini PC fails. The image carries the `org.opencontainers.image.source` label (set in the `Dockerfile`), which links the package to the repository; check that the package page shows the repository link after the first publish.
+- **GHCR visibility (one time, by hand):** the first push creates the package as private. In GitHub (package settings, Change visibility) set `midicontrol-sw` to public, otherwise `docker pull` on the mini PC fails. The image carries the `org.opencontainers.image.source` label (set in the `Dockerfile`), which links the package to the repository; check that the package page shows the repository link after the first publish.
 - **Image tags** (CI, `.github/workflows/ci.yml`): pull request builds push nothing; push to `main` publishes `edge`; a tag `v1.2.3` publishes `stable`, `1.2.3` and `sha-<short>`.
 - **First release:** the installer's default tag is `stable`, which exists only after the first `v*` git tag is pushed (the repository has none yet). Until then install with `--tag edge`.
 - **Known limitation:** `--exit-on-stall` detects a stalled or deadlocked worker thread, NOT a frozen or SIGSTOPped whole process (the watchdog runs inside the process). The image HEALTHCHECK is informational; nothing restarts a frozen process. Spec section 6's `kill -STOP` test therefore does not apply to this design.
@@ -149,4 +149,4 @@ This runs `docker compose down` and removes `compose.yaml`, `.env` and the wrapp
 
 ### Before publishing the repository
 
-The repository contains third-party PDFs in `docs/` and has history; before it is made public the owner must decide what to remove or rewrite. The installer and CI assume the public repo `WojtaCZ/midicontrol-sw-py`.
+The repository contains third-party PDFs in `docs/` and has history; before it is made public the owner must decide what to remove or rewrite. The installer and CI assume the public repo `WojtaCZ/midicontrol-sw`.

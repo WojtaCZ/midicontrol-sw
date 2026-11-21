@@ -216,7 +216,7 @@ About 52 distinct strings (Czech, no diacritics).
 
 ## 12. Screen pictures
 
-Path: `midicontrolpy-sw/docs/manual/docs/img/screens/remote/` (48 PNG + `sheet.png` + `index.html`, exported with `tools/screens/export.sh`, scale 4). Captions 01-38 are inferred from file names, 39-48 from the export output; verify against `tools/screens/main.cpp`.
+Path: `midicontrol-sw/docs/manual/docs/img/screens/remote/` (48 PNG + `sheet.png` + `index.html`, exported with `tools/screens/export.sh`, scale 4). Captions 01-38 are inferred from file names, 39-48 from the export output; verify against `tools/screens/main.cpp`.
 
 01_splash Splash | 02_main_player Main, Prehravac selected | 03_main_settings Main, Nastaveni selected | 04_settings_battery / 05_settings_bluetooth / 06_settings_firmware / 07_settings_pair_base / 08_settings_back Settings with the item selected | 09_info_firmware Verze FW | 10_info_battery Baterie | 11_info_battery_charging Baterie charging | 12_info_bluetooth Bluetooth | 13_pair_base_waiting, 14_pair_base_countdown, 15_pair_base_paired, 16_pair_base_expired pairing window states | 17_player_idle | 18_player_entry | 19_player_entry_letter | 20_player_starting | 21_player_playing | 22_player_anchor (section label) | 23_player_repeat_selected | 24_player_add_verse, 25_player_add_verse_2 | 26_player_stopping | 27_player_stopped | 28_player_unknown | 29_songs_loading | 30_songs_first | 31_songs_middle | 32_songs_last | 33_songs_page_more | 34_songs_page_two | 35_songs_error | 36_songs_empty | 37_pairing passkey dialog | 38_power_hold | 39_fw_update | 40_fw_update_failed | 41_no_base | 42_no_base_back_ignored | 43_no_base_settings | 44_no_base_back | 45_no_base_pairing | 46_no_pc | 47_base_back | 48_message_low_battery.
 

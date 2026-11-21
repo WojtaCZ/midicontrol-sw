@@ -1,6 +1,6 @@
 # Facts: PC software and web page (phase 1, audit step 4)
 
-Repo `midicontrolpy-sw`, branch `audit/step4-manual`, built from `42f3a9a` (status field `version`). Paths are relative to the repo root.
+Repo `midicontrol-sw`, branch `audit/step4-manual`, built from `42f3a9a` (status field `version`). Paths are relative to the repo root.
 Code wins over docs. UI strings are verbatim (Czech on the Přehled page, English on Pokročilé). Citation format `path:line`.
 Line numbers were captured on 2026-11-16; re-check them if the file has changed since.
 
@@ -200,7 +200,7 @@ Example file in the repo: `config.conf` (the one in the project root) and `share
 No built-in backup. What to save: the config file, PlayFolder (`*.mid` and `*.conf`; the `.conf` files are written by the web page), RecordFolder, and the diag folder if needed. Nothing else holds state (the organ stops are only in `<code>.conf`). No script in the repo does this (open question whether the owner wants one).
 
 ### 3.6 Docker deployment (NOT MERGED)
-Only on branch `docker-deployment` (worktree `midicontrolpy-sw-docker`, last commit `e20bde8`, pushed 2026-11-16; CI first run and bench pending per memory). Not part of `audit/step4-manual`; do not put in the manual as available until merged.
+Only on branch `docker-deployment` (worktree `midicontrol-sw-docker`, last commit `e20bde8`, pushed 2026-11-16; CI first run and bench pending per memory). Not part of `audit/step4-manual`; do not put in the manual as available until merged.
 - `curl ... install.sh | sh` installs under `/opt/midicontrol` (`MC_PREFIX`): `compose.yaml` with two services (`midicontrol` player, `updater`), `.env` (IMAGE_TAG default `stable`, UPDATE_WINDOW `02:00-04:00`, UPDATE_ENABLED), `data/` (songs, recordings, diag, firmware, config.conf), and the wrapper `/usr/local/bin/midicontrol` (`docs/deployment.md` in the worktree, lines 13-45).
 - Status page unchanged at `http://<host>:50118/`. Console: `midicontrol`, `midicontrol --cmd "..."`; firmware paths are `/data/firmware/...`.
 - Updater: polls the registry inside the window, idle guard, health gate 60 s, automatic rollback to `:previous`; result in `data/diag/update-status.json`. `--uninstall [--purge]`.

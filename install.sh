@@ -1,6 +1,6 @@
 #!/bin/sh
 # MIDIControl PC player: one-command Docker installer.
-#   curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-py/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw/main/install.sh | sh
 # Works when piped (never reads stdin, never relies on its own path).
 set -eu
 
@@ -18,7 +18,7 @@ Environment overrides:
   MC_BINDIR        where the "midicontrol" wrapper goes (default /usr/local/bin)
   MC_DOCKER        docker command (default docker)
   MC_RAW_URL       where compose.template.yaml and midicontrol-wrapper.sh are fetched
-                   (default raw GitHub, WojtaCZ/midicontrol-sw-py main, docker/)
+                   (default raw GitHub, WojtaCZ/midicontrol-sw main, docker/)
   MC_WAIT_SECONDS  how long to wait for /api/status (default 60, 0 = do not wait)
 USAGE
 }
@@ -54,7 +54,7 @@ fi
 DOCKER=${MC_DOCKER:-docker}
 PREFIX=${MC_PREFIX:-/opt/midicontrol}
 BINDIR=${MC_BINDIR:-/usr/local/bin}
-RAW_URL=${MC_RAW_URL:-https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw-py/main/docker}
+RAW_URL=${MC_RAW_URL:-https://raw.githubusercontent.com/WojtaCZ/midicontrol-sw/main/docker}
 WAIT=${MC_WAIT_SECONDS:-60}
 # Everything below may run rm -rf under PREFIX: it must be an absolute path below /.
 case "$PREFIX" in

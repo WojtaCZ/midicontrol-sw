@@ -202,7 +202,7 @@ class Burn:
                      "start": time.strftime("%Y-%m-%d %H:%M:%S"),
                      "planned_end": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.t_start + a.hours * 3600)),
                      "criteria_sha256": hashlib.sha256(crit).hexdigest()[:16],
-                     "revs": {d: git_rev(os.path.join(root, d)) for d in ("midicontrolpy-sw", "midicontrol-fw",
+                     "revs": {d: git_rev(os.path.join(root, d)) for d in ("midicontrol-sw", "midicontrol-fw",
                                                                              "midicontroller-fw")},
                      "windows_s": A.WINDOW_S, "weights": EPISODES, "end_reason": None}
 

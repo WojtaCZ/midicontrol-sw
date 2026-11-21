@@ -1,6 +1,6 @@
 # CI and publishing for the MIDIControl PC player image.
 #
-# Tags (image ghcr.io/wojtacz/midicontrol-sw-py, amd64 + arm64, built natively, no QEMU):
+# Tags (image ghcr.io/wojtacz/midicontrol-sw, amd64 + arm64, built natively, no QEMU):
 #   pull request   -> build + test only, nothing is pushed
 #   push to main   -> edge
 #   tag vX.Y.Z     -> stable, X.Y.Z (leading "v" stripped), sha-<short>
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE: ghcr.io/wojtacz/midicontrol-sw-py
+  IMAGE: ghcr.io/wojtacz/midicontrol-sw
 
 jobs:
   shell:

@@ -7,7 +7,7 @@ before any run (advisor #7). The expectations come from the code:
           with Repeat selected; BACK = clear letter, then last digit, while playing select Stop; RIGHT = select Repeat once
           the first anchor arrived; UP/DOWN = cycle the letter none->A->B->C->D while entering, else open the song list;
           a 5th digit starts a new code; a digit that would exceed 1999 is dropped on the remote ("2000" -> "200"; bench 2026-11-15))
-  PC      midicontrolpy-sw src/comm.cpp ("PLAY_SONG \"<code>\" from controller", "Song not found: <code>",
+  PC      midicontrol-sw src/comm.cpp ("PLAY_SONG \"<code>\" from controller", "Song not found: <code>",
           "Organ power on, warming up", "Playing <code>:", "Add verse: <label>", "STOP_SONG from controller",
           "Playback stopped.", "Playback finished, organ power off.", "Recording to <path>")
 

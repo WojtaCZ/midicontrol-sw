@@ -39,7 +39,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Goal: a service stop or reboot never kills an update in progress (remote update measured 152 s, base 13 s, docs/FAULTS.md:82).
 - Current code: packaging/midicontrol.service.in has no TimeoutStopSec (systemd default 90 s). src/main.cpp ~276-281: `control.stop()`, `web->stop()`, `exec.waitForUpload()`, then `handler.shutdown()`; ControlServer::stop (src/control_socket.cpp:77-87) waits for client commands, so a running update finishes.
 - Change: add `TimeoutStopSec=180` to the [Service] section (>= 180 s as owner said; VERIFY: 180 s is 18% over the 152 s measured; 300 s matches the manual's "up to 5 minutes" and is safer). Keep the wait in main.cpp. Make sure the wait is not bounded by a shorter internal timeout (VERIFY in exec.waitForUpload). Update docs/status-web-and-service.md:404 (mentions 90 s).
-- Depends on: nothing. Docker variant: VERIFY the worktree midicontrolpy-sw-docker compose file; it has no `stop_grace_period` (audit docker finding DK-1); DONE 2026-11-21: `stop_grace_period: 300s` added to docker/compose.template.yaml at the merge.
+- Depends on: nothing. Docker variant: VERIFY the worktree midicontrol-sw-docker compose file; it has no `stop_grace_period` (audit docker finding DK-1); DONE 2026-11-21: `stop_grace_period: 300s` added to docker/compose.template.yaml at the merge.
 - Tests: no unit test. Add a check to a packaging test if one exists (VERIFY: grep tests/ for midicontrol.service); otherwise a smoke grep in tests/ that the unit contains TimeoutStopSec >= 180. Bench: stop the service during a remote update.
 - Manual/facts: postupy.md:190 and ovladac.md:360 (M-update-time: "up to 5 minutes", see E1); sprava.md service chapter (stop waits for update).
 - Risk / open points: SIGKILL after the timeout still kills a hung update; the bootloader recovery stays the fallback.
@@ -128,7 +128,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 ### B12 Cleanup leftovers; track .trail and graft the same way in every repo (Q2-32)
 - Goal: a list of files for the owner to approve. NOTHING is deleted or committed until the owner approves this exact list.
 - Current state (read-only check 2026-11-16):
-  - Untracked in midicontrolpy-sw: docs/superpowers/plans/2026-11-07-docker-deployment.md, docs/superpowers/specs/2026-11-07-docker-deployment-design.md, songs/406B.conf (runtime stops file from a bench run). Q2-32 replaces the old rule "leave them uncommitted": propose delete or commit per file. DONE 2026-11-21 for the docker plan/spec: identical copies are tracked since the docker-deployment merge, the untracked duplicates were deleted. songs/406B.conf still open.
+  - Untracked in midicontrol-sw: docs/superpowers/plans/2026-11-07-docker-deployment.md, docs/superpowers/specs/2026-11-07-docker-deployment-design.md, songs/406B.conf (runtime stops file from a bench run). Q2-32 replaces the old rule "leave them uncommitted": propose delete or commit per file. DONE 2026-11-21 for the docker plan/spec: identical copies are tracked since the docker-deployment merge, the untracked duplicates were deleted. songs/406B.conf still open.
   - Untracked tool dirs in several repos: .claude/ .ignore (protocol, fw, remote, bootloader), .cache/ (remote). fw also shows ` ?` submodule entries lib/bootloader, lib/menu, lib/ui (VERIFY: submodule state, not a leftover).
   - .trail: tracked in all five repos (README.md, hook.cjs, .gitignore, learnings/; counts: protocol 7, fw 44, remote 14, pc 21, bootloader 3 files); each .trail/.gitignore lists `cache/` and `statusline.cjs`. `graft`: no graft file is tracked in any of the five repos (git ls-files shows none); `graft/`, `wt/`, `fault/`, `outIndex/`, `backups/`, `reference/` exist only at the workspace root /workspaces/MIDICONTROL-b81bba4a (not a git repo).
   - Workspace-root candidates for the owner: backups/ (many base-g431-flash-*.bin and remote-*.hex, dated 2026-10-18 to 2026-11-15), wt/, fault/, outIndex/, reference/, graft/, MIDICONTROL/midicontroller-fw (stray nested dir). VERIFY each before listing for deletion; do not touch backups/ (the manual says backups are not documented, M-backups, but they are flash images from real flashes).
@@ -148,7 +148,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - PC side of A9 (song list paging): see midicontrol-protocol/TODO.md. PC touch points: src/dispatch.cpp:105-127 (GET_SONG_LIST / SONG_LIST_RESP), src/comm.cpp:1054-1056 (`songListPage`, `buildSongListPage`), include/midicontrol/songs.hpp:43 (`buildSongListPage` offset/limit); relates to the base "more than 32 songs shows nothing" gap (zakladna.md:202).
 
 ### E1 Manual edits for every M-* answer (docs/manual/docs/*.md)
-- Goal: apply each M-* answer from audit/OWNER-ANSWERS.md (lines 64-98) and remove the TODO markers it settles; `cd midicontrolpy-sw && docs-build todo` lists them (49 markers on 2026-11-16, read-only).
+- Goal: apply each M-* answer from audit/OWNER-ANSWERS.md (lines 64-98) and remove the TODO markers it settles; `cd midicontrol-sw && docs-build todo` lists them (49 markers on 2026-11-16, read-only).
 - Current code: n/a (documentation). File:line below is from `docs-build todo`; line numbers shift as edits are made, so work from the bottom of each file upward.
 - Change (marker -> answer -> replacement intent):
   - index.md:29 -> M-version: delete the firmware-version sentence; say the manual carries only its issue date.
@@ -193,9 +193,9 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Manual/facts: also correct facts/pc.md lines 109, 134-135, 157-158, 200 (backups), 226 (open question on recording) to match.
 - Risk / open points: write each edit as the final behaviour only when the matching code item is built; otherwise use "planned" and keep a marker, so the manual never describes behaviour the firmware lacks. VERIFY: the line numbers before editing.
 
-### E2 docs/SYSTEM.md edits (main copy: midicontrolpy-sw/docs/SYSTEM.md)
+### E2 docs/SYSTEM.md edits (main copy: midicontrol-sw/docs/SYSTEM.md)
 - Goal: bring the spec in line with the owner answers.
-- Current code: n/a. SYSTEM.md line 17 says edit only the main copy. Copies live in the other repos (and in the lib/protocol and lib/bootloader submodule copies) and are synced by midicontrolpy-sw/tools/sync-system-doc.sh (`--check` reports drift; test tests/sync_system_doc_test.sh). CLAUDE.md: after editing, run tools/sync-system-doc.sh and commit the copies in the sibling repos.
+- Current code: n/a. SYSTEM.md line 17 says edit only the main copy. Copies live in the other repos (and in the lib/protocol and lib/bootloader submodule copies) and are synced by midicontrol-sw/tools/sync-system-doc.sh (`--check` reports drift; test tests/sync_system_doc_test.sh). CLAUDE.md: after editing, run tools/sync-system-doc.sh and commit the copies in the sibling repos.
 - Change (each edit):
   1. Drop SYS-USE-09 and SYS-USE-21 (pause/resume), M-pause.
   2. SYS-REC-01: recording starts from the base only; the console `record` is an admin/debug tool (M-recording-start, M-console-record).

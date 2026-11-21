@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copy the shared system documents from their main copies into every MIDIcontrol repo.
-#   docs/SYSTEM.md            main copy: midicontrolpy-sw/docs/SYSTEM.md
+#   docs/SYSTEM.md            main copy: midicontrol-sw/docs/SYSTEM.md
 #   docs/HARDWARE-base.md     main copy: midicontrol-fw/docs/HARDWARE.md
 #   docs/HARDWARE-remote.md   main copy: midicontroller-fw/docs/HARDWARE.md
 # The repos are expected side by side in one parent directory (override with MIDICONTROL_ROOT).
@@ -17,11 +17,11 @@ check=0; [[ "${1:-}" == "--check" ]] && check=1
 
 # source-repo:source-path  target-name
 docs=(
-  "midicontrolpy-sw:docs/SYSTEM.md SYSTEM.md"
+  "midicontrol-sw:docs/SYSTEM.md SYSTEM.md"
   "midicontrol-fw:docs/HARDWARE.md HARDWARE-base.md"
   "midicontroller-fw:docs/HARDWARE.md HARDWARE-remote.md"
 )
-repos=(midicontrolpy-sw midicontrol-fw midicontroller-fw midicontrol-bootloader midicontrol-protocol midicontrol-hw midicontroller-hw)
+repos=(midicontrol-sw midicontrol-fw midicontroller-fw midicontrol-bootloader midicontrol-protocol midicontrol-hw midicontroller-hw)
 fw_repos=(midicontrol-fw midicontroller-fw)
 submodules=(lib/protocol lib/bootloader)
 
@@ -40,7 +40,7 @@ for entry in "${docs[@]}"; do
   src="$root/$src_repo/$src_path"
   [[ -f "$src" ]] || { echo "missing main copy: $src" >&2; exit 2; }
   expected=$(mktemp)
-  { echo "<!-- COPY of $src_repo/$src_path. Do not edit here: edit the main copy, then run midicontrolpy-sw/tools/sync-system-doc.sh -->"; echo; cat "$src"; } > "$expected"
+  { echo "<!-- COPY of $src_repo/$src_path. Do not edit here: edit the main copy, then run midicontrol-sw/tools/sync-system-doc.sh -->"; echo; cat "$src"; } > "$expected"
   for repo in "${repos[@]}"; do
     [[ "$repo" == "$src_repo" ]] && continue
     [[ -d "$root/$repo" ]] || { echo "skip (not present): $repo"; continue; }
