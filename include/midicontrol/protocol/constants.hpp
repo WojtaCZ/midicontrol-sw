@@ -29,7 +29,9 @@ inline constexpr uint8_t FORBIDDEN_DOLLAR  = 0x24;  // $ - RN4870 command mode
 inline constexpr uint8_t FORBIDDEN_PERCENT = 0x25;  // % - RN4870 status delimiter
 
 // Protocol version (INFO tag PROTO_VER). Version 1 is implicit: a node without PROTO_VER is v1.
-// 2: PROTO_VER in INFO_RESP, KEEPALIVE session nonce, 8-id duplicate window.
+// 2: PROTO_VER in INFO_RESP, KEEPALIVE session nonce, 8-id duplicate window, ORGAN_SRC INFO tag, SIGNAL_INFO (incl.
+//    BASE_UPDATING), KEEPALIVE_ACK boot id + 7-byte STATUS_RESP, NPI_CLEAR_IF_OWN, FW_UPDATE_STATUS ACK/retry + NAK
+//    NO_TRANSFER, GET_SONG_LIST u16 offset, RECORD_SONG Base->PC + SIGNAL_RECORDING.
 inline constexpr uint8_t PROTOCOL_VERSION = 2;
 
 // Node addresses.

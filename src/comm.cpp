@@ -1586,8 +1586,9 @@ void CommHandler::controlLoop() {
                 doPlay(cmd);
                 break;
             case Command::Kind::Stop:
-                if (cmd.source == ADDR_REMOTE && recordingActive()) {
-                    // A7 (owner rule): only the base ends a recording; a STOP_SONG from the remote is ACKed and ignored.
+                if (cmd.source == ADDR_REMOTE && recordingActive() && !isPlaying()) {
+                    // A7 (owner rule): only the base ends a recording; a STOP_SONG from the remote is ACKed and ignored
+                    // unless a song is playing (R14: the remote must still be able to stop it).
                     mc::log::info(Node::Software, "STOP_SONG from the remote ignored: a recording runs.");
                     break;
                 }

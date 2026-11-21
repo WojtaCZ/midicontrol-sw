@@ -2016,6 +2016,18 @@ TEST(comm_a7_remote_stop_song_does_not_end_the_recording) {
     r.h->shutdown();
 }
 
+// R14: a recorder started from the console while a song plays must not stop the remote from stopping the song.
+TEST(comm_a7_remote_stop_song_stops_a_playing_song_during_recording) {
+    RecRig r(2);
+    CHECK(!r.h->playSong("401").has_value());
+    CHECK(waitFor([&] { return r.h->isPlaying(); }, 5000));
+    CHECK(r.h->recordSong());
+    const uint8_t id = r.send(MsgType::STOP_SONG, {}, ADDR_REMOTE);
+    CHECK(waitFor([&] { return answerTo(r.base.log(), id).has_value(); }, 3000));
+    CHECK(waitFor([&] { return !r.h->isPlaying(); }, 5000));
+    r.h->shutdown();
+}
+
 // A STOP_SONG from the base (or the console) still ends a recording.
 TEST(comm_a7_base_stop_song_ends_the_recording) {
     RecRig r(2);
