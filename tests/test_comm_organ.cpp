@@ -1763,3 +1763,64 @@ TEST(comm_a6_v1_remote_gets_no_signal_info) {
     CHECK_EQ(countType(log, 0, MsgType::SIGNAL_INFO), size_t(0));
     CHECK(countType(log, 0, MsgType::SIGNAL_PLAYING) >= 1);
 }
+
+// Fix round 1: the remote's PROTO_VER is unknown when the song starts. The flags are recorded anyway and go out
+// as soon as the INFO poll reports v2 (never from the reader thread: through the RemoteResync command).
+namespace {
+void relinkWhileVersionUnknown(CommHandler& h, FakeBase& base, int verNow) {
+    base.ble = false;
+    statusNow(h);
+    std::this_thread::sleep_for(2600ms);            // the info poller sees the link state on its 2 s tick
+    base.remoteProtoVer = verNow;   // the next GET_INFO (link edge) is answered with this version
+    base.ble = true;
+    statusNow(h);
+}
+}  // namespace
+
+TEST(comm_a6_signal_info_sent_when_version_becomes_known_v2) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = infoConfig("401.mid");
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    base.ble = true;                                  // link up, but no INFO_RESP: version unknown
+    statusNow(h);
+    CHECK_EQ(h.peerProtocolVersion(mc::status::Node::Controller), 1);
+    CHECK(!h.playSong("401").has_value());
+    CHECK(waitFor([&] { return countType(base.log(), 0, MsgType::SIGNAL_ANCHOR) > 0; }, 15000));
+    CHECK_EQ(countType(base.log(), 0, MsgType::SIGNAL_INFO), size_t(0));
+    const size_t m = base.log().size();
+    relinkWhileVersionUnknown(h, base, 2);
+    CHECK(waitFor([&] { return countType(base.log(), m, MsgType::SIGNAL_INFO) > 0; }, 8000));
+    CHECK_EQ(h.peerProtocolVersion(mc::status::Node::Controller), 2);
+    auto seq = sigAndInfo(base.log(), m);
+    h.stopSong();
+    h.shutdown();
+    bool found = false;
+    for (auto& r : seq)
+        if (r.type == MsgType::SIGNAL_INFO && r.payload == std::vector<uint8_t>{SIGNAL_INFO_SONG_HAS_SECTIONS}) found = true;
+    CHECK(found);
+}
+
+TEST(comm_a6_signal_info_not_sent_when_version_becomes_known_v1) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = infoConfig("401.mid");
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    base.ble = true;
+    statusNow(h);
+    CHECK(!h.playSong("401").has_value());
+    CHECK(waitFor([&] { return countType(base.log(), 0, MsgType::SIGNAL_ANCHOR) > 0; }, 15000));
+    relinkWhileVersionUnknown(h, base, 1);            // INFO_RESP says PROTO_VER 1
+    std::this_thread::sleep_for(3500ms);
+    CHECK_EQ(h.peerProtocolVersion(mc::status::Node::Controller), 1);
+    auto log = base.log();
+    h.stopSong();
+    h.shutdown();
+    CHECK_EQ(countType(log, 0, MsgType::SIGNAL_INFO), size_t(0));
+}

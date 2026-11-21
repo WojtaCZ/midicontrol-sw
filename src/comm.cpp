@@ -487,10 +487,15 @@ uint8_t CommHandler::sendRemoteSignalLocked(MsgType type, const std::vector<uint
         _remoteMayPlay = true;
         _lastAnchor.clear();
         _lastSignalInfo.reset();  // flags belong to the song; the PC sends them again after PLAYING
+        _signalInfoSent = false;
+    } else if (type == MsgType::SIGNAL_STOPPED) {
+        _lastSignalInfo.reset();
+        _signalInfoSent = false;
     } else if (type == MsgType::SIGNAL_ANCHOR) {
         _lastAnchor.assign(payload.begin(), payload.end());
     } else if (type == MsgType::SIGNAL_INFO && !payload.empty()) {
         _lastSignalInfo = payload[0];
+        _signalInfoSent = true;
     }
     if (!registered) _remoteDirty = true;  // no link: the remote did not get it
     return pid;
@@ -503,10 +508,13 @@ void CommHandler::sendRemoteSignal(MsgType type, const std::vector<uint8_t>& pay
 }
 
 // A6: SIGNAL_INFO [flags] to a protocol v2 remote (a v1 remote would answer NAK UNKNOWN_MSG, and keeps showing
-// add-verse, which is its behaviour today). `flags` is the complete byte; the last one sent is kept for a resync.
-// A8 adds SIGNAL_INFO_BASE_UPDATING by calling this with the combined byte.
+// add-verse, which is its behaviour today). `flags` is the complete byte; it is recorded before the version gate so a
+// remote whose PROTO_VER becomes known later (onInfoResp) or a resync still gets it. A8 adds
+// SIGNAL_INFO_BASE_UPDATING by calling this with the combined byte.
 void CommHandler::sendSignalInfo(uint8_t flags) {
     std::lock_guard<std::mutex> lk(_resyncMutex);
+    _lastSignalInfo = flags;
+    _signalInfoSent = false;
     if (peerProtocolVersion(Node::Controller) < 2) return;
     bool registered = false;
     sendRemoteSignalLocked(MsgType::SIGNAL_INFO, {flags}, registered);
@@ -549,6 +557,7 @@ void CommHandler::doRemoteResync() {
         sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_PLAYING,
                                                  std::vector<uint8_t>(code.begin(), code.end()), reg), reg);
         what = "SIGNAL_PLAYING " + code;
+        if (info) { _lastSignalInfo = info; _signalInfoSent = false; }  // PLAYING reset them: still this song's flags
         if (info && peerProtocolVersion(Node::Controller) >= 2) {
             sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_INFO, {*info}, reg), reg);
             what += " + SIGNAL_INFO";
@@ -979,6 +988,17 @@ void CommHandler::onInfoResp(const Packet& pkt) {
     _status.set(node, "info_unsupported", false);
     _status.setNow(node, "info_ms");
     _infoPoller->onResp(fromBase ? mc::devinfo::InfoPoller::Base : mc::devinfo::InfoPoller::Remote, steadyMs());
+    // A6: the remote's PROTO_VER just became known (v2) while a song's SIGNAL_INFO is still unsent: resync (PLAYING,
+    // SIGNAL_INFO, ANCHOR) on the control thread. A v1 remote gets nothing.
+    if (!fromBase && peerProtocolVersion(Node::Controller) >= 2) {
+        bool need;
+        {
+            std::lock_guard<std::mutex> lk(_resyncMutex);
+            need = _lastSignalInfo.has_value() && !_signalInfoSent;
+            if (need) _remoteDirty = true;
+        }
+        if (need && !_resyncQueued.exchange(true)) post({Command::Kind::RemoteResync, {}, {}, 0});
+    }
 }
 
 void CommHandler::clearInfo(Node node) {

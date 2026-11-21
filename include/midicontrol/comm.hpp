@@ -337,6 +337,7 @@ private:
     bool _remoteMayPlay = true;      // the remote may think a song plays (cleared by an ACKed SIGNAL_STOPPED)
     std::set<uint8_t> _resyncAwait;  // pids of the current resync attempt
     std::string _lastAnchor;         // last SIGNAL_ANCHOR label of the current song
+    bool _signalInfoSent = false;    // _lastSignalInfo went out (false: waits for a v2 remote)
     std::optional<uint8_t> _lastSignalInfo;  // last SIGNAL_INFO flags byte sent for the current song (A6)
     std::atomic<bool> _resyncQueued{false};
     Player::MidiSink _midiSinkForTest;
