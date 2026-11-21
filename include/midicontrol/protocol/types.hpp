@@ -27,6 +27,7 @@ enum class MsgType : uint8_t {
     SIGNAL_RECORDING = 0x31,
     SIGNAL_STOPPED   = 0x32,
     SIGNAL_ANCHOR    = 0x33,  // PC -> remote: playback entered a section; payload = null-terminated ASCII label ("Sloka 2")
+    SIGNAL_INFO      = 0x34,  // PC/Base -> remote (v2): payload [flags u8], see SIGNAL_INFO_* in constants.hpp; ACKed state message
 
     SET_CURRENT      = 0x40,
 

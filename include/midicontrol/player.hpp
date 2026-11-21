@@ -40,6 +40,9 @@ public:
 
     std::function<void(const mc::display::Update&)> onDisplay;
     std::function<void(const std::string&)> onAnchor;
+    // Called once from play(), after the file is parsed and before the playback thread starts (so before the first
+    // onAnchor): whether the song has sections (verse markers). A6.
+    std::function<void(bool)> onSections;
     std::function<void()> onFinished;  // natural end only (not after stop())
 
     // Load `filepath` and start playing it in a background thread. Throws on a

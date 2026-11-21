@@ -220,6 +220,8 @@ private:
     void finishPlayback();
     // P1-9 remote resync: every SIGNAL_* to the remote goes through sendRemoteSignal().
     void sendRemoteSignal(mc::protocol::MsgType type, const std::vector<uint8_t>& payload = {});
+    // A6: SIGNAL_INFO [flags] (protocol v2 remote only); remembered for the resync.
+    void sendSignalInfo(uint8_t flags);
     uint8_t sendRemoteSignalLocked(mc::protocol::MsgType type, const std::vector<uint8_t>& payload,
                                    bool& registered);  // _resyncMutex held
     uint8_t sendWithAckImpl(uint8_t dest, mc::protocol::MsgType type, const std::vector<uint8_t>& payload,
@@ -335,6 +337,7 @@ private:
     bool _remoteMayPlay = true;      // the remote may think a song plays (cleared by an ACKed SIGNAL_STOPPED)
     std::set<uint8_t> _resyncAwait;  // pids of the current resync attempt
     std::string _lastAnchor;         // last SIGNAL_ANCHOR label of the current song
+    std::optional<uint8_t> _lastSignalInfo;  // last SIGNAL_INFO flags byte sent for the current song (A6)
     std::atomic<bool> _resyncQueued{false};
     Player::MidiSink _midiSinkForTest;
 

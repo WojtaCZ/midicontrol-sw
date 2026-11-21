@@ -54,6 +54,10 @@ std::vector<Section> scanSections(const mc::smf::MidiFile& mf) {
     return out;
 }
 
+bool songHasSections(const std::vector<Section>& sections) {
+    return sections.size() > 1 || (!sections.empty() && sections.front().verse != 0);
+}
+
 std::string sectionLabel(const Section& s, int pendingRepeats) {
     std::string l = s.verse == 0 ? "Predehra" : "Sloka " + std::to_string(s.verse);
     if (pendingRepeats > 0) l += " +" + std::to_string(pendingRepeats);

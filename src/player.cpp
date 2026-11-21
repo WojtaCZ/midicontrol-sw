@@ -88,6 +88,8 @@ void Player::play(const std::string& filepath, const std::string& code,
     };
     _engine = std::make_unique<PlaybackEngine>(std::move(file), code, opts, std::move(cb));
 
+    if (onSections) onSections(songHasSections(_engine->sections()));
+
     _playing.store(true);
     _thread = std::thread(&Player::playbackLoop, this);
 }

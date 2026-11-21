@@ -42,13 +42,14 @@ int supersedeGroup(MsgType t) {
         case MsgType::SIGNAL_PLAYING:
         case MsgType::SIGNAL_RECORDING:
         case MsgType::SIGNAL_STOPPED: return 2;       // remote's playing/recording/stopped state
+        case MsgType::SIGNAL_INFO: return 3;          // A6: remote's song/system flags; independent of group 2
         default: return 0;
     }
 }
 
 bool isRemoteSignal(MsgType t) {
     return t == MsgType::SIGNAL_PLAYING || t == MsgType::SIGNAL_RECORDING || t == MsgType::SIGNAL_STOPPED ||
-           t == MsgType::SIGNAL_ANCHOR;
+           t == MsgType::SIGNAL_ANCHOR || t == MsgType::SIGNAL_INFO;
 }
 
 std::string hexByte(uint8_t b) {
@@ -485,8 +486,11 @@ uint8_t CommHandler::sendRemoteSignalLocked(MsgType type, const std::vector<uint
     if (type == MsgType::SIGNAL_PLAYING) {
         _remoteMayPlay = true;
         _lastAnchor.clear();
+        _lastSignalInfo.reset();  // flags belong to the song; the PC sends them again after PLAYING
     } else if (type == MsgType::SIGNAL_ANCHOR) {
         _lastAnchor.assign(payload.begin(), payload.end());
+    } else if (type == MsgType::SIGNAL_INFO && !payload.empty()) {
+        _lastSignalInfo = payload[0];
     }
     if (!registered) _remoteDirty = true;  // no link: the remote did not get it
     return pid;
@@ -496,6 +500,16 @@ void CommHandler::sendRemoteSignal(MsgType type, const std::vector<uint8_t>& pay
     std::lock_guard<std::mutex> lk(_resyncMutex);
     bool registered = false;
     sendRemoteSignalLocked(type, payload, registered);
+}
+
+// A6: SIGNAL_INFO [flags] to a protocol v2 remote (a v1 remote would answer NAK UNKNOWN_MSG, and keeps showing
+// add-verse, which is its behaviour today). `flags` is the complete byte; the last one sent is kept for a resync.
+// A8 adds SIGNAL_INFO_BASE_UPDATING by calling this with the combined byte.
+void CommHandler::sendSignalInfo(uint8_t flags) {
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    if (peerProtocolVersion(Node::Controller) < 2) return;
+    bool registered = false;
+    sendRemoteSignalLocked(MsgType::SIGNAL_INFO, {flags}, registered);
 }
 
 void CommHandler::noteRemoteSignalEnd(uint8_t pid, MsgType type, bool acked) {
@@ -531,9 +545,14 @@ void CommHandler::doRemoteResync() {
     if (playing) {
         bool reg = false;
         const std::vector<uint8_t> anchor(_lastAnchor.begin(), _lastAnchor.end());  // PLAYING clears it
+        const std::optional<uint8_t> info = _lastSignalInfo;                         // so does it
         sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_PLAYING,
                                                  std::vector<uint8_t>(code.begin(), code.end()), reg), reg);
         what = "SIGNAL_PLAYING " + code;
+        if (info && peerProtocolVersion(Node::Controller) >= 2) {
+            sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_INFO, {*info}, reg), reg);
+            what += " + SIGNAL_INFO";
+        }
         if (!anchor.empty()) {
             sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_ANCHOR, anchor, reg), reg);
             what += " + SIGNAL_ANCHOR";
@@ -1691,6 +1710,11 @@ void CommHandler::doPlay(const Command& cmd) {
         if (payload.size() > MAX_PAYLOAD_SIZE - 1) payload.resize(MAX_PAYLOAD_SIZE - 1);
         payload.push_back(0x00);
         sendRemoteSignal(MsgType::SIGNAL_ANCHOR, payload);  // remembered for a resync
+    };
+    // A6: after SIGNAL_PLAYING, before the first SIGNAL_ANCHOR (Player::play calls it once the file is parsed,
+    // before its thread starts), so the remote knows at once whether it may offer add-verse.
+    player->onSections = [this](bool hasSections) {
+        sendSignalInfo(hasSections ? SIGNAL_INFO_SONG_HAS_SECTIONS : uint8_t(0));
     };
     player->onFinished = [this, gen]() { post({Command::Kind::Finished, {}, {}, gen}); };
 

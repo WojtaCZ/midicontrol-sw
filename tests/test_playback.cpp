@@ -320,3 +320,10 @@ TEST(engine_forwards_partial_sysex_and_waits_gap_before_repeat) {
     CHECK_EQ(clock.passStarts, 3);  // start, gap, repeat
     CHECK_EQ(cap.noteOns(), 2);
 }
+
+TEST(song_has_sections_a6) {
+    CHECK(songHasSections(scanSections(multiVerse())));
+    CHECK(songHasSections(scanSections(song("401.mid"))));    // one section, but it carries verse 1
+    CHECK(!songHasSections(scanSections(song("523.mid"))));   // empty anchor: no verse markers
+    CHECK(!songHasSections({}));
+}

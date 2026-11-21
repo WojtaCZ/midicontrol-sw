@@ -72,6 +72,7 @@ public:
     std::atomic<int> statusAnswers{0};
     std::atomic<int> statusPairs{0};
     std::atomic<int> protoVer{0};      // > 0: GET_INFO is answered with an INFO_RESP carrying PROTO_VER
+    std::atomic<int> remoteProtoVer{0};  // > 0: the remote answers GET_INFO with an INFO_RESP carrying PROTO_VER (A6)
     std::atomic<int> organSrc{-1};     // >= 0: that INFO_RESP also carries ORGAN_SRC (A5); -1 = a v1 base (SSR tag only)
 
     // A4: a remote that takes a firmware transfer. 0 = off; 1 = accepts it and sends every FW_UPDATE_STATUS
@@ -121,6 +122,12 @@ private:
             if (p.msgType == MsgType::SIGNAL_ANCHOR && dropAnchors > 0) { --dropAnchors; return; }
             if (p.msgType == MsgType::SIGNAL_PLAYING && dropPlaying > 0) { --dropPlaying; return; }
             if (remoteFw > 0 && fwFrame(p)) return;
+            if (p.msgType == MsgType::GET_INFO && remoteProtoVer > 0) {
+                tx(Packet(ADDR_REMOTE, ADDR_PC, _id++, MsgType::ACK, {p.packetId}));
+                tx(Packet(ADDR_REMOTE, ADDR_PC, _id++, MsgType::INFO_RESP,
+                          {0x08, 1, static_cast<uint8_t>(remoteProtoVer.load())}));
+                return;
+            }
             if (busyRemote > 0) {
                 --busyRemote;
                 tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::NAK, {p.packetId, static_cast<uint8_t>(NakReason::BUSY)}));
@@ -1636,4 +1643,123 @@ TEST(comm_a4_no_transfer_nak_fails_at_once_with_a_clear_text) {
     for (auto& t : said)
         if (t.find("device lost the transfer (reset or timeout); start the update again") != std::string::npos) clear = true;
     CHECK(clear);
+}
+
+
+// ---- A6: SIGNAL_INFO [flags], SONG_HAS_SECTIONS ----
+namespace {
+Config infoConfig(const char* song) {
+    Config c = songConfig();
+    std::filesystem::copy_file(std::filesystem::path(MC_SONGS_DIR) / song, std::filesystem::path(c.playFolder) / song,
+                               std::filesystem::copy_options::overwrite_existing);
+    return c;
+}
+// Every packet to the remote that is a signal or SIGNAL_INFO, in order.
+std::vector<Rx> sigAndInfo(const std::vector<Rx>& log, size_t from = 0) {
+    std::vector<Rx> out;
+    for (size_t i = from; i < log.size(); ++i)
+        if (log[i].dest == ADDR_REMOTE && (isSignal(log[i].type) || log[i].type == MsgType::SIGNAL_INFO))
+            out.push_back(log[i]);
+    return out;
+}
+bool remoteKnown(CommHandler& h, FakeBase& base, int ver) {
+    base.remoteProtoVer = ver;
+    base.ble = true;
+    statusNow(h);
+    return waitFor([&] { return h.peerProtocolVersion(mc::status::Node::Controller) == ver || ver == 1; }, 5000);
+}
+}  // namespace
+
+// A song with sections: SIGNAL_INFO bit0=1 right after SIGNAL_PLAYING, before the first ANCHOR; group 3 does not drop PLAYING.
+TEST(comm_a6_signal_info_sections_after_playing_before_anchor) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = infoConfig("401.mid");
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    CHECK(remoteKnown(h, base, 2));
+    const size_t m = base.log().size();
+    CHECK(!h.playSong("401").has_value());
+    CHECK(waitFor([&] { return countType(base.log(), m, MsgType::SIGNAL_ANCHOR) > 0; }, 15000));
+    auto seq = sigAndInfo(base.log(), m);
+    h.stopSong();
+    h.shutdown();
+    CHECK(seq.size() >= 3);
+    CHECK(seq[0].type == MsgType::SIGNAL_PLAYING);
+    CHECK(seq[1].type == MsgType::SIGNAL_INFO);
+    CHECK(seq[1].payload == std::vector<uint8_t>{SIGNAL_INFO_SONG_HAS_SECTIONS});
+    CHECK(seq[2].type == MsgType::SIGNAL_ANCHOR);
+}
+
+// A song without sections: bit0 = 0 (reserved bits are 0 as well).
+TEST(comm_a6_signal_info_no_sections_is_zero) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = infoConfig("523.mid");
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    CHECK(remoteKnown(h, base, 2));
+    const size_t m = base.log().size();
+    CHECK(!h.playSong("523").has_value());
+    CHECK(waitFor([&] { return countType(base.log(), m, MsgType::SIGNAL_INFO) > 0; }, 15000));
+    auto seq = sigAndInfo(base.log(), m);
+    h.stopSong();
+    h.shutdown();
+    CHECK(seq.size() >= 2);
+    CHECK(seq[0].type == MsgType::SIGNAL_PLAYING);
+    CHECK(seq[1].type == MsgType::SIGNAL_INFO);
+    CHECK(seq[1].payload == std::vector<uint8_t>{0});
+}
+
+// A resync after a drop resends PLAYING, SIGNAL_INFO (same flags), then the ANCHOR.
+TEST(comm_a6_resync_resends_signal_info) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = infoConfig("523.mid");
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    CHECK(remoteKnown(h, base, 2));
+    CHECK(!h.playSong("523").has_value());
+    CHECK(waitFor([&] { return countType(base.log(), 0, MsgType::SIGNAL_INFO) > 0; }, 15000));
+    std::this_thread::sleep_for(300ms);
+    base.ble = false;
+    statusNow(h);
+    const size_t m = base.log().size();
+    base.ble = true;                                  // edge while playing: resync
+    statusNow(h);
+    std::this_thread::sleep_for(500ms);
+    auto seq = sigAndInfo(base.log(), m);
+    h.stopSong();
+    h.shutdown();
+    CHECK(seq.size() >= 2);
+    CHECK(seq[0].type == MsgType::SIGNAL_PLAYING);
+    CHECK(seq[1].type == MsgType::SIGNAL_INFO);
+    CHECK(seq[1].payload == std::vector<uint8_t>{0});
+}
+
+// A v1 remote (no PROTO_VER) never gets SIGNAL_INFO; PLAYING and ANCHOR still go out.
+TEST(comm_a6_v1_remote_gets_no_signal_info) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = infoConfig("401.mid");
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    base.ble = true;                                  // remoteProtoVer stays 0: the remote does not report one
+    statusNow(h);
+    CHECK_EQ(h.peerProtocolVersion(mc::status::Node::Controller), 1);
+    CHECK(!h.playSong("401").has_value());
+    CHECK(waitFor([&] { return countType(base.log(), 0, MsgType::SIGNAL_ANCHOR) > 0; }, 15000));
+    auto log = base.log();
+    h.stopSong();
+    h.shutdown();
+    CHECK_EQ(countType(log, 0, MsgType::SIGNAL_INFO), size_t(0));
+    CHECK(countType(log, 0, MsgType::SIGNAL_PLAYING) >= 1);
 }
