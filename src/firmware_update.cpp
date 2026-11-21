@@ -12,6 +12,7 @@ namespace mc {
 
 using mc::protocol::FwStatus;
 using mc::protocol::MsgType;
+using mc::protocol::NakReason;
 
 namespace {
 
@@ -133,6 +134,10 @@ bool FirmwareUpdater::streamImage(uint8_t target, const std::vector<uint8_t>& im
         payload.insert(payload.end(), image.begin() + off, image.begin() + off + n);
         if (!_comm.sendReliable(target, MsgType::FW_UPDATE_DATA, payload, /*timeoutMs=*/1500,
                                 /*maxRetries=*/8)) {
+            if (_comm.lastNakReason() == static_cast<uint8_t>(NakReason::NO_TRANSFER)) {
+                error("firmware update: device lost the transfer (reset or timeout); start the update again");
+                return false;
+            }
             auto s = _comm.waitFwStatus(300);
             error("firmware update: chunk at offset " + std::to_string(off) + " failed" +
                   withStatus(s));
@@ -152,6 +157,10 @@ bool FirmwareUpdater::streamImage(uint8_t target, const std::vector<uint8_t>& im
     _comm.clearFwStatus();
     bool acked = _comm.sendReliable(target, MsgType::FW_UPDATE_END, {}, /*timeoutMs=*/5000,
                                     /*maxRetries=*/3);
+    if (!acked && _comm.lastNakReason() == static_cast<uint8_t>(NakReason::NO_TRANSFER)) {
+        error("firmware update: device lost the transfer (reset or timeout); start the update again");
+        return false;
+    }
     auto endStatus = _comm.waitFwStatus(acked ? 3000 : 500);
     if (!acked || isFailure(endStatus)) {
         error("firmware update: device rejected the image at FW_UPDATE_END" +

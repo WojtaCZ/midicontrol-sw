@@ -46,6 +46,7 @@ const char* nakReasonName(uint8_t reason) {
         case NakReason::NOT_PLAYING: return "NOT_PLAYING";
         case NakReason::UNREACHABLE: return "UNREACHABLE";
         case NakReason::NOT_FOUND: return "NOT_FOUND";
+        case NakReason::NO_TRANSFER: return "NO_TRANSFER";
     }
     return "UNKNOWN";
 }

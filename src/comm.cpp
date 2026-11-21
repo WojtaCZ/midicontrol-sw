@@ -561,6 +561,10 @@ bool CommHandler::sendReliable(uint8_t dest, MsgType type, const std::vector<uin
     const uint8_t pid = nextPacketId();
     const Packet pkt(ADDR_PC, dest, pid, type, payload);
     const auto raw = encode(pkt);
+    {
+        std::lock_guard<std::mutex> lk(_ackMutex);
+        _lastNak.reset();
+    }
     for (int attempt = 0; attempt <= maxRetries; ++attempt) {
         {
             std::lock_guard<std::mutex> lk(_ackMutex);
@@ -590,7 +594,11 @@ bool CommHandler::sendReliable(uint8_t dest, MsgType type, const std::vector<uin
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             continue;
         }
-        if (signalled && result == 2) return false;  // NAK — caller aborts
+        if (signalled && result == 2) {  // NAK: final, caller aborts (the reason stays readable)
+            std::lock_guard<std::mutex> g(_ackMutex);
+            _lastNak = reason;
+            return false;
+        }
         // timeout: retry
     }
     for (Node n : mc::status::nodesForPeer(dest)) _status.count(n, "gave_up");
@@ -668,6 +676,11 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
 void CommHandler::clearFwStatus() {
     std::lock_guard<std::mutex> lk(_ackMutex);
     _fwStatus.reset();
+}
+
+std::optional<uint8_t> CommHandler::lastNakReason() {
+    std::lock_guard<std::mutex> lk(_ackMutex);
+    return _lastNak;
 }
 
 std::optional<uint8_t> CommHandler::waitFwStatus(int timeoutMs) {
@@ -1045,8 +1058,19 @@ void CommHandler::dispatchPacket(const Packet& pkt) {
     _dispatcher->handle(pkt);
     if (pkt.msgType == MsgType::FW_UPDATE_STATUS && pkt.dest == ADDR_PC && !pkt.payload.empty()) {
         std::lock_guard<std::mutex> lk(_ackMutex);
-        _fwStatus = pkt.payload[0];
-        _ackCv.notify_all();
+        // The device resends an un-ACKed status with the same PacketId (500 ms x 3). A late copy of a status the
+        // caller already took must not be read as the next one (a stale READY would pass for the END result).
+        const auto now = Clock::now();
+        const bool repeat = _fwSeen && _fwSeenPid == pkt.packetId && _fwSeenByte == pkt.payload[0] &&
+                            now - _fwSeenAt < std::chrono::seconds(2);
+        if (!repeat) {
+            _fwStatus = pkt.payload[0];
+            _fwSeen = true;
+            _fwSeenPid = pkt.packetId;
+            _fwSeenByte = pkt.payload[0];
+            _fwSeenAt = now;
+            _ackCv.notify_all();
+        }
     }
     if (_callback) _callback(pkt);
 }

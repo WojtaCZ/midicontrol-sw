@@ -7,6 +7,8 @@
 #include "midicontrol/console_exec.hpp"
 #include "midicontrol/config.hpp"
 #include "midicontrol/status.hpp"
+#include "midicontrol/firmware_update.hpp"
+#include "midicontrol/firmware_image.hpp"
 #include "midicontrol/log.hpp"
 #include "midicontrol/protocol/codec.hpp"
 #include "midicontrol/protocol/parser.hpp"
@@ -72,10 +74,39 @@ public:
     std::atomic<int> protoVer{0};      // > 0: GET_INFO is answered with an INFO_RESP carrying PROTO_VER
     std::atomic<int> organSrc{-1};     // >= 0: that INFO_RESP also carries ORGAN_SRC (A5); -1 = a v1 base (SSR tag only)
 
+    // A4: a remote that takes a firmware transfer. 0 = off; 1 = accepts it and sends every FW_UPDATE_STATUS
+    // twice with the same PacketId (the receiver's retry after a lost ACK); 2 = like 1 but DATA is NAKed
+    // NO_TRANSFER (the remote lost its transfer).
+    std::atomic<int> remoteFw{0};
+
     std::vector<Rx> log() { std::lock_guard<std::mutex> lk(_m); return _log; }
 
 private:
     void tx(const Packet& p) { auto b = encode(p); (void)!write(_master, b.data(), b.size()); }
+    void fwStatus(uint8_t st, uint8_t pid) {
+        for (int i = 0; i < 2; ++i) tx(Packet(ADDR_REMOTE, ADDR_PC, pid, MsgType::FW_UPDATE_STATUS, {st}));
+    }
+    bool fwFrame(const Packet& p) {
+        switch (p.msgType) {
+        case MsgType::FW_UPDATE_START:
+            tx(Packet(ADDR_REMOTE, ADDR_PC, _id++, MsgType::ACK, {p.packetId}));
+            fwStatus(static_cast<uint8_t>(FwStatus::READY), 71);
+            return true;
+        case MsgType::FW_UPDATE_DATA:
+            if (remoteFw == 2) {
+                tx(Packet(ADDR_REMOTE, ADDR_PC, _id++, MsgType::NAK,
+                          {p.packetId, static_cast<uint8_t>(NakReason::NO_TRANSFER)}));
+                return true;
+            }
+            tx(Packet(ADDR_REMOTE, ADDR_PC, _id++, MsgType::ACK, {p.packetId}));
+            return true;
+        case MsgType::FW_UPDATE_END:
+            tx(Packet(ADDR_REMOTE, ADDR_PC, _id++, MsgType::ACK, {p.packetId}));
+            fwStatus(static_cast<uint8_t>(FwStatus::CRC_OK), 77);
+            return true;
+        default: return false;
+        }
+    }
     void ack(const Packet& p) { tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::ACK, {p.packetId})); }
 
     void handle(const Packet& p) {
@@ -89,6 +120,7 @@ private:
         if (p.dest == ADDR_REMOTE) {  // forwarded, never executed by the base (own dedup: the remote's)
             if (p.msgType == MsgType::SIGNAL_ANCHOR && dropAnchors > 0) { --dropAnchors; return; }
             if (p.msgType == MsgType::SIGNAL_PLAYING && dropPlaying > 0) { --dropPlaying; return; }
+            if (remoteFw > 0 && fwFrame(p)) return;
             if (busyRemote > 0) {
                 --busyRemote;
                 tx(Packet(ADDR_BASE, ADDR_PC, _id++, MsgType::NAK, {p.packetId, static_cast<uint8_t>(NakReason::BUSY)}));
@@ -1535,4 +1567,73 @@ TEST(comm_a2_invalid_flag_ignores_the_id) {
     CHECK_EQ(r.resendsAfter([] {}), size_t(0));
     CHECK_EQ(r.resendsAfter([&] { r.base.bootId = 0x4321; }), size_t(0));  // valid=0: the id means nothing
     r.h->shutdown();
+}
+
+namespace {
+void put32le(std::vector<uint8_t>& v, uint32_t x) {
+    for (int i = 0; i < 4; ++i) v.push_back(static_cast<uint8_t>(x >> (8 * i)));
+}
+// An update file for the remote (board 3), same layout as midicontrol-bootloader tools/fw_trailer.py.
+std::vector<uint8_t> remoteUpdateFile() {
+    std::vector<uint8_t> f;
+    for (size_t i = 0; i < 100; ++i) f.push_back(static_cast<uint8_t>(i * 7));
+    while (f.size() % 8) f.push_back(0xFF);
+    std::vector<uint8_t> t;
+    put32le(t, static_cast<uint32_t>(f.size()));
+    put32le(t, mc::crc32(f.data(), f.size()));
+    put32le(t, (1u << 16) | (2u << 8) | 3u);
+    t.push_back(0x03);
+    t.push_back(static_cast<uint8_t>(mc::fwimage::kFormat));
+    t.push_back(0);
+    t.push_back(0);
+    put32le(t, mc::crc32(t.data(), 16));
+    put32le(t, mc::fwimage::kMagic);
+    f.insert(f.end(), t.begin(), t.end());
+    return f;
+}
+}  // namespace
+
+// A4 (PM-7): the device resends an un-ACKed FW_UPDATE_STATUS with the same PacketId. Both copies are
+// ACKed, but the copy of a status the updater already took is not a new status.
+TEST(comm_a4_repeated_fw_status_is_acked_but_counted_once) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    base.remoteFw = 1;
+    FirmwareUpdater up(h);
+    CHECK(up.updateRemote(remoteUpdateFile(), "remote-update.bin"));
+    std::this_thread::sleep_for(300ms);   // the repeated CRC_OK copy has arrived by now
+    CHECK(!h.takeFwStatus().has_value());
+    int ackedCopies = 0;
+    for (auto& r : base.log())
+        if (r.type == MsgType::ACK && r.payload.size() == 1 && r.payload[0] == 77) ++ackedCopies;
+    h.shutdown();
+    CHECK_EQ(ackedCopies, 2);
+}
+
+// A4 (PM-8): NAK NO_TRANSFER is final (no retries) and the updater says what happened.
+TEST(comm_a4_no_transfer_nak_fails_at_once_with_a_clear_text) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    base.remoteFw = 2;
+    std::vector<std::string> said;
+    FirmwareUpdater up(h, [&](const std::string& t) { said.push_back(t); });
+    const auto t0 = std::chrono::steady_clock::now();
+    CHECK(!up.updateRemote(remoteUpdateFile(), "remote-update.bin"));
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    CHECK(h.lastNakReason() == std::optional<uint8_t>(static_cast<uint8_t>(NakReason::NO_TRANSFER)));
+    int dataFrames = 0;
+    for (auto& r : base.log()) if (r.type == MsgType::FW_UPDATE_DATA) ++dataFrames;
+    h.shutdown();
+    CHECK_EQ(dataFrames, 1);              // not retried
+    CHECK(ms < 4000);                     // no 1.5 s x 9 chunk retries
+    bool clear = false;
+    for (auto& t : said)
+        if (t.find("device lost the transfer (reset or timeout); start the update again") != std::string::npos) clear = true;
+    CHECK(clear);
 }

@@ -21,6 +21,7 @@ const char* nakText(NakReason r) {
         case NakReason::INVALID_PAYLOAD: return "invalid song code";
         case NakReason::NOT_FOUND: return "song not found";
         case NakReason::NOT_PLAYING: return "nothing is playing";
+        case NakReason::NO_TRANSFER: return "no firmware transfer is running";
         default: return "refused";
     }
 }

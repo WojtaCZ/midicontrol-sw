@@ -97,6 +97,8 @@ public:
     std::optional<uint8_t> waitFwStatus(int timeoutMs);
     // Non-blocking take.
     std::optional<uint8_t> takeFwStatus() { return waitFwStatus(0); }
+    // NAK reason of the last sendReliable() that ended in a NAK; empty after an ACK or a timeout.
+    std::optional<uint8_t> lastNakReason();
 
     // High-level commands (thread-safe; playback work is queued).
     std::optional<mc::protocol::NakReason> playSong(const std::string& code);
@@ -266,6 +268,11 @@ private:
     int _awaitResult = 0;  // 0 = none, 1 = ACK, 2 = NAK
     uint8_t _awaitReason = 0;  // NAK reason when _awaitResult == 2 (guarded by _ackMutex)
     std::optional<uint8_t> _fwStatus;  // guarded by _ackMutex
+    std::optional<uint8_t> _lastNak;   // guarded by _ackMutex; see lastNakReason()
+    // A retried FW_UPDATE_STATUS (same PacketId, same byte) must not count as a new status. Guarded by _ackMutex.
+    bool _fwSeen = false;
+    uint8_t _fwSeenPid = 0, _fwSeenByte = 0;
+    Clock::time_point _fwSeenAt{};
 
     std::thread _readerThread;
     std::thread _keepaliveThread;

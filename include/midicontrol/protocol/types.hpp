@@ -68,6 +68,7 @@ enum class NakReason : uint8_t {
     NOT_PLAYING     = 0x05,  // command needs active playback (REPLAY_ANCHOR)
     UNREACHABLE     = 0x06,  // base: destination node not connected, packet not forwarded
     NOT_FOUND       = 0x07,  // PC: song code not in library
+    NO_TRANSFER     = 0x08,  // FW_UPDATE_DATA/END without an active transfer (device reset or timed out)
 };
 
 // A decoded/decodable packet. Unlike the fixed-size firmware struct (which
