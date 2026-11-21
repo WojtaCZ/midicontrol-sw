@@ -128,7 +128,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 ### B12 Cleanup leftovers; track .trail and graft the same way in every repo (Q2-32)
 - Goal: a list of files for the owner to approve. NOTHING is deleted or committed until the owner approves this exact list.
 - Current state (read-only check 2026-11-16):
-  - Untracked in midicontrolpy-sw: docs/superpowers/plans/2026-11-07-docker-deployment.md, docs/superpowers/specs/2026-11-07-docker-deployment-design.md, songs/406B.conf (runtime stops file from a bench run). Q2-32 replaces the old rule "leave them uncommitted": propose delete or commit per file; VERIFY with the owner that the docker plan/spec are also in the worktree midicontrolpy-sw-docker (branch docker-deployment) before deleting.
+  - Untracked in midicontrolpy-sw: docs/superpowers/plans/2026-11-07-docker-deployment.md, docs/superpowers/specs/2026-11-07-docker-deployment-design.md, songs/406B.conf (runtime stops file from a bench run). Q2-32 replaces the old rule "leave them uncommitted": propose delete or commit per file. DONE 2026-11-21 for the docker plan/spec: identical copies are tracked since the docker-deployment merge, the untracked duplicates were deleted. songs/406B.conf still open.
   - Untracked tool dirs in several repos: .claude/ .ignore (protocol, fw, remote, bootloader), .cache/ (remote). fw also shows ` ?` submodule entries lib/bootloader, lib/menu, lib/ui (VERIFY: submodule state, not a leftover).
   - .trail: tracked in all five repos (README.md, hook.cjs, .gitignore, learnings/; counts: protocol 7, fw 44, remote 14, pc 21, bootloader 3 files); each .trail/.gitignore lists `cache/` and `statusline.cjs`. `graft`: no graft file is tracked in any of the five repos (git ls-files shows none); `graft/`, `wt/`, `fault/`, `outIndex/`, `backups/`, `reference/` exist only at the workspace root /workspaces/MIDICONTROL-b81bba4a (not a git repo).
   - Workspace-root candidates for the owner: backups/ (many base-g431-flash-*.bin and remote-*.hex, dated 2026-10-18 to 2026-11-15), wt/, fault/, outIndex/, reference/, graft/, MIDICONTROL/midicontroller-fw (stray nested dir). VERIFY each before listing for deletion; do not touch backups/ (the manual says backups are not documented, M-backups, but they are flash images from real flashes).
@@ -136,7 +136,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Depends on: owner approval of the list; E3/D commits finished first so no work is lost.
 - Tests: `git status --short` clean in every repo; `trail check` unchanged.
 - Manual/facts: none.
-- Risk / open points: deleting is irreversible; show the final list first. The docker branch is unmerged (memory: docker-deployment pending), so its plan/spec may still be wanted.
+- Risk / open points: deleting is irreversible; show the final list first. The docker branch is merged (2026-11-21).
 
 ### PC side of A-items (protocol changes are specified in midicontrol-protocol/TODO.md)
 - PC side of A1 (session nonce): see midicontrol-protocol/TODO.md. PC touch points: src/dispatch.cpp (per-source remembered frames, kRemembered 8; reset on the new nonce), src/comm.cpp `nextPacketId()` / session start (~395-400) and the DISABLED_ PM-13 tests to re-enable (Q3-3).
