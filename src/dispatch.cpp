@@ -99,16 +99,33 @@ void Dispatcher::handle(const Packet& pkt) {
             answer(std::nullopt);
             _sink.stopSong(pkt.source);  // pause (0x01) is treated as stop
             return;
+        case MsgType::RECORD_SONG: {
+            // A7 (protocol v2, Base -> PC): [0x01] or empty starts, [0x00] stops. The PC enforces "one recording".
+            if (pkt.payload.size() > 1 || (pkt.payload.size() == 1 && pkt.payload[0] > 0x01)) {
+                answer(NakReason::INVALID_PAYLOAD);
+                return;
+            }
+            if (!pkt.payload.empty() && pkt.payload[0] == 0x00) {
+                answer(std::nullopt);
+                _sink.stopRecording(pkt.source);
+                return;
+            }
+            answer(_sink.startRecording(pkt.source));
+            return;
+        }
         case MsgType::REPLAY_ANCHOR:
             answer(_sink.addVerse());
             return;
         case MsgType::GET_SONG_LIST: {
-            if (pkt.payload.size() > 1) {
+            if (pkt.payload.size() > 2) {
                 answer(NakReason::INVALID_PAYLOAD);
                 return;
             }
             answer(std::nullopt);
-            size_t offset = pkt.payload.empty() ? 0 : pkt.payload[0];
+            // A9: offset is u16 LE; 1 byte (< 256) and empty (0) stay valid
+            size_t offset = pkt.payload.size() == 2
+                                ? static_cast<size_t>(pkt.payload[0] | (pkt.payload[1] << 8))
+                                : pkt.payload.empty() ? 0 : pkt.payload[0];
             auto page = _sink.songListPage(offset);
             if (!broadcast && _out.sendWithAck) {
                 _out.sendWithAck(pkt.source, MsgType::SONG_LIST_RESP, page);

@@ -1,0 +1,45 @@
+# Web edition of the manual. `nav` is also the chapter order of the PDF.
+site_name: "MIDIcontrol"
+site_description: "MIDIcontrol – uživatelská příručka"
+docs_dir: docs
+site_dir: ../build/site
+
+theme:
+  name: material
+  language: cs
+  features:
+    - navigation.footer
+    - navigation.top
+    - toc.follow
+    - search.highlight
+    - content.code.copy
+
+# With --strict (docs-build always uses it) a link to a missing #anchor fails
+# the build. Give headings you link to an explicit id: `## Reset { #reset }`.
+validation:
+  links:
+    anchors: warn
+
+# Only extensions whose output docs-build can carry into the PDF. Content tabs,
+# Mermaid and raw HTML render on the web only; use SVG images for diagrams.
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Úvod: index.md
+  - Ovladač: ovladac.md
+  - Základna: zakladna.md
+  - Tabule: tabule.md
+  - Webová stránka: web.md
+  - Typické postupy: postupy.md
+  - Řešení problémů: problemy.md
+  - Pro správce: sprava.md
+  - Slovníček: slovnicek.md
+  - Rychlý přehled: tahak.md

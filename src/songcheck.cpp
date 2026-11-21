@@ -3,6 +3,7 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <filesystem>
 #include <stdexcept>
@@ -25,6 +26,20 @@ std::string upper(std::string s) {
 
 bool hasMidExtension(const fs::path& p) { return upper(p.extension().string()) == ".MID"; }
 
+// Right-aligned: blanks only in front of the number, never after a digit.
+template <size_t N>
+bool rightAligned(const std::array<uint8_t, N>& d) {
+    bool digitSeen = false;
+    for (uint8_t b : d) {
+        if (b == mc::sysex::BLANK_DIGIT) {
+            if (digitSeen) return false;
+        } else {
+            digitSeen = true;
+        }
+    }
+    return true;
+}
+
 void checkAnchors(const mc::smf::MidiFile& mf, std::vector<std::string>& problems) {
     uint32_t firstNoteTick = UINT32_MAX;
     for (const auto& ev : mf.events) {
@@ -35,10 +50,14 @@ void checkAnchors(const mc::smf::MidiFile& mf, std::vector<std::string>& problem
     }
     bool emptyAnchor = false;
     bool verseAnchor = false;
+    bool songShifted = false;
+    bool verseShifted = false;
     for (const auto& ev : mf.events) {
         if (ev.kind != mc::smf::EventKind::SysEx) continue;
         auto info = mc::sysex::parse(ev.bytes);
         if (info && info->hasVerse) verseAnchor = true;
+        if (info && info->hasSong && !rightAligned(info->songDigits)) songShifted = true;
+        if (info && info->hasVerse && !rightAligned(info->verseDigits)) verseShifted = true;
         // Other vendors' SysEx (e.g. a GM reset) is not an anchor at all.
         const bool ours = ev.bytes.size() >= 2 && ev.bytes[0] == mc::sysex::HEADER0 &&
                           ev.bytes[1] == mc::sysex::HEADER1;
@@ -49,6 +68,9 @@ void checkAnchors(const mc::smf::MidiFile& mf, std::vector<std::string>& problem
     } else if (!verseAnchor) {
         problems.push_back("no display anchors");
     }
+    // D24: warn only; the file is played as authored.
+    if (songShifted) problems.push_back(kWarnSongShifted);
+    if (verseShifted) problems.push_back(kWarnVerseShifted);
 }
 
 }  // namespace

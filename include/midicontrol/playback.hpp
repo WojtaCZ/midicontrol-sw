@@ -47,6 +47,10 @@ struct Section {
 // merged; anchors before the first note define the first section.
 std::vector<Section> scanSections(const mc::smf::MidiFile& mf);
 
+// True when the file has verse markers: more than one section, or a first section that carries a verse number.
+// A song with only a prelude-like head (no verse anchor, or only blank ones) has no sections (A6).
+bool songHasSections(const std::vector<Section>& sections);
+
 // Label for SIGNAL_ANCHOR: "Predehra", "Sloka 2", "Sloka 2 +1".
 std::string sectionLabel(const Section& s, int pendingRepeats);
 

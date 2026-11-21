@@ -207,3 +207,38 @@ TEST(devinfo_unknown_link_values_are_left_out) {
     auto f = devinfo::decode(p.data(), p.size());
     CHECK(f.empty());
 }
+
+// Protocol v2 (A1): PROTO_VER (tag 0x08, u8). A node that does not send it speaks protocol v1.
+TEST(devinfo_proto_ver_is_decoded) {
+    Bytes p;
+    add(p, 0x01, "c880b14");
+    p.insert(p.end(), {0x08, 1, 2});
+    auto f = devinfo::decode(p.data(), p.size());
+    CHECK_EQ(get<int64_t>(f, "proto_ver"), int64_t(2));
+    bool known = false;
+    for (const auto& key : devinfo::fieldKeys()) known |= key == "proto_ver";
+    CHECK(known);
+}
+
+TEST(devinfo_proto_ver_with_wrong_length_is_ignored) {
+    Bytes p{0x08, 2, 2, 0};
+    auto f = devinfo::decode(p.data(), p.size());
+    CHECK(find(f, "proto_ver") == nullptr);
+}
+
+// A5: ORGAN_SRC (tag 0x22, u8 0..3, v2 base).
+TEST(devinfo_organ_src_is_decoded) {
+    Bytes p{0x21, 1, 1, 0x22, 1, 1};
+    auto f = devinfo::decode(p.data(), p.size());
+    CHECK_EQ(get<int64_t>(f, "organ_src"), int64_t(1));
+    bool known = false;
+    for (const auto& key : devinfo::fieldKeys()) known |= key == "organ_src";
+    CHECK(known);
+}
+
+TEST(devinfo_organ_src_out_of_range_or_wrong_length_is_ignored) {
+    Bytes p{0x22, 1, 4};
+    CHECK(find(devinfo::decode(p.data(), p.size()), "organ_src") == nullptr);
+    Bytes q{0x22, 2, 1, 0};
+    CHECK(find(devinfo::decode(q.data(), q.size()), "organ_src") == nullptr);
+}

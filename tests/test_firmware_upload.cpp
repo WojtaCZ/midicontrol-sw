@@ -128,3 +128,34 @@ TEST(fwupload_unknown_target_and_busy) {
     CHECK(has(r.body, "already running"));
     CHECK_EQ(rec.calls, 1);
 }
+
+TEST(fwupload_transfer_progress_updates_the_message) {
+    // FAULTS 2.6: fw_update_msg stayed at "Requesting reboot into bootloader..." while the
+    // image was sent. Each new percentage now carries a message with the bytes sent.
+    TransferProgress p;
+    auto s = p.update(0, 2000);
+    CHECK(s.has_value());  // the first block replaces the reboot message at once
+    CHECK_EQ(s->pct, 0);
+    CHECK_EQ(s->msg, "Sending the image: 0 of 2000 bytes");
+    CHECK(!p.update(10, 2000).has_value());  // still 0 %: no status write per block
+    s = p.update(1000, 2000);
+    CHECK(s.has_value());
+    CHECK_EQ(s->pct, 50);
+    CHECK_EQ(s->msg, "Sending the image: 1000 of 2000 bytes");
+    s = p.update(2000, 2000);
+    CHECK(s.has_value());
+    CHECK_EQ(s->pct, 100);
+    CHECK_EQ(s->msg, "Image sent (2000 bytes)");
+    CHECK(!p.update(2000, 2000).has_value());
+    TransferProgress empty;
+    CHECK_EQ(empty.update(0, 0)->pct, 100);
+}
+
+TEST(fwupload_update_refusal_covers_cli_and_web) {
+    // SB-1: the CLI `update` and the web upload share one rule; a playing song refuses both.
+    CHECK_EQ(updateRefusal(false, false, true), "");
+    CHECK(has(updateRefusal(false, true, true), "song is playing"));
+    CHECK(has(updateRefusal(true, true, true), "already running"));  // busy wins over playing
+    CHECK(has(updateRefusal(false, false, false), "not connected"));
+    CHECK(has(updateRefusal(false, true, false), "song is playing"));  // playing wins over base state
+}

@@ -36,6 +36,11 @@ int spawn(const std::vector<std::string>& args) {
     return rc == 0 ? pid : -rc;
 }
 
+bool running(int pid) {
+    if (pid <= 0) return false;
+    return waitpid(pid, nullptr, WNOHANG) == 0;  // pid: exited and reaped; -1: not our child
+}
+
 Ended terminate(int pid, int graceMs) {
     if (pid <= 0) return Ended::NotRunning;
     if (kill(pid, SIGTERM) != 0) {

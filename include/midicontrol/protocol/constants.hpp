@@ -28,6 +28,12 @@ inline constexpr uint8_t ESC_PERCENT     = 0x27;  // ESC 0x27 -> 0x25 (%)
 inline constexpr uint8_t FORBIDDEN_DOLLAR  = 0x24;  // $ - RN4870 command mode
 inline constexpr uint8_t FORBIDDEN_PERCENT = 0x25;  // % - RN4870 status delimiter
 
+// Protocol version (INFO tag PROTO_VER). Version 1 is implicit: a node without PROTO_VER is v1.
+// 2: PROTO_VER in INFO_RESP, KEEPALIVE session nonce, 8-id duplicate window, ORGAN_SRC INFO tag, SIGNAL_INFO (incl.
+//    BASE_UPDATING), KEEPALIVE_ACK boot id + 7-byte STATUS_RESP, NPI_CLEAR_IF_OWN, FW_UPDATE_STATUS ACK/retry + NAK
+//    NO_TRANSFER, GET_SONG_LIST u16 offset, RECORD_SONG Base->PC + SIGNAL_RECORDING.
+inline constexpr uint8_t PROTOCOL_VERSION = 2;
+
 // Node addresses.
 inline constexpr uint8_t ADDR_PC        = 0x01;
 inline constexpr uint8_t ADDR_BASE      = 0x02;
@@ -56,6 +62,13 @@ inline constexpr uint8_t MAX_SONG_CODE_LEN = 8;
 inline constexpr uint8_t NPI_NO_CHANGE   = 0xFF;  // field unchanged
 inline constexpr uint8_t NPI_BLANK       = 0xFE;  // blank the field (song number / verse)
 inline constexpr uint8_t NPI_DIGIT_BLANK = 0x0F;  // BCD nibble: blank digit
+// One-byte payload (protocol v2): clear the indicator only if this system wrote the number last.
+inline constexpr uint8_t NPI_CLEAR_IF_OWN = 0x01;
+
+// SIGNAL_INFO flags byte (protocol v2, MsgType 0x34). Receivers read the bytes and bits they know and ignore the
+// rest; bits 2-7 are reserved and sent as 0. The sender always sends the complete flags byte.
+inline constexpr uint8_t SIGNAL_INFO_SONG_HAS_SECTIONS = 0x01;  // bit0 (A6): the song file has verse markers; 0 = the remote hides add-verse
+inline constexpr uint8_t SIGNAL_INFO_BASE_UPDATING     = 0x02;  // bit1 (A8): sent by the base before it reboots into its bootloader; the remote shows "Zakladna: aktualizace"
 
 }  // namespace mc::protocol
 

@@ -5,7 +5,7 @@ The PC player (`midicontrol`) runs unattended, serves a status page with a Stops
 - Design (the binding spec): [`superpowers/specs/2026-10-19-status-web-design.md`](superpowers/specs/2026-10-19-status-web-design.md)
 - Implementation plan: [`superpowers/plans/2026-10-19-status-web.md`](superpowers/plans/2026-10-19-status-web.md)
 
-> **Status (2026-10-19):** implemented and merged to `main`, but **not yet tested on the bench hardware**. See [Bench checklist](#bench-checklist-not-run-yet).
+> **Status (2026-11-14):** implemented and merged to `main`. The web firmware update, its busy answers and the base reconnect were re-tested on the bench on 2026-11-12 (`FAULTS.md` 2.1). The rest of the [Bench checklist](#bench-checklist-not-run-yet) (systemd watchdog kill, port squatter, `record`) has not been run. On `main` the service is the systemd user unit described here; the unmerged branch `docker-deployment` proposes a Docker container as production instead (see `CLAUDE.md`).
 
 ---
 
@@ -61,7 +61,7 @@ Open `http://<pc>:50118/` from any machine on the LAN. The page is one self-cont
 
 The page has two views, switched in the top bar: **Přehled** (home, in Czech, for the organist) and **Pokročilé** (Advanced, in English, the full debug detail). The top bar also shows the live connection ("aktualizováno před N s"). If a request fails or takes longer than 3 s, it shows a red dot and "bez spojení s přehrávačem", a red notice appears on the home page, and the last data stays on screen greyed out.
 
-Addresses: `#` home, `#stops` home scrolled to the stops editor, `#adv/overview|software|base|controller|diag` the Advanced pages (the old `#base`, `#diag`, ... still open the matching Advanced page).
+Addresses: `#` home, `#stops` home scrolled to the stops editor, `#adv/overview|software|base|controller|diag|firmware` the Advanced pages (`firmware` is the upload tab, see "Firmware tab") (the old `#base`, `#diag`, ... still open the matching Advanced page).
 
 ### Home (Přehled)
 
@@ -115,6 +115,8 @@ Each node keeps its last 200 events in memory. Nothing survives a restart: the j
 
 An unplugged base is a state, not an error: the dot is yellow "Waiting for the base" and the player reconnects on its own.
 
+Base field **`in_bootloader`**: true while the serial port is closed, no update is running and the base shows up as its USB bootloader (ABCD:1235), i.e. a firmware update did not finish (P1-13). The player logs an ERROR once; the console `status` command then advises `update base <file>` to re-flash it. Nothing is re-flashed automatically.
+
 ### Base status poll
 
 While connected, the player sends `GET_STATUS` to the base every 5 s. A NAK, or no answer within 2 s, shows "not answered" (yellow), not an error. The poll and keepalives pause during a base firmware update, because the bootloader ignores them.
@@ -134,14 +136,14 @@ The play folder is scanned at start and rescanned every 60 s on the web thread, 
 | `cannot parse: <reason>` | the MIDI file reader rejected it |
 | `empty display anchor` | an empty SysEx (`F0 F7`), or one with the MIDIControl header that doesn't decode, before the first note (e.g. `523.mid`) |
 | `no display anchors` | no display SysEx with a verse field at all (not repeated when an empty anchor was already reported) |
-| `file name is not a valid song code` | the name without `.mid` isn't `[0-9A-Z]{1,8}` (e.g. `072 - Lide muj.mid`) |
+| `file name is not a valid song code` | the name without `.mid` is not a song code: 1-4 digits, value <= 1999, optional A-D (e.g. `072 - Lide muj.mid`, `2000.mid`, `rejstriky.mid`) |
 
 ### JSON API
 
-`GET /api/status` returns schema version 1:
+`GET /api/status` returns **schema version 2** (`/api/diag` and `/api/stops` are schema 1, each with its own `schema` field):
 
 ```json
-{"schema":1,"now_ms":1792432422052,
+{"schema":2,"now_ms":1792432422052,
  "nodes":{
    "software":{"dot":"green","fields":{"version":"73ebcbf","playback":"idle"},
                "counters":{"songs_ended":3},
@@ -152,6 +154,7 @@ The play folder is scanned at start and rescanned every 60 s on the web thread, 
  "songs":[{"code":"401","problem":""},{"code":"523","problem":"empty display anchor"}]}
 ```
 
+- Each node object also carries `last_fault` (the newest decoded fault of that node, `null` if none) and `unseen_faults` (count not yet acknowledged with **Mark seen**); both are written for every node. They drive the yellow dot and the home page notice.
 - Events and problems are newest first.
 - Times are ms since the epoch.
 - Text is escaped so the JSON is valid for any bytes: invalid UTF-8 becomes `�`.
@@ -162,16 +165,16 @@ Field names, which are the contract between `CommHandler`, `main` and the page:
 | Node | Fields | Counters |
 |---|---|---|
 | software | `version`, `build_date`, `started_ms`, `config_path`, `play_folder`, `song_count`, `song_problems`, `playback`, `recording` (bool, true while `arecordmidi` runs; read by the container updater's idle guard), `fw_update_state` (`running`/`done`/`failed`), `stops`, `song`, `section`, `last_song`, `last_sections`, `last_end`, `activity` | `songs_ended`, `songs_stopped`, `warnings`, `errors` |
-| base | `connected`, `alive`, `updating`, `device`, `vidpid`, `midi_port_found`, `midi_out`, `keepalive_ack_ms`, `connected_since_ms`, `reconnects`, `organ_power` (base SSR, null = unknown), `status_ms`, `status_ble`, `status_relay`, `status_display`, `status_pc`, `status_answered` (the `status_*` fields are null while not connected) | `tx`, `rx`, `retries`, `gave_up`, `nak_sent`, `nak_received`, `crc_errors`, `duplicates`, `warnings`, `errors` |
+| base | `connected`, `alive`, `updating`, `device`, `vidpid`, `midi_port_found`, `midi_out`, `keepalive_ack_ms`, `connected_since_ms`, `reconnects`, `organ_power` (base SSR, null = unknown), `status_ms`, `status_ble`, `status_relay`, `status_display`, `status_pc`, `status_answered` (the `status_*` fields are null while not connected) | `tx`, `rx`, `retries`, `busy_retries`, `gave_up`, `nak_sent`, `nak_received`, `crc_errors`, `duplicates`, `warnings`, `errors` |
 | controller | `last_rx_ms`, `last_cmd`, `last_cmd_reply`, `last_cmd_ms`, `last_tx`, `last_tx_result`, `last_tx_ms` | the same packet counters, plus `cmd.<MSGTYPE>` per received command |
 | base, controller (INFO_RESP) | `info_ms`, `info_unsupported`, `fw_revision`, `fw_branch`, `fw_built`, `fw_dirty`, `uptime_ms`, `reset_cause`, `fault_count`, `ble_connected`, `ble_stream_open`, `ble_secured`, `ble_bonded`, `ble_module_up`, `ble_peer_alive`, `ble_pc_alive`, `ble_peer`, `ble_name`, `ble_pairing`, `link_rssi`, `link_peer_rssi`, `link_interval_ms`, `link_latency`, `link_timeout_ms`, `link_phy`, `link_losses`, `link_err_conn`, `link_module_reboots`, `link_secure_retries`, `link_reconnect_ms` (RSSI fields are omitted when not measured); base `display`, `ssr`; controller `battery_mv`, `battery_level`, `battery_percent`, `charging`, `charge_done`, `vbus`, `battery_critical`, `vbus_mv` (all null when not reported) | |
 
-Any other path returns 404 and any method other than GET (or PUT on `/api/stops/<code>`, see below) returns 405. Malformed requests get 400, oversized ones (> 8 KiB) 413, chunked ones (no `Content-Length`) 411, and incomplete ones 408 after 3 s.
+Routes: `GET /`, `GET /api/status`, `GET /api/diag`, `GET /api/stops`, `PUT /api/stops/<code>`, `POST /api/firmware/<base|remote>`. Any other path returns 404. A wrong method on a known resource returns 405 with an `Allow` header: `POST` for `/api/firmware/...` and `/api/firmware`, `PUT` for `/api/stops/<code>`, `GET` for the rest. Malformed requests get 400, oversized ones 413, chunked ones (no `Content-Length`) 411, and incomplete ones 408 after 3 s. Limits (`include/midicontrol/http.hpp`): head plus body together 8 KiB (`kMaxRequest` 8192), body 4 KiB (`kMaxBody` 4096), firmware upload body 512 KiB (`kMaxFirmwareBody`, that route only).
 
 ### Isolation from playback
 
 - The web server runs on its own thread and only reads copies of the status registry, taken under the registry's short lock. It never takes `CommHandler` or `Player` locks.
-- It serves up to 8 connections at once (`poll()`), so an idle browser connection can't hold up the others. Each request has a 3 s deadline and an 8 KiB limit.
+- It serves up to 8 connections at once (`poll()`), so an idle browser connection can't hold up the others. Each request has a 3 s deadline and an 8 KiB head+body limit (4 KiB body; 512 KiB for the firmware upload).
 - Writes use `MSG_NOSIGNAL`, and every exception is caught and logged.
 - If the port can't be bound (in use, or an invalid `Bind`), the server logs **one** ERROR and retries every 10 s while playback runs normally.
 
@@ -225,7 +228,7 @@ The base and controller images can't be swapped. Each check stops it on its own:
 2. **Service**, `fwupload::handlePost`: the same check with `fwimage::check` against the unit in the URL (`base` = 0x02, `remote` = 0x03). 422 `{"error": ...}` for any failure (a board ID that is neither unit is "built for an unknown unit (board ID N)", as on the page); the update is never started.
 3. **Device**: `FW_UPDATE_START` carries the target and the firmware NAKs a foreign one; at `FW_UPDATE_END` the bootloader / remote app checks trailer, board ID and CRC again before committing (midicontrol-bootloader README).
 
-The POST needs `Content-Type: application/octet-stream` (415 otherwise, so a cross-site form can't post), may carry up to 512 KiB (only this route; everything else keeps the 4 KiB limit) and gets 60 s to arrive instead of 3 s. The body must have a `Content-Length`: a chunked upload gets 411. `/api/firmware` without a target is 404, and any method other than POST on `/api/firmware/<target>` is 405. A valid file answers **202** `{"target","version","size"}` and the update runs on a worker thread of `ConsoleExecutor`. It answers **409** while another update runs (checked first, so a second upload during a base update says so rather than "the base is not connected"), while a song is playing, or while the base isn't connected; a CLI `update` and a page upload share one busy flag. Progress is in `/api/status` as Software fields `fw_update_target`, `fw_update_state` (`running` / `done` / `failed`), `fw_update_pct`, `fw_update_msg` (last updater message; a base update shows "Sending the image to the base bootloader..." during the transfer) and `fw_update_ms`, also for a CLI `update`, so the card shows a bar however the update was started. The Flash button asks for confirmation and stays off while a song plays, the base is disconnected or (for the controller) the base reports no BLE link. Stopping the service waits for an upload to finish (`ConsoleExecutor::waitForUpload` before `CommHandler::shutdown`).
+The POST needs `Content-Type: application/octet-stream` (415 otherwise, so a cross-site form can't post), may carry up to 512 KiB (only this route; everything else keeps the 4 KiB body limit, and 8 KiB for head plus body) and gets 60 s to arrive instead of 3 s. The body must have a `Content-Length`: a chunked upload gets 411. `/api/firmware` without a target is 404, and any method other than POST on `/api/firmware/<target>` is 405. A valid file answers **202** `{"target","version","size"}` and the update runs on a worker thread of `ConsoleExecutor`. It answers **409** while another update runs (checked first, so a second upload during a base update says so rather than "the base is not connected"), while a song is playing, or while the base isn't connected; a CLI `update` and a page upload share one busy flag and the same playing refusal (`fwupload::updateRefusal`). Progress is in `/api/status` as Software fields `fw_update_target`, `fw_update_state` (`running` / `done` / `failed`), `fw_update_pct`, `fw_update_msg` (last updater message; a base update shows "Sending the image to the base bootloader..." during the transfer) and `fw_update_ms`, also for a CLI `update`, so the card shows a bar however the update was started. The Flash button asks for confirmation and stays off while a song plays, the base is disconnected or (for the controller) the base reports no BLE link. Stopping the service waits for an upload to finish (`ConsoleExecutor::waitForUpload` before `CommHandler::shutdown`).
 
 There is no login: anyone who can open the page on the LAN can flash a valid image, just as they can edit stops. Set `[WEB] Bind=127.0.0.1` if that's too open.
 
@@ -238,7 +241,7 @@ midicontrol                                        # in a terminal
 midicontrol --cmd "update base midicontrol-fw-update.bin"   # one-shot, for scripts
 ```
 
-- **Service running:** `midicontrol` attaches as a thin client, with the same prompt and commands as before: `play <code>`, `stop`, `verse`, `list`, `record`, `on`, `off`, `status`, `update <base|remote> <name-update.bin>`, `quit`. `quit` only **detaches**; the service keeps running.
+- **Service running:** `midicontrol` attaches as a thin client, with the same prompt and commands as before: `play <code>`, `stop`, `verse`, `list`, `record`, `on`, `off`, `status`, `diag` (last faults and log lines), `update <base|remote> <name-update.bin>`, `quit`. `verse` has the alias `repeat`. `quit` only **detaches**; the service keeps running.
 - **No service running:** it runs standalone as before and takes the single-instance lock itself, so a service started later would fail until it exits.
 - **`--cmd`:** prints the replies and exits **0** on success, **1** on failure (unknown command, song not found, nothing playing, base didn't answer, update failed, connection lost). With no service running it runs that one command standalone.
 - **Where commands run:** inside the service, through the same `CommHandler` paths the remote uses. The client only sends a line and prints the text that comes back.
@@ -246,6 +249,7 @@ midicontrol --cmd "update base midicontrol-fw-update.bin"   # one-shot, for scri
   - `update` streams its progress to the client until done.
   - The client turns a relative `.bin` path into an absolute one before sending. The service reads the file itself, so the service user needs permission to read it.
   - Only one update runs at a time, including one started from the page's Firmware tab; a second gets `busy: a firmware update is already running`.
+  - `update` is refused while a song is playing (`refused: a song is playing; stop it first`), the same rule as the page upload, because the base reboots into its bootloader. This also covers `--cmd` and the control socket (audit SB-1, 2026-11-14).
   - While it runs, the Software tab shows the activity ("firmware update to base in progress") and the Base dot is yellow "Firmware update in progress".
 - **Disconnects:** a client that drops mid-command never cancels it or blocks the service; its output is discarded. Stopping the service waits for a running firmware update to finish, so the base is never abandoned half-flashed.
 - **Limits:** at most 4 clients at a time; a 5th gets `busy: too many clients`.
@@ -288,6 +292,7 @@ There is no login and no HTTPS, by design: the page is meant for a trusted LAN (
 | Page shows "no connection" | The service is stopped, restarting or frozen. `systemctl --user status midicontrol`. |
 | Base dot yellow "Waiting for the base" | USB unplugged or not enumerated; the player reconnects by itself. |
 | Base dot red | Serial open but the base doesn't answer keepalives: firmware hung or wrong device. |
+| Base `in_bootloader` true / ERROR "The base is in its USB bootloader" | A base firmware update did not finish. Re-flash: `midicontrol --cmd "update base <file>-update.bin"`. |
 | Controller dot grey | The base isn't connected, or hasn't answered GET_STATUS in the last 15 s. |
 | `error: another midicontrol instance is running … but does not answer` | A second player holds the lock but its socket is gone. Find it with `pgrep -a midicontrol`. |
 | `warning: a worker thread stalled; withholding the watchdog ping` | A CommHandler thread made no progress for 10 s; systemd will restart the service within 30 s. |
@@ -332,7 +337,7 @@ App layer:
 
 It was built test-first, one task per commit, following the plan. A fresh reviewer then reviewed the whole branch, and the review fixes went in as one more commit.
 
-**Unit tests:** 122, all passing, no compiler warnings. They cover:
+**Unit tests:** 122 at the time of the first implementation, all passing, no compiler warnings (285 on 2026-11-14; one real-songs check fails because of the tracked `songs/rejstriky.mid`, see `TODO.md`). They cover:
 - the registry and dot rules;
 - JSON escaping (control characters, invalid and overlong UTF-8);
 - HTTP parsing and routing (good, incomplete, oversize, malformed, unknown paths and methods);
@@ -344,7 +349,7 @@ It was built test-first, one task per commit, following the plan. A fresh review
 - child-process signal handling;
 - the new parser and dispatcher hooks.
 
-**Container limits:** RtMidi isn't installed in the dev container and there's no network, so the CMake app target was skipped. Instead:
+**Container limits (historical, 2026-10-19):** RtMidi was not installed in the dev container then, so the CMake app target was skipped (it is built only when `pkg-config` finds `rtmidi`; the 2026-11-14 container builds it). Instead:
 
 - **Stub build:** every app source was compiled with `-Wall -Wextra -Werror` and linked against a small RtMidi stub header, then run.
 - **Real base visible:** the base is visible in the container as `/dev/ttyACM0`. All local runs after the first hid it with an `LD_PRELOAD` shim. The one earlier run exchanged only keepalive and status-request packets with it.

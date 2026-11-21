@@ -22,6 +22,21 @@ bool hasMidExtension(const fs::path& p) { return upper(p.extension().string()) =
 
 }  // namespace
 
+bool validCode(const std::string& code) {
+    size_t n = 0;
+    int value = 0;
+    while (n < code.size() && code[n] >= '0' && code[n] <= '9') {
+        if (n == 4) return false;  // 5+ digits
+        value = value * 10 + (code[n] - '0');
+        ++n;
+    }
+    if (n == 0 || value > 1999) return false;
+    if (n == code.size()) return true;
+    if (code.size() != n + 1) return false;
+    const char c = static_cast<char>(std::toupper(static_cast<unsigned char>(code[n])));
+    return c >= 'A' && c <= 'D';
+}
+
 std::optional<std::string> sanitizeCode(const std::string& raw) {
     std::string s = raw;
     while (!s.empty() && (s.back() == '\0' || std::isspace(static_cast<unsigned char>(s.back())))) {
@@ -31,11 +46,7 @@ std::optional<std::string> sanitizeCode(const std::string& raw) {
     while (a < s.size() && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
     s = upper(s.substr(a));
 
-    if (s.empty() || s.size() > mc::protocol::MAX_SONG_CODE_LEN) return std::nullopt;
-    for (char c : s) {
-        bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z');
-        if (!ok) return std::nullopt;
-    }
+    if (s.size() > mc::protocol::MAX_SONG_CODE_LEN || !validCode(s)) return std::nullopt;
     return s;
 }
 
@@ -87,8 +98,10 @@ std::vector<std::string> listSongs(const std::string& folder) {
         if (!entry.is_regular_file(ec2)) continue;
         const fs::path& p = entry.path();
         if (!hasMidExtension(p)) continue;
-        auto code = sanitizeCode(p.stem().string());
-        if (code) codes.push_back(*code);
+        // Q1-2a: the stem itself must be the code (as for play and songcheck); " 12.mid" is not offered.
+        const std::string stem = p.stem().string();
+        auto code = sanitizeCode(stem);
+        if (code && *code == upper(stem)) codes.push_back(*code);
     }
     std::sort(codes.begin(), codes.end(), naturalLess);
     codes.erase(std::unique(codes.begin(), codes.end()), codes.end());

@@ -17,6 +17,7 @@ TEST(names_msg_type) {
     CHECK_EQ(static_cast<int>(MsgType::DIAG_RESP), 0x81);
     CHECK_EQ(std::string(protocol::msgTypeName(static_cast<MsgType>(0x99))), "UNKNOWN");
     CHECK_EQ(std::string(protocol::nakReasonName(0x05)), "NOT_PLAYING");
+    CHECK_EQ(std::string(protocol::nakReasonName(0x08)), "NO_TRANSFER");
     CHECK_EQ(std::string(protocol::nakReasonName(0x77)), "UNKNOWN");
 }
 

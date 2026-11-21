@@ -1,3 +1,4 @@
+#include <optional>
 #include <vector>
 
 #include "midicontrol/firmware_image.hpp"
@@ -70,4 +71,18 @@ TEST(fwimage_rejects_corruption) {
     auto extra = f;
     extra.insert(extra.begin(), 0x00);  // size no longer matches
     CHECK(check(extra, 0x02) == Check::BadSize);
+}
+
+TEST(fwimage_unknown_board_id_reads_as_on_the_page) {
+    // FAULTS 2.6: board ID 7 is neither base nor controller. The page says "unknown unit
+    // (board ID 7)"; the console update path must not say "the other unit".
+    auto f = makeUpdateFile(0x07);
+    CHECK(check(f, 0x02) == Check::UnknownBoard);
+    CHECK(check(f, 0x03) == Check::UnknownBoard);
+    CHECK(boardIdOf(f) == std::optional<uint8_t>(0x07));
+    CHECK(!boardIdOf(Bytes(200, 0x11)).has_value());
+    CHECK_EQ(describe(Check::UnknownBoard, 7), "image is built for an unknown unit (board ID 7)");
+    CHECK_EQ(describe(Check::WrongBoard, 3), "image is built for the other unit (board ID mismatch)");
+    // The other unit's real ID stays "the other unit".
+    CHECK(check(makeUpdateFile(0x03), 0x02) == Check::WrongBoard);
 }

@@ -17,8 +17,18 @@
 //                                          before the first note (e.g. 523.mid)
 //   "no display anchors"                   no display SysEx with a verse field at
 //                                          all (not repeated after an empty anchor)
-//   "file name is not a valid song code"   the name without .mid isn't [0-9A-Z]{1,8}
+//   "file name is not a valid song code"   the name without .mid is not 1-4 digits <= 1999 + optional A-D (PCW-1)
+//   kWarnSongShifted / kWarnVerseShifted   a display SysEx whose song or verse
+//                                          digits are not right-aligned (a blank
+//                                          after a digit, e.g. 513.mid "513 ",
+//                                          512.mid verse "1 "). An authoring
+//                                          mistake (D24): warned, never fixed.
 namespace mc::songcheck {
+
+inline constexpr const char* kWarnSongShifted =
+    "warning: song number digits are shifted (not right-aligned) in a display SysEx";
+inline constexpr const char* kWarnVerseShifted =
+    "warning: verse digits are shifted (not right-aligned) in a display SysEx";
 
 struct FileCheck {
     std::string file;  // base name, e.g. "523.mid"

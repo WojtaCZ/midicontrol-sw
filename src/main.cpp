@@ -221,6 +221,7 @@ int main(int argc, char** argv) {
     status.set(Node::Software, "diag_dir", config.diagDir);
 
     CommHandler handler(config, [] { return findMidiControlPorts(); }, status, &diagStore);
+    handler.setBootloaderProbe([] { return baseInBootloader(); });
     handler.start([] { return findMidiControlPort(); }, findMidiControlPort().value_or(""));
     ConsoleExecutor exec(handler, status, &diagStore);
 

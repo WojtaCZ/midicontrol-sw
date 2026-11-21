@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 330" width="760" height="330" font-family="DejaVu Sans, Arial, sans-serif" font-size="14">
+  <title>Topologie systému MIDIcontrol</title>
+  <defs>
+    <style>
+      .box { fill: #f4f6f8; stroke: #333; stroke-width: 2; }
+      .main { fill: #e3eefc; stroke: #1f4e8c; stroke-width: 2.5; }
+      .line { stroke: #333; stroke-width: 2; fill: none; }
+      .dash { stroke: #333; stroke-width: 2; fill: none; stroke-dasharray: 7 5; }
+      .t { fill: #111; text-anchor: middle; }
+      .s { fill: #444; text-anchor: middle; font-size: 12px; }
+      .lab { fill: #111; text-anchor: middle; font-size: 12px; font-weight: bold; }
+    </style>
+  </defs>
+  <rect class="box" x="20" y="30" width="170" height="70" rx="8"/>
+  <text class="t" x="105" y="60" font-weight="bold">Ovladač</text>
+  <text class="s" x="105" y="80">v ruce varhaníka</text>
+
+  <rect class="main" x="295" y="30" width="170" height="70" rx="8"/>
+  <text class="t" x="380" y="60" font-weight="bold">Základna</text>
+  <text class="s" x="380" y="80">u varhan</text>
+
+  <rect class="main" x="570" y="30" width="170" height="70" rx="8"/>
+  <text class="t" x="655" y="60" font-weight="bold">Počítač</text>
+  <text class="s" x="655" y="80">program midicontrol + web</text>
+
+  <rect class="box" x="295" y="230" width="170" height="70" rx="8"/>
+  <text class="t" x="380" y="260" font-weight="bold">Varhany</text>
+  <text class="s" x="380" y="280">MIDI + napájení (SSR)</text>
+
+  <rect class="box" x="20" y="230" width="170" height="70" rx="8"/>
+  <text class="t" x="105" y="260" font-weight="bold">Tabule</text>
+  <text class="s" x="105" y="280">ukazatel v kostele</text>
+
+  <!-- Bluetooth: remote - base -->
+  <path class="dash" d="M190 65 H295"/>
+  <text class="lab" x="242" y="55">Bluetooth</text>
+  <!-- USB: base - PC -->
+  <path class="line" d="M465 65 H570"/>
+  <text class="lab" x="517" y="55">USB</text>
+  <!-- base - organ -->
+  <path class="line" d="M380 100 V230"/>
+  <text class="s" x="390" y="160" style="text-anchor:start">MIDI (USB nebo DIN)</text>
+  <text class="s" x="390" y="178" style="text-anchor:start">a zapínání napájení</text>
+  <!-- base - tabule -->
+  <path class="line" d="M330 100 V165 H105 V230"/>
+  <text class="s" x="215" y="190">sběrnice tabule</text>
+</svg>

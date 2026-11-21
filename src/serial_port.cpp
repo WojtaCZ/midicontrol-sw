@@ -20,6 +20,11 @@ namespace mc {
 
 namespace {
 
+std::string envOr(const char* name, const char* dflt) {
+    const char* v = std::getenv(name);
+    return (v && *v) ? std::string(v) : std::string(dflt);
+}
+
 speed_t baudToSpeed(int baud) {
     switch (baud) {
         case 9600:   return B9600;
@@ -201,27 +206,37 @@ std::vector<UsbTty> candidates(const std::string& vid, const std::string& pid, c
 
 }  // namespace
 
-std::optional<std::string> findMidiControlPort(const std::string& vid, const std::string& pid, const std::string& sysRoot) {
+std::string sysfsRoot() { return envOr("MIDICONTROL_SYSFS_ROOT", "/sys"); }
+std::string devRoot() { return envOr("MIDICONTROL_DEV_ROOT", "/dev"); }
+std::string midiKey() { return envOr("MIDICONTROL_MIDI_KEY", "MIDIControl"); }
+
+std::optional<std::string> findMidiControlPort(const std::string& vid, const std::string& pid, const std::string& sysRootArg) {
+    const std::string sysRoot = sysRootArg.empty() ? sysfsRoot() : sysRootArg;
     // The protocol CDC is USB interface 00. The log CDC (a second ttyACM of the same device) must never
     // be taken for it, whatever order the kernel lists them in.
     const auto all = candidates(vid, pid, sysRoot);
     for (const auto& t : all) {
-        if (t.ifNum == kProtocolInterface) return "/dev/" + t.name;
+        if (t.ifNum == kProtocolInterface) return devRoot() + "/" + t.name;
     }
     // Old firmware / no interface info: the first one that is not the log CDC.
     for (const auto& t : all) {
-        if (t.ifNum < 0 && t.ifString != kLogInterfaceName) return "/dev/" + t.name;
+        if (t.ifNum < 0 && t.ifString != kLogInterfaceName) return devRoot() + "/" + t.name;
     }
     return std::nullopt;
 }
 
-std::optional<std::string> findMidiControlLogPort(const std::string& vid, const std::string& pid, const std::string& sysRoot) {
+bool baseInBootloader(const std::string& sysRootArg) {
+    return !candidates("abcd", "1235", sysRootArg.empty() ? sysfsRoot() : sysRootArg).empty();
+}
+
+std::optional<std::string> findMidiControlLogPort(const std::string& vid, const std::string& pid, const std::string& sysRootArg) {
+    const std::string sysRoot = sysRootArg.empty() ? sysfsRoot() : sysRootArg;
     const auto all = candidates(vid, pid, sysRoot);
     for (const auto& t : all) {
-        if (t.ifString == kLogInterfaceName) return "/dev/" + t.name;
+        if (t.ifString == kLogInterfaceName) return devRoot() + "/" + t.name;
     }
     for (const auto& t : all) {
-        if (t.ifNum == kLogInterface) return "/dev/" + t.name;
+        if (t.ifNum == kLogInterface) return devRoot() + "/" + t.name;
     }
     return std::nullopt;
 }
@@ -229,7 +244,7 @@ std::optional<std::string> findMidiControlLogPort(const std::string& vid, const 
 std::string usbIdOf(const std::string& devicePath) {
     auto slash = devicePath.find_last_of('/');
     UsbTty t;
-    if (!usbInfo("/sys", devicePath.substr(slash == std::string::npos ? 0 : slash + 1), t)) return {};
+    if (!usbInfo(sysfsRoot(), devicePath.substr(slash == std::string::npos ? 0 : slash + 1), t)) return {};
     std::string id = t.vid + ":" + t.pid;
     for (char& ch : id) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     return id;

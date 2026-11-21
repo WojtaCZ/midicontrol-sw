@@ -38,7 +38,24 @@ private:
 
 }  // namespace
 
-Player::Player(int outPortIndex) : _outPortIndex(outPortIndex) {}
+bool sendMidiMessages(int outPortIndex, const std::vector<std::vector<uint8_t>>& messages,
+                      std::string* err) {
+    try {
+        RtMidiOut out;
+        out.openPort(static_cast<unsigned int>(outPortIndex));
+        for (const auto& m : messages) {
+            std::vector<unsigned char> msg(m.begin(), m.end());
+            out.sendMessage(&msg);
+        }
+        out.closePort();
+        return true;
+    } catch (const RtMidiError& e) {
+        if (err) *err = e.getMessage();
+        return false;
+    }
+}
+
+Player::Player(int outPortIndex, MidiSink sink) : _outPortIndex(outPortIndex), _sink(std::move(sink)) {}
 
 Player::~Player() { stop(); }
 
@@ -48,18 +65,21 @@ void Player::play(const std::string& filepath, const std::string& code,
 
     auto file = mc::smf::load(filepath);  // throws on error
 
-    _midiOut = std::make_unique<RtMidiOut>();
-    _midiOut->openPort(static_cast<unsigned int>(_outPortIndex));  // throws RtMidiError
-
     PlaybackEngine::Callbacks cb;
-    cb.midi = [this](const std::vector<uint8_t>& bytes) {
-        std::vector<unsigned char> msg(bytes.begin(), bytes.end());
-        try {
-            _midiOut->sendMessage(&msg);
-        } catch (const RtMidiError& e) {
-            std::cerr << "MIDI output error: " << e.getMessage() << "\n";
-        }
-    };
+    if (_sink) {
+        cb.midi = _sink;  // no RtMidi port is opened
+    } else {
+        _midiOut = std::make_unique<RtMidiOut>();
+        _midiOut->openPort(static_cast<unsigned int>(_outPortIndex));  // throws RtMidiError
+        cb.midi = [this](const std::vector<uint8_t>& bytes) {
+            std::vector<unsigned char> msg(bytes.begin(), bytes.end());
+            try {
+                _midiOut->sendMessage(&msg);
+            } catch (const RtMidiError& e) {
+                std::cerr << "MIDI output error: " << e.getMessage() << "\n";
+            }
+        };
+    }
     cb.display = [this](const mc::display::Update& u) {
         if (onDisplay) onDisplay(u);
     };
@@ -67,6 +87,8 @@ void Player::play(const std::string& filepath, const std::string& code,
         if (onAnchor) onAnchor(label);
     };
     _engine = std::make_unique<PlaybackEngine>(std::move(file), code, opts, std::move(cb));
+
+    if (onSections) onSections(songHasSections(_engine->sections()));
 
     _playing.store(true);
     _thread = std::thread(&Player::playbackLoop, this);

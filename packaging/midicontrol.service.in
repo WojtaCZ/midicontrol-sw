@@ -10,7 +10,7 @@
 # REQUIRED: loginctl enable-linger $USER
 #           (without it the user manager, and this service, only run while
 #           someone is logged in; with it the player starts at boot)
-# Status:   http://<this-pc>:50118/   (read-only page; [WEB] in the config)
+# Status:   http://<this-pc>:50118/   (status page; [WEB] in the config)
 # Control:  midicontrol                 (in a terminal: attaches to the service,
 #                                        same commands; quit detaches)
 #           midicontrol --cmd "update base fw-update.bin"   (one-shot, for scripts)

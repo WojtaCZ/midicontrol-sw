@@ -51,6 +51,9 @@ TEST(songcheck_real_files) {
             // Organ stop-list reference file, not a song: its name is not a song code.
             if (!hasProblem(c, "file name is not a valid song code"))
                 FAIL_AT("rejstriky.mid: no bad-name problem");
+        } else if (name == "512.mid" || name == "513.mid") {
+            // Shifted display digits (D24), checked in songcheck_warns_real_shifted_files.
+            if (c.problems.size() != 1) FAIL_AT(name + ": expected exactly the shifted-digits warning");
         } else if (!c.problems.empty()) {
             closedir(dir);
             FAIL_AT(name + ": unexpected problem: " + c.problems[0]);
@@ -104,4 +107,82 @@ TEST(songcheck_scanner_missing_folder) {
     auto r = scanner.rescan("/nonexistent/mc/folder");
     CHECK(r.all.empty());
     CHECK(r.newProblems.empty());
+}
+
+// ---------------------------------------------------------------------------
+// FAULTS 2.8 / gap 31 / D24: shifted display digits are authoring mistakes;
+// songcheck warns about them (it does not fix the file).
+// ---------------------------------------------------------------------------
+namespace {
+// A one-track SMF: a full-display SysEx at tick 0, then one note.
+std::string smfWithDisplay(const std::vector<uint8_t>& digits8) {
+    std::string trk;
+    std::string body = std::string("\x4D\x43\x01\x00", 4);
+    for (uint8_t b : digits8) body += static_cast<char>(b);
+    body += '\xF7';
+    trk += '\x00';
+    trk += '\xF0';
+    trk += static_cast<char>(body.size());
+    trk += body;
+    trk += std::string("\x00\x90\x3C\x40", 4);
+    trk += std::string("\x60\x80\x3C\x00", 4);
+    trk += std::string("\x00\xFF\x2F\x00", 4);
+    std::string f = std::string("MThd\x00\x00\x00\x06\x00\x00\x00\x01\x00\x60", 14);
+    f += "MTrk";
+    const uint32_t n = static_cast<uint32_t>(trk.size());
+    f += static_cast<char>(n >> 24);
+    f += static_cast<char>(n >> 16);
+    f += static_cast<char>(n >> 8);
+    f += static_cast<char>(n);
+    return f + trk;
+}
+
+FileCheck checkSynthetic(const std::string& name, const std::vector<uint8_t>& digits8) {
+    auto dir = tempDir();
+    auto path = dir + "/" + name;
+    writeFile(path, smfWithDisplay(digits8));
+    auto c = checkFile(path);
+    unlink(path.c_str());
+    rmdir(dir.c_str());
+    return c;
+}
+}  // namespace
+
+TEST(songcheck_aligned_digits_no_warning) {
+    // " 401" verse " 1": right-aligned, as authored in 401.mid.
+    auto c = checkSynthetic("401.mid", {0x0F, 0x04, 0x00, 0x01, 0x0F, 0x01, 0x0F, 0x0F});
+    CHECK(c.problems.empty());
+    // A two-digit verse and a four-digit song are aligned too.
+    auto d = checkSynthetic("1234.mid", {0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x0F, 0x0F});
+    CHECK(d.problems.empty());
+}
+
+TEST(songcheck_warns_shifted_verse) {
+    // Verse "1 " (1 in the tens position), as in 512.mid.
+    auto c = checkSynthetic("512.mid", {0x0F, 0x05, 0x01, 0x02, 0x01, 0x0F, 0x0F, 0x0F});
+    CHECK(hasProblem(c, kWarnVerseShifted));
+    CHECK(!hasProblem(c, kWarnSongShifted));
+}
+
+TEST(songcheck_warns_shifted_song) {
+    // Song "513 " (shifted left), as in 513.mid.
+    auto c = checkSynthetic("513.mid", {0x05, 0x01, 0x03, 0x0F, 0x0F, 0x01, 0x0F, 0x0F});
+    CHECK(hasProblem(c, kWarnSongShifted));
+    CHECK(!hasProblem(c, kWarnVerseShifted));
+    // A gap inside the number ("5 13") is shifted as well.
+    auto d = checkSynthetic("513.mid", {0x0F, 0x05, 0x0F, 0x03, 0x0F, 0x01, 0x0F, 0x0F});
+    CHECK(hasProblem(d, kWarnSongShifted));
+}
+
+TEST(songcheck_warns_real_shifted_files) {
+    // The real authoring mistakes from the owner's folder, when present.
+    const std::string d = MC_SONGS_DIR;
+    if (access((d + "/512.mid").c_str(), R_OK) == 0) {
+        auto c = checkFile(d + "/512.mid");
+        CHECK(hasProblem(c, kWarnVerseShifted));
+    }
+    if (access((d + "/513.mid").c_str(), R_OK) == 0) {
+        auto c = checkFile(d + "/513.mid");
+        CHECK(hasProblem(c, kWarnSongShifted));
+    }
 }

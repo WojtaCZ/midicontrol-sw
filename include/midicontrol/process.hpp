@@ -18,6 +18,9 @@ enum class Ended { Exited, Killed, NotRunning };
 // reaps the child; never blocks longer than about graceMs.
 Ended terminate(int pid, int graceMs = 2000);
 
+// Non-blocking: true while the child runs; reaps it and returns false once it has exited.
+bool running(int pid);
+
 }  // namespace mc::proc
 
 #endif  // MIDICONTROL_PROCESS_HPP

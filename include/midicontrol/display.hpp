@@ -18,7 +18,7 @@
 //   led           : 0x01-0x04 = red/green/blue/yellow, 0x0F = off
 //   0xFF in a field = no change (song_h = 0xFF leaves both song bytes alone)
 //   0xFE in song_h / verse = blank that field
-//   empty payload = clear the whole indicator
+//   empty payload = clear the whole indicator; [0x01] = clear it only if the base's own number is still shown
 namespace mc::display {
 
 enum class Field : uint8_t {
@@ -29,7 +29,8 @@ enum class Field : uint8_t {
 
 // One indicator update. Fields left at NoChange are sent as 0xFF.
 struct Update {
-    bool clear = false;  // true -> empty payload (clears everything)
+    bool clear = false;  // true -> empty payload (clears everything), or [NPI_CLEAR_IF_OWN] if `conditional`
+    bool conditional = false;  // with `clear`: protocol v2 form, the base clears only a number it wrote itself
 
     Field song = Field::NoChange;
     std::array<uint8_t, 4> songDigits{0x0F, 0x0F, 0x0F, 0x0F};  // 0-9 or 0x0F, left to right
@@ -47,8 +48,9 @@ struct Update {
 // Build a NOW_PLAYING_INFO payload.
 std::vector<uint8_t> encodeNowPlaying(const Update& u);
 
-// Update that clears the indicator (empty payload).
-Update clearUpdate();
+// Update that clears the indicator: the empty payload, or with `conditional` the one-byte
+// [NPI_CLEAR_IF_OWN] (only for a base that reports PROTO_VER >= 2).
+Update clearUpdate(bool conditional = false);
 
 // Convert a decoded display SysEx into an update: only the fields the SysEx
 // carried are Set (digits forwarded exactly as authored), the rest NoChange.

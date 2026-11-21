@@ -3,10 +3,12 @@
 #include <cctype>
 
 #include "midicontrol/protocol/constants.hpp"
+#include "midicontrol/songs.hpp"
 
 namespace mc::display {
 
 using mc::protocol::NPI_BLANK;
+using mc::protocol::NPI_CLEAR_IF_OWN;
 using mc::protocol::NPI_DIGIT_BLANK;
 using mc::protocol::NPI_NO_CHANGE;
 
@@ -26,7 +28,7 @@ uint8_t encodeLetter(char c) {
 }  // namespace
 
 std::vector<uint8_t> encodeNowPlaying(const Update& u) {
-    if (u.clear) return {};
+    if (u.clear) return u.conditional ? std::vector<uint8_t>{NPI_CLEAR_IF_OWN} : std::vector<uint8_t>{};
 
     std::vector<uint8_t> out(5, NPI_NO_CHANGE);
 
@@ -65,9 +67,10 @@ std::vector<uint8_t> encodeNowPlaying(const Update& u) {
     return out;
 }
 
-Update clearUpdate() {
+Update clearUpdate(bool conditional) {
     Update u;
     u.clear = true;
+    u.conditional = conditional;
     return u;
 }
 
@@ -93,6 +96,7 @@ Update fromSysEx(const mc::sysex::DisplayInfo& info) {
 }
 
 std::optional<CodeDisplay> fromSongCode(const std::string& code) {
+    if (!mc::songs::validCode(code)) return std::nullopt;  // PCW-1 / P1-4: same rule as everywhere (<= 1999)
     size_t n = 0;
     while (n < code.size() && std::isdigit(static_cast<unsigned char>(code[n]))) ++n;
     if (n == 0 || n > 4) return std::nullopt;

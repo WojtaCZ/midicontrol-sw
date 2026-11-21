@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include "midicontrol/diag_api.hpp"
+#include "midicontrol/firmware_upload.hpp"
 #include "midicontrol/log.hpp"
 #include "midicontrol/protocol/constants.hpp"
 
@@ -20,6 +21,7 @@ const char* nakText(NakReason r) {
         case NakReason::INVALID_PAYLOAD: return "invalid song code";
         case NakReason::NOT_FOUND: return "song not found";
         case NakReason::NOT_PLAYING: return "nothing is playing";
+        case NakReason::NO_TRANSFER: return "no firmware transfer is running";
         default: return "refused";
     }
 }
@@ -59,8 +61,9 @@ ExecResult ConsoleExecutor::execute(const std::string& line, const console::Repl
             out("Nothing is playing\n");
             return ExecResult::Failed;
         case Kind::Record:
-            _handler.recordSong();
-            return ExecResult::Ok;
+            if (_handler.recordSong()) return ExecResult::Ok;
+            out("Recording not started (see the log)\n");
+            return ExecResult::Failed;
         case Kind::List: {
             auto songs = _handler.songList();
             std::string s = std::to_string(songs.size()) + " songs:";
@@ -81,6 +84,10 @@ ExecResult ConsoleExecutor::execute(const std::string& line, const console::Repl
             auto label = _handler.sectionLabel();
             if (!label.empty()) os << " section=\"" << label << "\"";
             out(os.str() + "\n");
+            if (_handler.baseInBootloader()) {
+                out("Base is in its USB bootloader (ABCD:1235): a firmware update did not finish; "
+                    "re-flash it with: update base <file>\n");
+            }
             if (auto st = _handler.requestStatus()) {
                 std::ostringstream bs;
                 bs << "Base: BLE=" << st->ble << ", relay=" << st->relay << ", display=" << st->display
@@ -127,10 +134,12 @@ bool ConsoleExecutor::runUpdate(const std::string& target, const Run& run, const
     set("fw_update_msg", std::string());
     _status.setNow(Node::Software, "fw_update_ms");
     _status.set(Node::Software, "activity", "firmware update to " + target + " in progress");
-    int lastPct = 0;
+    mc::fwupload::TransferProgress transfer;
     auto bar = [&](std::size_t done, std::size_t total) {
-        const int pct = total ? static_cast<int>(done * 100 / total) : 100;
-        if (pct != lastPct) set("fw_update_pct", static_cast<int64_t>(lastPct = pct));
+        if (auto step = transfer.update(done, total)) {
+            set("fw_update_pct", static_cast<int64_t>(step->pct));
+            set("fw_update_msg", step->msg);
+        }
         if (progress) progress(done, total);
     };
     auto tell = [&](const std::string& text) {
@@ -152,8 +161,17 @@ bool ConsoleExecutor::runUpdate(const std::string& target, const Run& run, const
 }
 
 ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, bool remote) {
-    if (_updating.exchange(true)) {
-        out("busy: a firmware update is already running\n");
+    // Same refusals as the status page upload (startUpload): never reboot the base under a song.
+    // The busy wording is unchanged ("busy: ...") for scripts that match it.
+    // P1-14: the claim is taken under the same gate a Play takes when it is queued, so an update
+    // cannot start while a song warms up the organ (isPlaying() is still false then).
+    const auto claim = _handler.tryBeginUpdate();
+    const bool busy = claim == CommHandler::UpdateClaim::Busy;
+    const std::string why =
+        mc::fwupload::updateRefusal(busy, claim == CommHandler::UpdateClaim::Playing || _handler.isPlaying(), true);
+    if (!why.empty()) {
+        if (claim == CommHandler::UpdateClaim::Granted) _handler.endUpdate();
+        out((busy ? "busy: " : "refused: ") + why + "\n");
         return ExecResult::Failed;
     }
     auto progress = [&out](std::size_t done, std::size_t total) {
@@ -169,20 +187,24 @@ ExecResult ConsoleExecutor::update(const Command& c, const console::Reply& out, 
     const bool ok = runUpdate(c.target, [&c](FirmwareUpdater& u, FirmwareUpdater::Progress p) {
         return c.target == "base" ? u.updateBase(c.arg, p) : u.updateRemote(c.arg, p);
     }, say, progress);
-    _updating.store(false);
+    _handler.endUpdate();
     out(std::string("\n") + (ok ? "Firmware update complete." : "Firmware update FAILED.") + "\n");
     return ok ? ExecResult::Ok : ExecResult::Failed;
 }
 
 std::string ConsoleExecutor::startUpload(mc::fwupload::Accepted upload) {
-    // Busy first: a running base update takes the base off USB, which would read as "not connected".
-    if (_updating.load()) return "a firmware update is already running";
-    // Both units are reached through the base; a base update would cut a playing song off.
-    if (_handler.isPlaying()) return "a song is playing; stop it first";
-    if (!_handler.isBaseAlive()) return "the base is not connected";
-    if (_updating.exchange(true)) return "a firmware update is already running";
+    // Busy, then playing, then base connection (see fwupload::updateRefusal).
+    // P1-14: claimed under the play gate (see update()).
+    const auto claim = _handler.tryBeginUpdate();
+    const std::string why = mc::fwupload::updateRefusal(
+        claim == CommHandler::UpdateClaim::Busy,
+        claim == CommHandler::UpdateClaim::Playing || _handler.isPlaying(), _handler.isBaseAlive());
+    if (!why.empty()) {
+        if (claim == CommHandler::UpdateClaim::Granted) _handler.endUpdate();
+        return why;
+    }
     std::lock_guard<std::mutex> lk(_workerMutex);
-    if (_worker.joinable()) _worker.join();  // the previous upload has finished: _updating was clear
+    if (_worker.joinable()) _worker.join();  // the previous upload has finished: the gate was free
     const bool base = upload.board == mc::protocol::ADDR_BASE;
     const std::string target = base ? "base" : "remote";
     mc::log::info(Node::Software, "status page: firmware update to " + target + " requested");
@@ -192,10 +214,10 @@ std::string ConsoleExecutor::startUpload(mc::fwupload::Accepted upload) {
             runUpdate(target, [&](FirmwareUpdater& u, FirmwareUpdater::Progress p) {
                 return base ? u.updateBase(image, name, p) : u.updateRemote(image, name, p);
             }, {}, {});
-            _updating.store(false);
+            _handler.endUpdate();
         });
     } catch (const std::exception& e) {
-        _updating.store(false);
+        _handler.endUpdate();
         return std::string("cannot start the update: ") + e.what();
     }
     return {};

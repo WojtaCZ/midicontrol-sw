@@ -1,0 +1,317 @@
+# Pass/fail criteria for the audit step-3 bench runs (latency.py, scenarios, burnin.py).
+# Each [[c]] names a metric (from latency.jsonl parts or the burn-in summary), the statistic over its trials, the
+# comparison and the limit. `src` is where the number comes from: a SYSTEM.md requirement/timing row, or "proposed"
+# (no spec number exists; the value is the auditor's proposal, reported as an owner question, never silently binding).
+# `hard = true` failures fail the run; soft ones are reported.
+
+# ---------------------------------------------------------------- latency (latency.py)
+[[c]]
+id = "LAT-1"
+part = "play"
+metric = "key_to_play_song_ms"
+stat = "max"
+op = "<"
+limit = 1500
+hard = true
+src = "SYS-USE-03: no answer after 3 x 500 ms -> remote shows 'Bez odpovedi'"
+[[c]]
+id = "LAT-2"
+part = "play"
+metric = "key_to_play_song_ms"
+stat = "p95"
+op = "<="
+limit = 300
+hard = false
+src = "proposed: key press to the PC acting on it, perceived as instant"
+[[c]]
+id = "LAT-3"
+part = "play"
+metric = "warmup_ms"
+stat = "max"
+op = "<="
+limit = 3100
+hard = true
+src = "SYS-USE-04 / timing table: WarmupMs 3000 (bench config 3000)"
+[[c]]
+id = "LAT-4"
+part = "play"
+metric = "warmup_ms"
+stat = "min"
+op = ">="
+limit = 2990
+hard = true
+src = "SYS-ORG-03: organ on before first note + WarmupMs"
+[[c]]
+id = "LAT-5"
+part = "play"
+metric = "playing_to_first_note_ms"
+stat = "p95"
+op = "<="
+limit = 100
+hard = false
+src = "proposed: 'Playing' log to first Note On (stops preamble 'not set' on the bench)"
+[[c]]
+id = "LAT-6"
+part = "play"
+metric = "playing_to_base_screen_ms"
+stat = "max"
+op = "<="
+limit = 1000
+hard = false
+src = "proposed: base shows now-playing within 1 s"
+[[c]]
+id = "LAT-7"
+part = "play"
+metric = "playing_to_remote_frame_ms"
+stat = "max"
+op = "<="
+limit = 1000
+hard = false
+src = "proposed: remote shows playing within 1 s"
+[[c]]
+id = "LAT-8"
+part = "play"
+metric = "key_to_stopped_ms"
+stat = "max"
+op = "<"
+limit = 1500
+hard = true
+src = "SYS-USE-03 (stop path: STOP must not end in 'Bez odpovedi')"
+[[c]]
+id = "LAT-9"
+part = "play"
+metric = "stopped_to_base_main_ms"
+stat = "max"
+op = "<="
+limit = 2600
+hard = false
+src = "timing table: base 'stopped' screen 1.5 s (+1 s observation slack)"
+[[c]]
+id = "LAT-10"
+part = "play"
+metric = "notes_on_after_stop"
+stat = "max"
+op = "=="
+limit = 0
+hard = true
+src = "no hanging notes after stop (organ safety)"
+[[c]]
+id = "LAT-11"
+part = "play"
+metric = "fwd_err"
+stat = "max"
+op = "=="
+limit = 0
+hard = true
+src = "advisor #6: a tap forward error invalidates the MIDI observations"
+[[c]]
+id = "LAT-12"
+part = "reset"
+metric = "reset_to_base_up_ms"
+stat = "max"
+op = "<="
+limit = 10000
+hard = true
+src = "SYS-LINK-01: loss within 2.5 s supervision, reconnect every 5 s (+ remote boot)"
+[[c]]
+id = "LAT-13"
+part = "reset"
+metric = "reset_to_remote_main_ms"
+stat = "max"
+op = "<="
+limit = 15000
+hard = false
+src = "proposed: remote usable within 15 s after a reset"
+[[c]]
+id = "LAT-14"
+part = "pcrestart"
+metric = "start_to_resync_ms"
+stat = "max"
+op = "<="
+limit = 10000
+hard = false
+src = "proposed: PC service usable within 10 s of (re)start (systemd RestartSec 5 s comes on top)"
+[[c]]
+id = "LAT-15"
+part = "pcrestart"
+metric = "start_to_api_ms"
+stat = "max"
+op = "<="
+limit = 10000
+hard = false
+src = "proposed: status page answers within 10 s of (re)start"
+[[c]]
+id = "LAT-16"
+part = "play"
+metric = "key_to_play_song_ms"
+stat = "n"
+op = ">="
+limit = 30
+hard = true
+src = "advisor #6: at least 30 trials per pair"
+[[c]]
+id = "LAT-17"
+part = "reset"
+metric = "reset_to_base_up_ms"
+stat = "n"
+op = ">="
+limit = 10
+hard = true
+src = "advisor #7: count check per part"
+[[c]]
+id = "LAT-18"
+part = "pcrestart"
+metric = "start_to_api_ms"
+stat = "n"
+op = ">="
+limit = 10
+hard = true
+src = "advisor #7: count check per part"
+
+# ---------------------------------------------------------------- burn-in (burnin.py summary.json)
+[[c]]
+id = "BURN-1"
+part = "burnin"
+metric = "zombies"
+stat = "value"
+op = "=="
+limit = 0
+hard = true
+src = "BE-1 zombie (advisor #4, c100-mailbox.md): both units report connected and neither base lastRemoteRx nor remote ka_last moved for > 15 s (only while both SWD samplers advance)"
+[[c]]
+id = "BURN-2"
+part = "burnin"
+metric = "kicks_outside_windows"
+stat = "value"
+op = "=="
+limit = 0
+hard = true
+src = "SYS-LINK-01: stale-link guard must not fire on a healthy link"
+[[c]]
+id = "BURN-3"
+part = "burnin"
+metric = "restarts"
+stat = "value"
+op = "=="
+limit = 0
+hard = true
+src = "SYS-LINK-01: module restart only if K,1 fails"
+[[c]]
+id = "BURN-4"
+part = "burnin"
+metric = "unexpected_resets"
+stat = "value"
+op = "=="
+limit = 0
+hard = true
+src = "SYS-DIAG-01/02: no watchdog or fault reset in normal use"
+[[c]]
+id = "BURN-5"
+part = "burnin"
+metric = "pc_died"
+stat = "value"
+op = "=="
+limit = 0
+hard = true
+src = "SYS-PWR-06: the service stays up"
+[[c]]
+id = "BURN-6"
+part = "burnin"
+metric = "notes_on_after_stop_max"
+stat = "value"
+op = "=="
+limit = 0
+hard = true
+src = "no hanging notes"
+[[c]]
+id = "BURN-7"
+part = "burnin"
+metric = "fwd_err"
+stat = "value"
+op = "=="
+limit = 0
+hard = true
+src = "advisor #6"
+[[c]]
+id = "BURN-8"
+part = "burnin"
+metric = "play_failures"
+stat = "value"
+op = "=="
+limit = 0
+hard = true
+src = "every requested song started, stopped or ended as expected (play/stop/wait_end failures OUTSIDE disturbance windows; in-window ones are BURN-14)"
+[[c]]
+id = "BURN-9"
+part = "burnin"
+metric = "rss_growth_kib_per_h"
+stat = "value"
+op = "<="
+limit = 1024
+hard = false
+src = "proposed: PC memory stable (< 1 MiB/h after the first 10 min)"
+[[c]]
+id = "BURN-10"
+part = "burnin"
+metric = "fd_growth"
+stat = "value"
+op = "<="
+limit = 2
+hard = false
+src = "proposed: no fd leak; idle floor = min fds over the last 10 min minus min fds over minutes 10-20 of the longest PC lifetime (playback/web/record fds excluded by taking minima)"
+[[c]]
+id = "BURN-11"
+part = "burnin"
+metric = "key_timeouts"
+stat = "value"
+op = "=="
+limit = 0
+hard = false
+src = "harness health (mailbox), not a product criterion"
+
+[[c]]
+id = "BURN-12"
+part = "burnin"
+metric = "elapsed_h"
+stat = "value"
+op = ">="
+limit = 4.0
+hard = true
+src = "plan 3.5: burn-in at least 4 h (target 8 h); a pilot run fails this by design"
+
+[[c]]
+id = "BURN-13"
+part = "burnin"
+metric = "other_failures"
+stat = "value"
+op = "=="
+limit = 0
+hard = false
+src = "advisor #8: failed non-song actions (remote_reset/pc_restart recovery checks, stops edit, web, add verse, list, wrong code, record); each is listed in summary.failed_actions"
+[[c]]
+id = "BURN-14"
+part = "burnin"
+metric = "play_failures_in_window"
+stat = "value"
+op = "=="
+limit = 0
+hard = false
+src = "advisor #8: song failures inside a remote_reset/pc_restart window (R33 resync residual expected); reported, not a hard fail"
+[[c]]
+id = "BURN-15"
+part = "burnin"
+metric = "swd_stale"
+stat = "value"
+op = "=="
+limit = 0
+hard = true
+src = "harness health (advisor #8): an SWD sampler that stops advancing makes BURN-1..4 vacuous"
+[[c]]
+id = "BURN-16"
+part = "burnin"
+metric = "leak_lifetime_h"
+stat = "value"
+op = ">="
+limit = 3.0
+hard = false
+src = "advisor #8: the leak slopes (BURN-9/10) need one PC lifetime of >= 3 h (pc_restart confined to the first hour)"

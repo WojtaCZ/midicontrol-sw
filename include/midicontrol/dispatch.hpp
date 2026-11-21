@@ -34,6 +34,12 @@ public:
     virtual std::optional<mc::protocol::NakReason> playSong(const std::string& code,
                                                             uint8_t requester) = 0;
     virtual void stopSong(uint8_t requester) = 0;
+    // A7: RECORD_SONG [1] / empty (start) and [0] (stop), from the base. A sink without recording answers UNKNOWN_MSG.
+    virtual std::optional<mc::protocol::NakReason> startRecording(uint8_t requester) {
+        (void)requester;
+        return mc::protocol::NakReason::UNKNOWN_MSG;
+    }
+    virtual void stopRecording(uint8_t requester) { (void)requester; }
     // Add-verse; NOT_PLAYING when idle.
     virtual std::optional<mc::protocol::NakReason> addVerse() = 0;
     // SONG_LIST_RESP payload for the given offset.

@@ -50,6 +50,8 @@ add_library(midicontrol_core
     src/diag_poller.cpp
     src/diag_api.cpp
     src/device_info.cpp
+    src/startup_reset.cpp
+    src/recording.cpp
 )
 find_package(Threads REQUIRED)
 target_include_directories(midicontrol_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -95,12 +97,16 @@ add_executable(midicontrol_tests
     tests/test_diag_poller.cpp
     tests/test_diag_api.cpp
     tests/test_stall_monitor.cpp
+    tests/test_startup_reset.cpp
+    tests/test_recording.cpp
+    tests/test_songcode.cpp
 )
 target_link_libraries(midicontrol_tests PRIVATE midicontrol_core)
 target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_compile_definitions(midicontrol_tests
     PRIVATE MC_SONGS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/songs")
 add_test(NAME unit COMMAND midicontrol_tests)
+add_test(NAME sync_system_doc COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/sync_system_doc_test.sh)
 
 # ---------------------------------------------------------------------------
 # Application: needs RtMidi (playback) + pthreads + the serial layer. Built
@@ -151,6 +157,28 @@ if(RTMIDI_FOUND)
         target_link_directories(midicontrol PRIVATE ${RTMIDI_LIBRARY_DIRS})
     endif()
 
+    # CommHandler tests: real comm/player threads against a fake base on a pty.
+    add_executable(midicontrol_comm_tests
+        tests/test_main.cpp
+        tests/test_comm_organ.cpp
+        src/comm.cpp
+        src/console_exec.cpp
+        src/firmware_update.cpp
+        src/player.cpp
+        src/midi_ports.cpp
+    )
+    target_link_libraries(midicontrol_comm_tests PRIVATE midicontrol_core Threads::Threads
+                          ${RTMIDI_LIBRARIES} util)
+    target_include_directories(midicontrol_comm_tests PRIVATE
+                               ${CMAKE_CURRENT_SOURCE_DIR}/tests ${RTMIDI_INCLUDE_DIRS})
+    target_compile_definitions(midicontrol_comm_tests
+        PRIVATE MC_SONGS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/songs")
+    target_compile_options(midicontrol_comm_tests PRIVATE ${RTMIDI_CFLAGS_OTHER})
+    if(RTMIDI_LIBRARY_DIRS)
+        target_link_directories(midicontrol_comm_tests PRIVATE ${RTMIDI_LIBRARY_DIRS})
+    endif()
+    add_test(NAME comm COMMAND midicontrol_comm_tests)
+
     # ---- Install: binary, example config, systemd user unit ----
     # Developer use only: production runs from the Docker image (docs/deployment.md).
     include(GNUInstallDirs)
@@ -166,3 +194,6 @@ else()
     message(WARNING "RtMidi not found - skipping the 'midicontrol' app target "
                     "(core library and tests will still build).")
 endif()
+
+# Fuzz targets + seeded fallback (tests/fuzz); libFuzzer binaries only with -DMIDICONTROL_FUZZ=ON.
+add_subdirectory(tests/fuzz)

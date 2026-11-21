@@ -155,8 +155,33 @@ TEST(http_route_firmware) {
     CHECK_EQ(call(Request{"GET", "/api/firmware/base", "", "", ""}, &api).status, 405);
     CHECK_EQ(call(Request{"PUT", "/api/firmware/remote", "", "application/octet-stream", "img"}, &api).status, 405);
     CHECK_EQ(call(Request{"POST", "/api/firmware", "", "application/octet-stream", "img"}, &api).status, 404);
-    CHECK_EQ(call(Request{"GET", "/api/firmware", "", "", ""}, &api).status, 404);
     CHECK_EQ(call(Request{"POST", "/api/status", "", "application/octet-stream", ""}, &api).status, 405);
+}
+
+TEST(http_405_carries_allow) {
+    // FAULTS 2.6: GET /api/firmware is a known resource with the wrong method -> 405, and
+    // every 405 says which methods the resource takes (RFC 9110 15.5.6).
+    FirmwareApi fw;
+    fw.post = [](const std::string&, const std::string&) { return Response{202, "application/json", "{}"}; };
+    StopsApi stops;
+    stops.get = [] { return std::string("{}"); };
+    stops.put = [](const std::string&, const std::string&) { return Response{200, "application/json", "{}"}; };
+    auto call = [&](const Request& r) {
+        return route(r, "<html>", [] { return std::string("{}"); }, nullptr, &stops, &fw);
+    };
+    auto r = call(Request{"GET", "/api/firmware", "", "", ""});
+    CHECK_EQ(r.status, 405);
+    CHECK_EQ(r.allow, "POST");
+    CHECK(serialize(r).find("\r\nAllow: POST\r\n") != std::string::npos);
+    CHECK_EQ(call(Request{"DELETE", "/api/firmware", "", "", ""}).allow, "POST");
+    CHECK_EQ(call(Request{"GET", "/api/firmware/base", "", "", ""}).allow, "POST");
+    CHECK_EQ(call(Request{"POST", "/api/stops/401", "", "application/json", "{}"}).allow, "PUT");
+    CHECK_EQ(call(Request{"POST", "/api/status", "", "", ""}).allow, "GET");
+    CHECK_EQ(call(Request{"PUT", "/", "", "application/json", "{}"}).allow, "GET");
+    // Not a 405: no Allow header.
+    auto ok = call(Request{"GET", "/api/status", "", "", ""});
+    CHECK_EQ(ok.allow, "");
+    CHECK(serialize(ok).find("Allow:") == std::string::npos);
 }
 
 TEST(http_serialize) {

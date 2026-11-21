@@ -22,7 +22,16 @@ uint32_t le32(const uint8_t* p) {
     return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
            (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
 }
+constexpr uint8_t kBoardBase = 0x02;    // = protocol::ADDR_BASE
+constexpr uint8_t kBoardRemote = 0x03;  // = protocol::ADDR_REMOTE
 }  // namespace
+
+std::optional<uint8_t> boardIdOf(const std::vector<uint8_t>& file) {
+    if (file.size() < kTrailerSize) return std::nullopt;
+    const uint8_t* t = file.data() + file.size() - kTrailerSize;
+    if (le32(t + 20) != kMagic || crc32(t, 16) != le32(t + 16) || t[13] != kFormat) return std::nullopt;
+    return t[12];
+}
 
 Check check(const std::vector<uint8_t>& file, uint8_t board, Info* info) {
     if (file.size() < kTrailerSize) return Check::NoTrailer;
@@ -35,7 +44,9 @@ Check check(const std::vector<uint8_t>& file, uint8_t board, Info* info) {
     i.imageCrc = le32(t + 4);
     i.version = le32(t + 8);
     i.boardId = t[12];
-    if (i.boardId != board) return Check::WrongBoard;
+    if (i.boardId != board) {
+        return i.boardId == kBoardBase || i.boardId == kBoardRemote ? Check::WrongBoard : Check::UnknownBoard;
+    }
     if (i.imageSize == 0 || i.imageSize != file.size() - kTrailerSize) return Check::BadSize;
     if (crc32(file.data(), i.imageSize) != i.imageCrc) return Check::BadCrc;
     if (info) *info = i;
@@ -50,10 +61,18 @@ std::string describe(Check c) {
                    "from the firmware build";
         case Check::BadTrailer: return "image trailer is corrupt or of an unknown format";
         case Check::WrongBoard: return "image is built for the other unit (board ID mismatch)";
+        case Check::UnknownBoard: return "image is built for an unknown unit (board ID mismatch)";
         case Check::BadSize: return "image size in the trailer does not match the file";
         case Check::BadCrc: return "image CRC does not match the trailer";
     }
     return "unknown";
+}
+
+std::string describe(Check c, uint8_t boardId) {
+    if (c == Check::UnknownBoard) {
+        return "image is built for an unknown unit (board ID " + std::to_string(boardId) + ")";
+    }
+    return describe(c);
 }
 
 }  // namespace mc::fwimage

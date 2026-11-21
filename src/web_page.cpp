@@ -829,6 +829,16 @@ function node(ic,name,color,state,fact,href){
 function link(label,state){const l=el("div","link");l.append(el("span","lb",label),el("div","wire "+state));return l;}
 function fact(ic,text){const x=el("div","fact");if(ic)x.append(typeof ic==="string"?icon(ic):ic);x.append(el("span",null,text));return x;}
 function battery(p,cls){const b=el("span","batt "+cls),i=el("i");i.style.width=Math.max(0,Math.min(100,p))+"%";b.append(i);return b;}
+// last_end is the player's English text ("ended normally", "stopped", "stopped (base disconnected)",
+// "failed: <why>"); the home page shows Czech only, the raw text stays on the Software page.
+function endText(le){
+  le=le||"";
+  if(le.startsWith("ended"))return "dohrála";
+  if(le.startsWith("stopped (base"))return "zastavena, základna se odpojila";
+  if(le.startsWith("stopped"))return "zastavena";
+  if(le.startsWith("failed"))return "nepodařilo se ji přehrát";
+  return le?"skončila":"";
+}
 function systemPanel(list){
   const sw=data.nodes.software,bs=data.nodes.base,ct=data.nodes.controller;
   // Počítač
@@ -879,7 +889,7 @@ function systemPanel(list){
     k.append(icon("note"),document.createTextNode("Nic nehraje"));now.append(k);
     const last=f("software","last_song");
     if(last){
-      const end={ended:"dohrála",stopped:"zastavena"}[f("software","last_end")]||f("software","last_end")||"";
+      const end=endText(f("software","last_end"));
       now.append(el("span","sub","naposledy píseň "+last+(end?" ("+end+")":"")));
     }
   }
@@ -910,9 +920,14 @@ async function spFetch(url,opts){
   const ac=new AbortController(),timer=setTimeout(()=>ac.abort(),5000);
   try{
     const r=await fetch(url,Object.assign({cache:"no-store",signal:ac.signal},opts));
-    if(!r.ok)throw new Error((await r.text()).trim()||"HTTP "+r.status);
+    if(!r.ok){
+      const why={400:"chybný požadavek",404:"nenalezeno",415:"nepodporovaný formát",500:"chyba přehrávače při ukládání",
+        409:"přehrávač je zaneprázdněn",413:"příliš velká data"}[r.status];
+      throw new Error(why||"chyba "+r.status);
+    }
     return await r.json();
-  }catch(e){throw e.name==="AbortError"?new Error("přehrávač neodpovídá"):e;}
+  }catch(e){throw e.name==="AbortError"?new Error("přehrávač neodpovídá")
+    :e instanceof TypeError?new Error("spojení s přehrávačem selhalo"):e;}
   finally{clearTimeout(timer);}
 }
 function spMsg(text,err){SP.E.msg.textContent=text;SP.E.msg.className="sp-msg"+(err?" err":"");}

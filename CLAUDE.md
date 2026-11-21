@@ -2,11 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Read first: system spec and hardware
+
+`docs/SYSTEM.md` is the owner's specification of what the whole MIDIcontrol system (PC software, base, remote,
+bootloader, protocol) is expected to do, with requirement IDs, owner decisions and a gap list. Its main copy lives in
+`midicontrolpy-sw/docs/SYSTEM.md`; the copies in the other repos are kept identical by
+`midicontrolpy-sw/tools/sync-system-doc.sh` (`--check` reports drift). Edit only the main copy. When the code and the spec
+disagree, the spec says what is wanted: ask the owner instead of changing the spec to match the code.
+`docs/HARDWARE-base.md` / `docs/HARDWARE-remote.md` (or `docs/HARDWARE.md` in the matching firmware repo) describe the
+base (STM32G431) and remote (STM32G071) hardware. The firmware pin maps are authoritative; the KiCad repos are historical.
+
+- **User-visible changes** (screen text, menus, keys, timeouts, web page, CLI output, config keys, install steps): in the same commit series update midicontrolpy-sw/docs/SYSTEM.md (status/glossary/timing; then run midicontrolpy-sw/tools/sync-system-doc.sh), this CLAUDE.md/README, midicontrolpy-sw/docs/status-web-and-service.md for the PC, the screen scenarios in tools/screens/main.cpp, and the Czech user manual in `midicontrolpy-sw/docs/manual/` (its `facts/*.md` too; pictures: `docs/manual/README.md`).
+
+This repo holds the MAIN copy of `docs/SYSTEM.md`. After editing it run `tools/sync-system-doc.sh` and commit the copies in the sibling repos.
+
 ## Project Overview
 
 MIDIControl PC companion app — a CLI tool that communicates with a MIDIControl hardware device (organ/MIDI controller) over a serial port. It plays and records MIDI files, controls power to the organ, and maintains a keepalive connection with the Base unit.
 
-The app is written in C++ (the original Python implementation was removed; only stale `__pycache__/` remains).
+The app is written in C++ (the original Python implementation was removed).
 
 The project language is English (comments, UI strings, documentation).
 
@@ -26,7 +40,7 @@ cmake --install build          # developer use: binary, share/midicontrol/config
 
 Device: USB serial VID:PID=ABCD:1234 (base bootloader: ABCD:1235) plus ALSA MIDI ports named "MIDIControl"; both are re-discovered after a USB reconnect. Uses `arecordmidi` for recording.
 
-Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME/midicontrol/config.conf` (`~/.config/...`), else `./config.conf`. Sections: `[FILES]` (PlayFolder/RecordFolder; `~/` and config-relative paths allowed), `[PLAYBACK]` (WarmupMs, KeepPowerOn, VerseGapMs), `[WEB]` (Enabled=true, Port=50118, Bind=0.0.0.0), `[DIAG]` (LogPort= override of the log CDC auto-detection, Dir= store directory, default `$XDG_STATE_HOME/midicontrol`, else `~/.local/state/midicontrol`, else `/tmp/midicontrol-<uid>/diag`, created recursively), `[ORGAN]` (stops layout, Opus 910 defaults), `[BINDINGS]` (parsed, unused). See `config.conf`.
+Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME/midicontrol/config.conf` (`~/.config/...`), else `./config.conf`. Sections: `[FILES]` (PlayFolder/RecordFolder; `~/` and config-relative paths allowed), `[PLAYBACK]` (WarmupMs, KeepPowerOn, VerseGapMs), `[WEB]` (Enabled=true, Port=50118, Bind=0.0.0.0), `[DIAG]` (LogPort= override of the log CDC auto-detection, Dir= store directory, default `$XDG_STATE_HOME/midicontrol`, else `~/.local/state/midicontrol`, else `/tmp/midicontrol-<uid>/diag`, created recursively), `[ORGAN]` (stops layout, Opus 910 defaults), `[BINDINGS]` (parsed, reserved, unused: do not remove). See `config.conf`.
 
 ## Service, status page, control socket
 
@@ -37,7 +51,7 @@ Full operator guide, behaviour, design decisions, known issues and the bench che
 - **Status page**: `http://<pc>:50118/` (`GET /`, `GET /api/status` JSON schema 2, `GET /api/diag`, `GET /api/stops` and `PUT /api/stops/<code>` for the per-song organ stops in `<PlayFolder>/<CODE>.conf` (needs `Content-Type: application/json`), `POST /api/firmware/<base|remote>` with a `<name>-update.bin` as `application/octet-stream` (≤ 512 KiB, 202 then progress in Software `fw_update_*` fields)), served by the player process itself on its own thread. Two views: home "Přehled" (Czech, for the organist: notices, system topology, now playing, stops editor) and "Pokročilé" (English: Overview / Software / Base / Controller / Diagnostics / Firmware, `#adv/<page>`; Firmware = drop zone per unit, the trailer's board ID is checked in the browser, by `fwupload` and by the device, so base and controller images can't be swapped); design context in `PRODUCT.md`; Base and Controller show only what the PC sees (firmware debug data later = more `fields` in the same JSON). Port 50118 is also used by the superpowers brainstorm companion server; don't run both.
 - **Single instance**: exclusive `flock` on `$XDG_RUNTIME_DIR/midicontrol.lock` (fallback `/tmp/midicontrol-<uid>/`); the serial port is opened with `TIOCEXCL`.
 - **Control socket** `$XDG_RUNTIME_DIR/midicontrol.sock` (0600): `midicontrol` in a terminal attaches to the running service as a thin client (commands run in the service; `quit` detaches); `--cmd` is the one-shot form. Line protocol in `console.hpp` (reply ends with `\x1eOK` / `\x1eFAIL`).
-- **systemd (developer-only)**: `Type=notify` (`READY=1`, `WATCHDOG=1` sent directly to `$NOTIFY_SOCKET`, no libsystemd), `WatchdogSec=30`, `Restart=always`, `StartLimitIntervalSec=0`. The watchdog ping is sent only while the CommHandler reader, keepalive and control threads all stamp their heartbeats. `loginctl enable-linger $USER` is required for start at boot.
+- **systemd (developer-only)**: `Type=notify` (`READY=1`, `WATCHDOG=1` sent directly to `$NOTIFY_SOCKET`, no libsystemd), `WatchdogSec=30`, `Restart=always`, `StartLimitIntervalSec=0`. The watchdog ping is sent only while the CommHandler reader, keepalive and control threads all stamp their heartbeats. `loginctl enable-linger $USER` is required for start at boot. Not the production service: the daemon always runs as the Docker deployment (owner ruling 2026-11-21); never run the standalone build alongside it.
 - **Container**: `docker/` holds `compose.template.yaml` (services `midicontrol` and `updater`), `entrypoint.sh` (seeds `/data`, runs `--headless --exit-on-stall`), `midicontrol-wrapper.sh` (host console), `config.container.conf` and `updater/` (`lib.sh`, `updater.sh`; tests in `docker/tests/`, run with `sh docker/tests/test_*.sh`); `install.sh` and `Dockerfile` at the root, CI in `.github/workflows/ci.yml`. Software status field `recording` (bool) and `fw_update_state` are read by the updater's idle guard from `/api/status`.
 
 ## Diagnostics (base log + remote DIAG records)
@@ -65,11 +79,11 @@ Full operator guide, behaviour, design decisions, known issues and the bench che
 The code is split into a **pure core library** (`midicontrol_core`, no hardware deps, fully unit-tested) and a thin **app layer** (RtMidi + serial). Public headers live in `include/midicontrol/`, sources in `src/`.
 
 Core (testable anywhere):
-- **`protocol/`** (`crc8`, `codec`, `parser`, `constants`, `types`) — binary protocol v2: frame format (SOH/EOT, byte stuffing, CRC-8/MAXIM), `Packet`, `MsgType`, NAK reasons, and a byte-by-byte `Parser` state machine. Vendored from `midicontrol-protocol` (the spec is its `PROTOCOL.md`); wire format is byte-identical. The PC copy uses `std::vector`/`size_t` (no fixed buffers).
+- **`protocol/`** (`crc8`, `codec`, `parser`, `constants`, `types`) — binary protocol v2: frame format (SOH/EOT, byte stuffing, CRC-8 poly 0x31, init 0, non-reflected, no final XOR, check value 0xA2 for "123456789"; this is NOT CRC-8/MAXIM), `Packet`, `MsgType`, NAK reasons, and a byte-by-byte `Parser` state machine. Vendored from `midicontrol-protocol` (the spec is its `PROTOCOL.md`); wire format is byte-identical. The PC copy uses `std::vector`/`size_t` (no fixed buffers).
 - **`sysex`** — MIDIControl display SysEx (header `4D 43`, device `01`, targets `0x00`–`0x04`). Per-digit spec (each digit one byte ≤ `0x0F`). `DisplayInfo` keeps the decoded numbers and the digits as authored (`songDigits`/`verseDigits`).
 - **`smf`** — Standard MIDI File reader (format 0/1, running status, tempo map → seconds). Accepts both the project files' raw `F0 … F7` SysEx (no length) and standard `F0 <len> … F7`.
 - **`display`** — NOW_PLAYING_INFO encoding (per-digit BCD, `0xF` blank digit, `0xFF` no change, `0xFE` blank field, empty = clear), song-code fallback digits, verse-digit placement.
-- **`songs`** — song codes (`[0-9A-Z]{1,8}`, sanitised), case-insensitive `<code>.mid` lookup, sorted song list and SONG_LIST_RESP paging.
+- **`songs`** — song codes (rule Q1-2 a, `songs::validCode`: 1-4 digits, value at most 1999, optional A-D; checked at every entry point, the song list offers only valid names), case-insensitive `<code>.mid` lookup, sorted song list and SONG_LIST_RESP paging.
 - **`playback`** — `scanSections` (the file defines the song: every display SysEx with a verse field starts a section; blank verse = prelude), `sectionLabel` ("Predehra"/"Sloka N +k") and `PlaybackEngine` (plays the file; add-verse replays the current section from its anchor once it ends, presses accumulate, the indicator keeps the verse number; clock and outputs injected, so it is tested without time or ports).
 - **`device_info`** — `INFO_RESP` TLV decoder (fields `fw_*`, `uptime_ms`, `reset_cause`, `ble_*`, battery/charger, link quality `link_rssi`, `link_peer_rssi`, `link_interval_ms`, `link_latency`, `link_timeout_ms`, `link_phy`, `link_losses`, `link_err_conn`, `link_module_reboots`, `link_secure_retries`, `link_reconnect_ms`; shown on the Bluetooth page, no chart yet) and `InfoPoller` (GET_INFO at node up + every 15 s, UNREACHABLE retry 5 s, UNKNOWN_MSG stops until the next up, down clears the fields).
 - **`dispatch`** — `Dispatcher`: ACK/NAK per spec, duplicate suppression per `(source, packetId)` over the last 8 frames per source (a node can have several reliable frames in flight), NAK UNKNOWN_MSG / INVALID_PAYLOAD, song-list reply to the requester. Commands go to a `CommandSink`.
@@ -81,7 +95,7 @@ Core (testable anywhere):
 - **`config`** — INI loader and config-path resolution.
 - **`status`** — `StatusRegistry` (thread-safe; per-node counters, fields, 200-event rings, 50-entry problems list of WARN/ERROR; injected clock), `nodesForPeer` (BASE→Base, REMOTE→Controller, BROADCAST→both, rest→Base) and the dot rules (`evaluateDot`).
 - **`status_json`** — `/api/status` JSON (schema 2: per node `last_fault`, `unseen_faults`) and a UTF-8-safe `jsonEscape`.
-- **`http`** — request parsing (8 KiB head limit; bodies via Content-Length up to `kMaxBody`), routing (`/`, `/api/status`, `/api/diag`, `GET /api/stops`, `PUT /api/stops/<code>`, 404, 405, 415 for a non-JSON PUT) and response building, no sockets.
+- **`http`** — request parsing (8 KiB limit for head+body together (`kMaxRequest`); bodies via Content-Length up to `kMaxBody` = 4 KiB, firmware uploads up to `kMaxFirmwareBody` = 512 KiB), routing (`/`, `/api/status`, `/api/diag`, `GET /api/stops`, `PUT /api/stops/<code>`, 404, 405, 415 for a non-JSON PUT) and response building, no sockets.
 - **`web_page`** — the embedded status page (inline CSS/JS, no external requests).
 - **`log_line`, `fault_decode`, `diag_codes`, `diag_store`, `diag_api`, `diag_poller`, `log_reader`** — diagnostics (see the section above): line parser, fault accumulation/decoding, DIAG record decoder, JSONL store, `/api/diag` + `diag` text, remote polling state machine, base log ingest + reader thread.
 - **`songcheck`** — per-file song checks (parse failure, empty display anchor, no anchors, bad file name) and an incremental `Scanner` (mtime/size).
@@ -95,23 +109,27 @@ App layer (needs hardware):
 - **`midi_ports`** — RtMidi discovery of "MIDIControl" ports.
 - **`player`** — runs a `PlaybackEngine` on its own thread with the wall clock and RtMidi out. Owned by one thread only; `onFinished` just posts a message (never destroys the player on its own thread).
 - **`comm`** — `CommHandler`: reader thread (RX, `Dispatcher`, retries with the same PacketId, reconnect when the port disappears), keepalive thread (2 s, base lost after 6 s), and a **control thread** with a command queue that alone creates/stops/destroys the `Player` (organ warm-up waits happen there, never on the reader). Sends NOW_PLAYING_INFO to the base and SIGNAL_PLAYING/ANCHOR/STOPPED to the remote (0x03).
+- **`comm` resync** (P1-9, pending owner decision on D8) — remote state is "dirty" at start, on a ble 0 -> 1 edge in `STATUS_RESP` and after an un-ACKed SIGNAL_*; while dirty each `STATUS_RESP` with ble=1 sends one resync (playing: SIGNAL_PLAYING + last anchor; maybe playing: SIGNAL_STOPPED); cleared when all its packets are ACKed (`_remoteDirty`, `_resyncAwait`). Not during an update or diag pause.
+- **`comm` `in_bootloader`** (P1-13) — while the serial port is closed and no update runs, `_bootloaderProbe` looks for ABCD:1235; Base status field `in_bootloader`, an ERROR log and the console `status` advice "update base <file>". No automatic re-flash.
 - **`firmware_update`** — `update <base|remote> <name-update.bin>` (or the bytes of an upload); validates the trailer, waits for FW_UPDATE_STATUS, base bootloader on PID 0x1235.
-- **`comm` status** — CommHandler also counts TX/RX/retries/gave-up/NAK/CRC/duplicates per peer, keeps link/playback fields, polls `GET_STATUS` every 5 s and `GET_INFO` via `InfoPoller` (routine traffic updates counters only, never events; background polls that time out are logged as debug and don't touch `last_tx_result`) and stamps thread heartbeats (`threadsAlive`). `organ_power` and `_organOn` follow the base's SSR from `STATUS_RESP` unless a `SET_CURRENT` went out after that `GET_STATUS` (`_setCurrentGen`). `sendReliable` retries a NAK BUSY like a timeout (firmware updates no longer abort on it).
+- **`comm` status** — CommHandler also counts TX/RX/retries/gave-up/NAK/CRC/duplicates per peer, keeps link/playback fields, polls `GET_STATUS` every 5 s and `GET_INFO` via `InfoPoller` (routine traffic updates counters only, never events; background polls that time out are logged as debug and don't touch `last_tx_result`) and stamps thread heartbeats (`threadsAlive`). `organ_power` and `_organOn` follow the base's SSR from `STATUS_RESP` unless a `SET_CURRENT` went out after that `GET_STATUS` (`_setCurrentGen`). `sendReliable` retries a NAK BUSY like a timeout (firmware updates no longer abort on it); so does `handleAck` for every pending reliable packet except the background polls (DIAG_GET, GET_INFO, GET_STATUS keep their own rules): same PacketId, same budget, counter `busy_retries`, the remote is marked dirty only once the budget is used up (bench 2026-11-15, LAT-7).
 - **`web_server`** — status page thread: poll() over ≤ 8 connections, 3 s request deadline, bind retry every 10 s, song folder rescan every 60 s. Never touches CommHandler/Player locks.
-- **`console_exec`** — runs terminal commands (local prompt and socket clients) and status-page uploads (`startUpload` on a worker thread, `waitForUpload` before shutdown); one firmware update at a time (one busy flag), progress in Software `fw_update_*` fields.
+- **`console_exec`** — runs terminal commands (local prompt and socket clients) and status-page uploads (`startUpload` on a worker thread, `waitForUpload` before shutdown); one firmware update at a time, taken through the claim gate `CommHandler::tryBeginUpdate()` (P1-14: the same gate a queued Play takes; Busy / Playing / Granted, `endUpdate()` releases), progress in Software `fw_update_*` fields.
 - **`control_socket`** — Unix socket server (thread per client, ≤ 4) and the thin client (`runClient`).
 - **`instance`** — runtime dir and the single-instance lock.
 - **`sd_notify`** — `READY=1` / `WATCHDOG=1` / `STOPPING=1` datagrams.
-- **`main`** — args/config/headless/`--cmd`; attach-or-run; interactive CLI: `play <code>`, `stop`, `verse` (add verse), `list`, `record`, `on`, `off`, `status`, `update`, `quit`.
+- **`main`** — args/config/headless/`--cmd`; attach-or-run; interactive CLI: `play <code>`, `stop`, `verse` (add verse), `list`, `record`, `on`, `off`, `status`, `update` (refused while a song is playing or while another update runs; the same rule covers `--cmd`, the socket and the web upload, because ENTER_BOOTLOADER reboots the base. Only the web upload also refuses when the base is not connected; the CLI path passes `baseAlive=true` to `updateRefusal`), `quit`.
 - **`packaging/midicontrol.service.in`** — systemd user unit (configured at build time; developer use only, production is the container).
 
 ## Tests
 
 `tests/` uses a tiny built-in harness (`test_framework.hpp`, no external deps). Covers CRC vectors, codec/parser, SysEx, NOW_PLAYING_INFO encoding, both SMF SysEx framings, the SMF reader against the real files in `songs/`, song lookup/list paging, verse sequencing and the playback engine (fake clock), the dispatcher's ACK/NAK/duplicate logic, config (keys, path resolution, `[WEB]`), update-file validation, message names, the status registry and dot rules, JSON escaping/schema, the organ layout and preamble, per-song stop file parse/save/remove/store/PUT, HTTP parsing/routing incl. request bodies, the embedded page (self-contained, home/Advanced views, stops editor), the song-file check, console command parsing, the logger and child-process signal handling, the diagnostics core (port selection, store/cache, log ingest incl. reconnect and the replay window, DIAG polling, `/api/diag`, status schema 2). All deterministic: no real time, no ports. `MC_SONGS_DIR` is injected by CMake.
 
+**Test-only environment seam** (not user-visible, no config keys; used by `tools/systest/`): `MIDICONTROL_SYSFS_ROOT` replaces `/sys` in every sysfs lookup (`findMidiControlPort`, `findMidiControlLogPort`, `baseInBootloader`, `usbIdOf`), `MIDICONTROL_DEV_ROOT` replaces `/dev` in the paths they return (fake tree -> ptys), `MIDICONTROL_MIDI_KEY` replaces the `"MIDIControl"` ALSA port-name key (also picks the `arecordmidi` input). Unset = production behaviour. Unit tests: `port_select_env_*` in `tests/test_port_select.cpp`. `songcheck_real_files` fails on `rejstriky.mid` in a fresh worktree/build (pre-existing, unrelated).
+
 ## Protocol Details
 
 - Frame: `[SOH] [stuffed: length, src, dest, pkt_id, msg_type, payload..., crc8] [EOT]`
 - Byte stuffing escapes SOH, EOT, ESC, `$`, `%` (RN4870 BLE module reserved chars)
-- Reliable delivery: end-to-end ACK/NAK, 3 retries of the same PacketId at 500 ms; receivers re-ACK duplicates without executing them
+- Reliable delivery: end-to-end ACK/NAK, 3 retries of the same PacketId at 500 ms; receivers re-ACK duplicates without executing them (also the `sendReliable` defaults, P1-18); NAK BUSY is retried like a timeout
 - Addresses: PC=0x01, BASE=0x02, REMOTE=0x03, BROADCAST=0xFF

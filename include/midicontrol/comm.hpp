@@ -26,6 +26,7 @@
 #include "midicontrol/protocol/parser.hpp"
 #include "midicontrol/protocol/types.hpp"
 #include "midicontrol/serial_port.hpp"
+#include "midicontrol/startup_reset.hpp"
 #include "midicontrol/status.hpp"
 
 namespace mc {
@@ -82,10 +83,12 @@ public:
     // Synchronous reliable send: transmits the packet and blocks until a matching
     // ACK arrives (true) or a NAK / the retry budget is exhausted (false). Used by
     // the firmware-update flow, which needs per-chunk confirmation. Does not use
-    // the background _pending retry machinery.
+    // the background _pending retry machinery. The defaults are the protocol's retry budget
+    // (RETRY_TIMEOUT_MS, MAX_RETRIES retries after the first send); the firmware updater passes its own.
     bool sendReliable(uint8_t dest, mc::protocol::MsgType type,
-                      const std::vector<uint8_t>& payload, int timeoutMs = 600,
-                      int maxRetries = 5);
+                      const std::vector<uint8_t>& payload,
+                      int timeoutMs = mc::protocol::RETRY_TIMEOUT_MS,
+                      int maxRetries = mc::protocol::MAX_RETRIES);
 
     // FW_UPDATE_STATUS mailbox (firmware updater). Status packets are ACKed by
     // the dispatcher; the latest code is kept here until taken.
@@ -94,12 +97,15 @@ public:
     std::optional<uint8_t> waitFwStatus(int timeoutMs);
     // Non-blocking take.
     std::optional<uint8_t> takeFwStatus() { return waitFwStatus(0); }
+    // NAK reason of the last sendReliable() that ended in a NAK; empty after an ACK or a timeout.
+    std::optional<uint8_t> lastNakReason();
 
     // High-level commands (thread-safe; playback work is queued).
     std::optional<mc::protocol::NakReason> playSong(const std::string& code);
     void stopSong();
     bool requestAddVerse();
-    void recordSong();
+    // false: not started (already recording, no MIDI input port, no file, spawn failed, or cancelled).
+    bool recordSong();
     void organOn();
     void organOff();
     std::vector<std::string> songList() const;
@@ -107,6 +113,8 @@ public:
     bool isPlaying() const;
     std::string sectionLabel() const;
     bool isConnected() const;
+    // Protocol version the node reported in its INFO_RESP (PROTO_VER); 1 while unknown or when the node does not send it.
+    int peerProtocolVersion(mc::status::Node node) const;
     bool isBaseAlive() const;
 
     // STATUS_RESP flags as the base reports them.
@@ -123,6 +131,22 @@ public:
     // heartbeat within `maxAge` (reader/keepalive only while they run).
     bool threadsAlive(std::chrono::milliseconds maxAge) const;
 
+    // P1-14: one gate for "a song is coming" and "an update runs". A Play claims it when it is queued
+    // (before the player exists, so also through the organ warm-up); the control thread releases it when
+    // no player is left and no Play is queued. tryBeginUpdate() takes the update side only when neither
+    // a song nor another update holds the gate; endUpdate() gives it back.
+    enum class UpdateClaim { Granted, Busy, Playing };
+    UpdateClaim tryBeginUpdate();
+    void endUpdate();
+    bool updateClaimed() const;
+
+    // P1-13: while the base is not connected, the reader asks `probe` once a second whether the base sits
+    // in its USB bootloader (an update that did not finish); not during a base update, where that is
+    // expected. Reported once per edge: log, status field Base/in_bootloader, console `status`. Set
+    // before start()/connect(). No probe (the default, and in tests unless given): never looked for.
+    void setBootloaderProbe(std::function<bool()> probe) { _bootloaderProbe = std::move(probe); }
+    bool baseInBootloader() const { return _inBootloader.load(); }
+
     // A base firmware update is running: the bootloader ignores KEEPALIVE and
     // GET_STATUS, so neither is sent and keepalive loss is not reported.
     void setUpdating(bool on);
@@ -131,6 +155,16 @@ public:
     // remote programs its diag slot's "fetched" byte in the W25Q32 the OTA stages to). Unlike setUpdating(), base
     // keepalive and GET_STATUS continue.
     void pauseDiag(bool on);
+
+    // A8: a firmware update of ANY device (base: setUpdating, remote: pauseDiag) is running. The single check behind
+    // the BUSY refusal of playSong(); A7 (RECORD_SONG) extends busyReason() for its own refusals.
+    bool updateInProgress() const { return _updating.load() || _remotePaused.load(); }
+    // NakReason::BUSY while a command that starts playback or recording must be refused, otherwise empty.
+    // A7: also BUSY while a recording runs or starts (PLAY_SONG and RECORD_SONG both use it).
+    std::optional<mc::protocol::NakReason> busyReason();
+
+    // Tests only: the player writes its MIDI bytes here instead of opening an RtMidi port.
+    void setMidiSinkForTest(Player::MidiSink sink) { _midiSinkForTest = std::move(sink); }
 
 private:
     using Clock = std::chrono::steady_clock;
@@ -144,16 +178,19 @@ private:
     };
 
     struct Command {
-        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown } kind;
+        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset, IdleOff, RemoteResync, StopRecording } kind;
         std::string code;
         std::string path;
         uint64_t generation = 0;
+        uint8_t source = 0;  // Stop: the packet's source address (0 = local/console); A7: a remote Stop does not end a recording
     };
 
     // CommandSink (reader thread).
     std::optional<mc::protocol::NakReason> playSong(const std::string& code,
                                                     uint8_t requester) override;
     void stopSong(uint8_t requester) override;
+    std::optional<mc::protocol::NakReason> startRecording(uint8_t requester) override;
+    void stopRecording(uint8_t requester) override;
     std::optional<mc::protocol::NakReason> addVerse() override;
     std::vector<uint8_t> songListPage(size_t offset) override;
 
@@ -168,7 +205,8 @@ private:
     void handleSerialLoss();
     bool tryReopen();
     uint8_t nextPacketId();
-    uint8_t sendPacket(const mc::protocol::Packet& pkt);  // unreliable, id already set
+    // Unreliable, id already set; `sentOut` (optional) tells whether the frame was written.
+    uint8_t sendPacket(const mc::protocol::Packet& pkt, bool* sentOut = nullptr);
 
     // Status instrumentation.
     void noteTx(const mc::protocol::Packet& pkt, bool retransmit);
@@ -190,20 +228,58 @@ private:
     void doPlay(const Command& cmd);
     void doStop(bool signal);
     void finishPlayback();
+    // P1-9 remote resync: every SIGNAL_* to the remote goes through sendRemoteSignal().
+    void sendRemoteSignal(mc::protocol::MsgType type, const std::vector<uint8_t>& payload = {});
+    // A6: SIGNAL_INFO [flags] (protocol v2 remote only); remembered for the resync.
+    void sendSignalInfo(uint8_t flags);
+    uint8_t sendRemoteSignalLocked(mc::protocol::MsgType type, const std::vector<uint8_t>& payload,
+                                   bool& registered);  // _resyncMutex held
+    uint8_t sendWithAckImpl(uint8_t dest, mc::protocol::MsgType type, const std::vector<uint8_t>& payload,
+                            bool* registered);
+    void noteRemoteSignalEnd(uint8_t pid, mc::protocol::MsgType type, bool acked);  // reader thread
+    void doRemoteResync();
     bool releasePlayer();  // stop + destroy the player; false if there was none
     void displayClear();
+    // P1-10: true while the indicator shows something this PC sent (a non-clear NOW_PLAYING_INFO);
+    // displayClear() is a no-op otherwise. Kept across a serial loss: the base may still show the code.
+    std::atomic<bool> _displaySet{false};
     void stopRecorder();
+    // A7: recordSong() = claimRecorder() + runRecorderClaimed(). startRecording() claims synchronously (so a second
+    // RECORD_SONG sees BUSY at once) and runs the warm-up and the spawn on _recordThread.
+    bool claimRecorder();
+    bool runRecorderClaimed();  // clears _recorderStarting when done
+    bool recordingActive();     // starting or alive
+    void signalRecordingStarted();
+    void signalRecordingEnded(bool remoteToo);  // idempotent
+    void sendBaseSignal(mc::protocol::MsgType type);  // SIGNAL_* straight to a protocol v2 base
+    std::atomic<bool> _recordingSignalled{false};  // SIGNAL_RECORDING went out and its end is still owed
+    bool _recordingRemoteSent = false;             // _resyncMutex: the remote got that SIGNAL_RECORDING
+    std::mutex _recordThreadMutex;
+    std::thread _recordThread;
+    bool recorderAliveLocked();  // _recorderMutex held; forgets a recorder that exited on its own
 
     Config _config;
     mc::status::StatusRegistry& _status;
     MidiPortFinder _midiFinder;
     SerialFinder _serialFinder;
+    std::function<bool()> _bootloaderProbe;
+    std::atomic<bool> _inBootloader{false};
+    void noteBootloader(bool in);  // reader thread
     std::string _devicePath;
 
     SerialPort _serial;
     mc::protocol::Parser _parser;
     std::unique_ptr<Dispatcher> _dispatcher;
-    std::atomic<uint8_t> _packetId{0};
+    // Fast PC restart: the base de-duplicates by the last PacketId per source, so every
+    // process starts at a random id (a restart repeating the old ids could have its first
+    // command dropped as a duplicate). Two processes still collide with p = 1/256.
+    std::atomic<uint8_t> _packetId{initialPacketId()};
+    static uint8_t initialPacketId();
+    // Protocol v2: session nonce (non-zero, random per process) sent in every KEEPALIVE to the base. A restarted PC shows a
+    // different nonce, so base and remote forget the old PC's duplicate window even when the new PacketIds collide.
+    const uint16_t _sessionNonce{makeSessionNonce()};
+    static uint16_t makeSessionNonce();
+    void sendKeepalive();
 
     std::mutex _mutex;  // guards _serial, _pending
     std::map<uint8_t, Pending> _pending;
@@ -216,6 +292,11 @@ private:
     int _awaitResult = 0;  // 0 = none, 1 = ACK, 2 = NAK
     uint8_t _awaitReason = 0;  // NAK reason when _awaitResult == 2 (guarded by _ackMutex)
     std::optional<uint8_t> _fwStatus;  // guarded by _ackMutex
+    std::optional<uint8_t> _lastNak;   // guarded by _ackMutex; see lastNakReason()
+    // A retried FW_UPDATE_STATUS (same PacketId, same byte) must not count as a new status. Guarded by _ackMutex.
+    bool _fwSeen = false;
+    uint8_t _fwSeenPid = 0, _fwSeenByte = 0;
+    Clock::time_point _fwSeenAt{};
 
     std::thread _readerThread;
     std::thread _keepaliveThread;
@@ -235,9 +316,14 @@ private:
     uint8_t _pollPid = 0;
     int64_t _pollSentMs = 0;
     // Organ power: a STATUS_RESP is the base's truth only when no SET_CURRENT went out after its GET_STATUS
-    // (the base answers in order). _statusGen = _setCurrentGen when the last GET_STATUS was sent (_routineMutex).
+    // (the base answers in order). Item 4b: one (sentMs, _setCurrentGen) entry per GET_STATUS written to the
+    // base, popped by each new STATUS_RESP, so an answer to an older request is judged by that request's
+    // generation. Extra entries (lost or de-duplicated requests) only make the PC ignore more answers.
+    // _setCurrentGen is bumped and the entries pushed under _mutex, in the same section as the write.
     std::atomic<uint64_t> _setCurrentGen{0};
-    uint64_t _statusGen = 0;
+    std::deque<std::pair<int64_t, uint64_t>> _statusGens;  // _mutex
+    int _lastStatusRespPid = -1;                            // _mutex; the base retries an un-ACKed STATUS_RESP
+    void noteStatusRequestLocked();                         // caller holds _mutex
 
     // Interactive status request (requestStatus).
     std::mutex _statusMutex;
@@ -264,6 +350,20 @@ private:
     std::atomic<bool> _remotePaused{false};  // remote firmware update running (pauseDiag)
     std::atomic<int64_t> _reconnects{0};
 
+    // P1-9: "remote state dirty" until the remote ACKs a re-sent state. Lock order: _resyncMutex before
+    // _mutex (sendRemoteSignal holds it across sendWithAck so an ACK cannot be matched before it is awaited).
+    // A new PC process starts dirty and "may play": the remote can still show a song from the previous run.
+    std::mutex _resyncMutex;
+    bool _remoteDirty = true;
+    std::optional<uint16_t> _lastRemoteBootId;  // A2: remote boot id of the current ble=1 stretch (under _resyncMutex)
+    bool _remoteMayPlay = true;      // the remote may think a song plays (cleared by an ACKed SIGNAL_STOPPED)
+    std::set<uint8_t> _resyncAwait;  // pids of the current resync attempt
+    std::string _lastAnchor;         // last SIGNAL_ANCHOR label of the current song
+    bool _signalInfoSent = false;    // _lastSignalInfo went out (false: waits for a v2 remote)
+    std::optional<uint8_t> _lastSignalInfo;  // last SIGNAL_INFO flags byte sent for the current song (A6)
+    std::atomic<bool> _resyncQueued{false};
+    Player::MidiSink _midiSinkForTest;
+
     // Song being played: sections visited (playback thread appends, control
     // thread reads after the player has been joined).
     std::mutex _songMutex;
@@ -272,9 +372,13 @@ private:
 
     // Control thread + queue.
     std::thread _controlThread;
-    std::mutex _queueMutex;
+    mutable std::mutex _queueMutex;
     std::condition_variable _queueCv;
     std::deque<Command> _queue;
+    // P1-14 gate, guarded by _queueMutex (a Play is claimed in the same lock that queues it).
+    bool _playClaimed = false;
+    bool _updateClaimed = false;
+    void releasePlayClaimIfIdle();  // control thread, after each command
 
     // Player: created/destroyed only on the control thread; _playerMutex
     // guards the pointer for readers on other threads.
@@ -282,9 +386,43 @@ private:
     std::unique_ptr<Player> _player;
     uint64_t _generation = 0;  // control thread only
     std::atomic<bool> _organOn{false};
+    // PCC-2: the organ state the PC last commanded and not yet confirmed by an authoritative STATUS_RESP.
+    // organOn/organOff set it and send under _organMutex, so a re-send can never overtake a newer command
+    // (the supersede rule makes the last sender win). Lock order: _organMutex before _mutex.
+    std::mutex _organMutex;
+    int _organIntent = -1;          // -1 none (adopt what the base reports), 0 off, 1 on
+    int64_t _organIntentMs = 0;     // steady ms of the command
+    int _organReasserts = 0;        // re-sends for this intent
+    int _organFault = -1;           // SSR state (0/1) shown as organ_power_fault after giving up; -1 none
+    void setOrganLocked(bool on);   // caller holds _organMutex
+    void reconcileOrgan(bool relay, uint64_t statusGen);  // authoritative STATUS_RESP (reader thread)
+
+    // Startup reset (gap 2 / SYS-PWR-07 / SYS-NOTE-04): notes off + organ off
+    // once the base link is up. The keepalive ACK posts Kind::StartupReset
+    // while it is not finished; the control thread decides and performs it.
+    void doStartupReset();
+    mc::startup::StartupReset _startupReset;  // control thread only
+    std::atomic<bool> _startupResetDone{false};
+    std::atomic<bool> _startupResetQueued{false};
+    std::atomic<bool> _organClaimed{false};  // organOn() ran: never power off at startup
+    std::atomic<int64_t> _baseUpMs{-1};      // steady ms of the first keepalive ACK
+    std::atomic<int> _ssrReported{-1};       // last authoritative STATUS_RESP relay: -1 unknown, 0 off, 1 on
+
+    // Q1-1 b idle-off timer: armed when the startup reset finds the SSR on
+    // (manual organ-on survives a PC start). Disarmed when the PC switches the
+    // organ (organOn/organOff), a song starts, or the base reports it off.
+    // The keepalive thread posts Kind::IdleOff when it expires; the control
+    // thread re-checks and powers off.
+    void armIdleOff();
+    void disarmIdleOff();
+    void doIdleOff();
+    std::atomic<int64_t> _idleOffArmedMs{-1};  // steady ms when armed, -1 = not armed
+    std::atomic<bool> _idleOffQueued{false};
 
     std::mutex _recorderMutex;
     int _recorderPid = -1;
+    bool _recorderStarting = false;   // PCC-1: a Record is in its warm-up (guarded by _recorderMutex)
+    bool _recorderCancelled = false;  // stopRecorder ran during that warm-up
 };
 
 }  // namespace mc

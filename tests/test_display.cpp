@@ -48,6 +48,12 @@ TEST(npi_blank_fields) {
 
 TEST(npi_clear_is_empty_payload) { CHECK(encodeNowPlaying(clearUpdate()).empty()); }
 
+// A3: the conditional clear (protocol v2) is the single byte NPI_CLEAR_IF_OWN.
+TEST(npi_conditional_clear_is_one_byte_0x01) {
+    checkBytes(encodeNowPlaying(clearUpdate(true)), {0x01});
+    CHECK(encodeNowPlaying(clearUpdate(false)).empty());
+}
+
 TEST(npi_short_song_number_keeps_0xff_high_byte) {
     // "  12" is 0xFF 0x12: no-change for the song needs both bytes 0xFF.
     Update u;

@@ -1,6 +1,7 @@
 #ifndef MIDICONTROL_CONFIG_HPP
 #define MIDICONTROL_CONFIG_HPP
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -14,7 +15,7 @@
 //              the config file are resolved by loadConfig)
 //   [PLAYBACK] WarmupMs, KeepPowerOn, VerseGapMs (all optional, see Config)
 // The song structure (prelude, verses) comes from the anchors in each MIDI file.
-//   [BINDINGS] Bind0=song.mid, ...   (parsed, not used yet)
+//   [BINDINGS] Bind0=song.mid, ...   (parsed, reserved, unused: do not remove)
 //   [WEB]      Enabled, Port, Bind (status page, all optional, see Config)
 //   [ORGAN]    stop layout and Program Change mapping (all optional, see organ.hpp)
 //   [DIAG]     LogPort (override of the log CDC auto-detection), Dir (diagnostics store)
@@ -29,6 +30,9 @@ struct Config {
     int warmupMs = 3000;               // organ warm-up after power-on, before the first note
     bool keepPowerOn = false;          // leave organ power on between songs
     int verseGapMs = 0;                // silence before a section repeated with add-verse
+    // Q1-1 b: an organ found switched on at PC start is switched off after this
+    // idle time (SYSTEM.md D27 default 30 min). Not a config.conf key yet.
+    int64_t organIdleOffMs = 30LL * 60 * 1000;
 
     // [WEB] status page + Stops editor (writes <CODE>.conf per song; 0.0.0.0 exposes that to the LAN)
     bool webEnabled = true;

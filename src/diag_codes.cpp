@@ -73,6 +73,14 @@ std::string diagCodeText(uint8_t code, uint32_t arg) {
         case C::OTA_RESULT: return "ota result " + std::to_string(arg);
         case C::SHUTDOWN: return "shutdown, reason " + std::to_string(arg);
         case C::RECORDS_LOST: return std::to_string(arg) + " records lost";
+        case C::BLE_MODULE_REBOOT:
+            return arg == 0 ? std::string("ble module reboot")
+                            : "ble module reboot, " + std::to_string(arg) + " ms since the last";
+        case C::BLE_ERR_CONN: {
+            const int8_t rssi = static_cast<int8_t>(arg & 0xFF);
+            return rssi == -128 ? std::string("ble link lost (supervision timeout), rssi unknown")
+                                : "ble link lost (supervision timeout), rssi " + std::to_string(rssi) + " dBm";
+        }
     }
     char b[16];
     snprintf(b, sizeof b, "code 0x%02X", code);

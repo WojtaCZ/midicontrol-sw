@@ -47,14 +47,13 @@ public:
 private:
     console::ExecResult update(const console::Command& c, const console::Reply& out, bool remote);
     using Run = std::function<bool(FirmwareUpdater&, FirmwareUpdater::Progress)>;
-    // One update with the status fields kept current; the caller holds _updating.
+    // One update with the status fields kept current; the caller holds the update gate (CommHandler::tryBeginUpdate).
     bool runUpdate(const std::string& target, const Run& run, const FirmwareUpdater::Say& say,
                    const FirmwareUpdater::Progress& progress);
 
     CommHandler& _handler;
     mc::status::StatusRegistry& _status;
     mc::diag::DiagStore* _diag;
-    std::atomic<bool> _updating{false};
     std::mutex _workerMutex;  // guards _worker (web thread starts it, main joins it)
     std::thread _worker;      // the last upload; joined before the next one starts
 };

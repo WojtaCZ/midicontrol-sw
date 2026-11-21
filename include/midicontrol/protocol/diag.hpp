@@ -43,6 +43,8 @@ enum class Code : uint8_t {
     OTA_RESULT = 14,
     SHUTDOWN = 15,
     RECORDS_LOST = 16,
+    BLE_MODULE_REBOOT = 17,  // module reset on its own; arg = ms since the last one (0 = first)
+    BLE_ERR_CONN = 18,       // link lost by supervision timeout; arg = last RSSI dBm (i8 low byte, 0x80 = unknown)
 };
 
 enum class Level : uint8_t { ERROR = 1, WARNING = 2, INFO = 3, DEBUG = 4 };

@@ -19,6 +19,7 @@ const char* msgTypeName(MsgType type) {
         case MsgType::SIGNAL_RECORDING: return "SIGNAL_RECORDING";
         case MsgType::SIGNAL_STOPPED: return "SIGNAL_STOPPED";
         case MsgType::SIGNAL_ANCHOR: return "SIGNAL_ANCHOR";
+        case MsgType::SIGNAL_INFO: return "SIGNAL_INFO";
         case MsgType::SET_CURRENT: return "SET_CURRENT";
         case MsgType::GET_STATUS: return "GET_STATUS";
         case MsgType::STATUS_RESP: return "STATUS_RESP";
@@ -46,6 +47,7 @@ const char* nakReasonName(uint8_t reason) {
         case NakReason::NOT_PLAYING: return "NOT_PLAYING";
         case NakReason::UNREACHABLE: return "UNREACHABLE";
         case NakReason::NOT_FOUND: return "NOT_FOUND";
+        case NakReason::NO_TRANSFER: return "NO_TRANSFER";
     }
     return "UNKNOWN";
 }

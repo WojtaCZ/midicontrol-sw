@@ -10,6 +10,7 @@
 // Tests register themselves automatically at static-init time.
 
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <sstream>
@@ -53,7 +54,10 @@ inline std::string toHex(const std::vector<uint8_t>& v) {
 inline int runAll() {
     int failed = 0;
     int passed = 0;
+    // MC_TEST_FILTER=<substring>: run only the cases whose name contains it.
+    const char* filt = std::getenv("MC_TEST_FILTER");
     for (auto& c : registry()) {
+        if (filt && *filt && c.name.find(filt) == std::string::npos) continue;
         try {
             c.fn();
             ++passed;
@@ -68,7 +72,7 @@ inline int runAll() {
         }
     }
     std::cout << "\n" << passed << " passed, " << failed << " failed, "
-              << registry().size() << " total\n";
+              << (passed + failed) << " total\n";
     return failed == 0 ? 0 : 1;
 }
 
@@ -83,9 +87,9 @@ inline int runAll() {
 
 #define FAIL_AT(msg)                                                                       \
     do {                                                                                   \
-        std::ostringstream _os;                                                            \
-        _os << __FILE__ << ":" << __LINE__ << ": " << msg;                                 \
-        throw ::mc::test::Failure{_os.str()};                                              \
+        std::ostringstream _fos; /* not _os: CHECK_EQ passes its own _os.str() as msg */   \
+        _fos << __FILE__ << ":" << __LINE__ << ": " << msg;                                \
+        throw ::mc::test::Failure{_fos.str()};                                             \
     } while (0)
 
 #define CHECK(cond)                                                                        \

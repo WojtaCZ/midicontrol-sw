@@ -27,6 +27,7 @@ enum class MsgType : uint8_t {
     SIGNAL_RECORDING = 0x31,
     SIGNAL_STOPPED   = 0x32,
     SIGNAL_ANCHOR    = 0x33,  // PC -> remote: playback entered a section; payload = null-terminated ASCII label ("Sloka 2")
+    SIGNAL_INFO      = 0x34,  // PC/Base -> remote (v2): payload [flags u8], see SIGNAL_INFO_* in constants.hpp; ACKed state message
 
     SET_CURRENT      = 0x40,
 
@@ -68,6 +69,7 @@ enum class NakReason : uint8_t {
     NOT_PLAYING     = 0x05,  // command needs active playback (REPLAY_ANCHOR)
     UNREACHABLE     = 0x06,  // base: destination node not connected, packet not forwarded
     NOT_FOUND       = 0x07,  // PC: song code not in library
+    NO_TRANSFER     = 0x08,  // FW_UPDATE_DATA/END without an active transfer (device reset or timed out)
 };
 
 // A decoded/decodable packet. Unlike the fixed-size firmware struct (which

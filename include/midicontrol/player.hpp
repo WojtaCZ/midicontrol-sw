@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "midicontrol/display.hpp"
 #include "midicontrol/playback.hpp"
@@ -21,9 +22,17 @@ namespace mc {
 // thread (CommHandler's control thread). Callbacks run on the playback thread
 // and must not destroy the Player; onFinished should only post a message to
 // the owner, which then destroys the Player (joining the finished thread).
+// Open MIDI output `outPortIndex`, send `messages` and close it again (used
+// when no song plays, e.g. the startup All Notes Off). False with `err` set
+// when the port cannot be opened or a send fails.
+bool sendMidiMessages(int outPortIndex, const std::vector<std::vector<uint8_t>>& messages,
+                      std::string* err);
+
 class Player {
 public:
-    explicit Player(int outPortIndex);
+    // Where the MIDI bytes go instead of an RtMidi port (tests: no real port is ever opened).
+    using MidiSink = std::function<void(const std::vector<uint8_t>&)>;
+    explicit Player(int outPortIndex, MidiSink sink = {});
     ~Player();
 
     Player(const Player&) = delete;
@@ -31,6 +40,9 @@ public:
 
     std::function<void(const mc::display::Update&)> onDisplay;
     std::function<void(const std::string&)> onAnchor;
+    // Called once from play(), after the file is parsed and before the playback thread starts (so before the first
+    // onAnchor): whether the song has sections (verse markers). A6.
+    std::function<void(bool)> onSections;
     std::function<void()> onFinished;  // natural end only (not after stop())
 
     // Load `filepath` and start playing it in a background thread. Throws on a
@@ -51,6 +63,7 @@ private:
     void playbackLoop();
 
     int _outPortIndex;
+    MidiSink _sink;
     std::unique_ptr<RtMidiOut> _midiOut;
     std::unique_ptr<PlaybackEngine> _engine;
     std::thread _thread;

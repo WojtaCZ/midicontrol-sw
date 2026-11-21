@@ -3,11 +3,13 @@
 
 #include <cstdio>
 #include <ctime>
+#include <random>
 #include <sstream>
 
 #include "midicontrol/diag_api.hpp"
 #include "midicontrol/log.hpp"
 #include "midicontrol/process.hpp"
+#include "midicontrol/recording.hpp"
 #include "midicontrol/protocol/codec.hpp"
 #include "midicontrol/protocol/constants.hpp"
 #include "midicontrol/songs.hpp"
@@ -22,7 +24,33 @@ namespace {
 
 constexpr int kStatusPollMs = 5000;     // GET_STATUS to the base while connected
 constexpr int kStatusAnswerMs = 2000;   // no STATUS_RESP by then = "not answered"
+constexpr int64_t kInfoWaitMs = 4000;  // A5: how long the "found on" startup decision waits for the base INFO_RESP
 constexpr int kMidiCheckMs = 10000;     // MIDI port re-discovery for the status page
+constexpr uint64_t kNoStatusGen = UINT64_MAX;     // Item 4b: a STATUS_RESP that answers no known GET_STATUS
+constexpr int64_t kStatusGenMaxAgeMs = 15000;     // Item 4b: a request unanswered this long is not answered later
+constexpr int kOrganReassertMax = 3;         // PCC-2: re-sends of a SET_CURRENT the base did not take
+constexpr int64_t kOrganIntentWindowMs = 30000;  // PCC-2: how long a PC organ command is defended
+std::string idleText(int64_t ms) {
+    return ms >= 60000 ? std::to_string(ms / 60000) + " min" : std::to_string(ms / 1000) + " s";
+}
+
+// PM-13: reliable messages that carry a state, where only the newest one may reach the node.
+// 0 = no supersede; equal non-zero values supersede each other (same destination only).
+int supersedeGroup(MsgType t) {
+    switch (t) {
+        case MsgType::SET_CURRENT: return 1;          // organ SSR on/off
+        case MsgType::SIGNAL_PLAYING:
+        case MsgType::SIGNAL_RECORDING:
+        case MsgType::SIGNAL_STOPPED: return 2;       // remote's playing/recording/stopped state
+        case MsgType::SIGNAL_INFO: return 3;          // A6: remote's song/system flags; independent of group 2
+        default: return 0;
+    }
+}
+
+bool isRemoteSignal(MsgType t) {
+    return t == MsgType::SIGNAL_PLAYING || t == MsgType::SIGNAL_RECORDING || t == MsgType::SIGNAL_STOPPED ||
+           t == MsgType::SIGNAL_ANCHOR || t == MsgType::SIGNAL_INFO;
+}
 
 std::string hexByte(uint8_t b) {
     char buf[8];
@@ -67,6 +95,11 @@ CommHandler::CommHandler(const Config& config, MidiPortFinder midiFinder,
     out.onNak = [this](uint8_t pid, uint8_t reason) { handleAck(pid, true, reason); };
     out.onKeepaliveAck = [this]() {
         _lastBaseKeepalive.store(Clock::now());
+        int64_t unset = -1;
+        _baseUpMs.compare_exchange_strong(unset, steadyMs());
+        if (!_startupResetDone.load() && !_updating.load() && !_startupResetQueued.exchange(true)) {
+            post({Command::Kind::StartupReset, {}, {}, 0});
+        }
         _status.setNow(Node::Base, "keepalive_ack_ms");
         if (_baseLostReported.exchange(false)) {
             _status.set(Node::Base, "alive", true);
@@ -130,12 +163,17 @@ CommHandler::~CommHandler() { shutdown(); }
 
 void CommHandler::start(SerialFinder finder, const std::string& devicePath) {
     _serialFinder = std::move(finder);
+    bool opened = false;
     if (!devicePath.empty()) {
         std::lock_guard<std::mutex> lk(_mutex);
         if (_serial.open(devicePath, 115200)) {
             _devicePath = devicePath;
-            _connected.store(true);
+            opened = true;
         }
+    }
+    if (opened) {
+        sendKeepalive();  // hello with the session nonce, before any reliable frame (_connected is still false)
+        _connected.store(true);
     }
     if (_connected.load()) {
         noteConnected(devicePath, false);
@@ -158,6 +196,7 @@ bool CommHandler::connect(const std::string& devicePath) {
         }
         _devicePath = devicePath;
     }
+    sendKeepalive();  // hello with the session nonce, before any reliable frame (_connected is still false)
     _connected.store(true);
     noteConnected(devicePath, false);
     startIoThreads();
@@ -188,6 +227,8 @@ void CommHandler::disconnect() {
     std::lock_guard<std::mutex> lk(_mutex);
     _serial.close();
     _pending.clear();
+    _statusGens.clear();  // no answer to an earlier request can come over a new connection
+    _lastStatusRespPid = -1;
     _connected.store(false);
     _status.set(Node::Base, "connected", false);
     clearBaseReport();
@@ -203,6 +244,10 @@ void CommHandler::shutdown() {
     if (_controlThread.joinable()) {
         post({Command::Kind::Shutdown, {}, {}, 0});
         _controlThread.join();
+    }
+    {
+        std::lock_guard<std::mutex> lk(_recordThreadMutex);
+        if (_recordThread.joinable()) _recordThread.join();
     }
     disconnect();
 }
@@ -259,6 +304,8 @@ void CommHandler::handleSerialLoss() {
         std::lock_guard<std::mutex> lk(_mutex);
         _serial.close();
         _pending.clear();
+        _statusGens.clear();  // no answer to an earlier request can come over a new connection
+        _lastStatusRespPid = -1;
     }
     _connected.store(false);
     _parser.reset();
@@ -269,6 +316,17 @@ void CommHandler::handleSerialLoss() {
     _infoPoller->tick(steadyMs(), false, false);  // down now: a reconnect faster than the 2 s tick is still an edge
     mc::log::warn(Node::Base, "Serial link to the base lost; waiting for it to come back...");
     post({Command::Kind::SerialLost, {}, {}, 0});
+}
+
+void CommHandler::noteBootloader(bool in) {
+    if (_inBootloader.exchange(in) == in) return;
+    _status.set(Node::Base, "in_bootloader", in);
+    if (in) {
+        mc::log::error(Node::Base, "The base is in its USB bootloader (ABCD:1235): a firmware update did not "
+                                   "finish. Re-flash the base (console: update base <file>).");
+    } else {
+        mc::log::info(Node::Base, "The base left its bootloader.");
+    }
 }
 
 bool CommHandler::tryReopen() {
@@ -286,6 +344,7 @@ bool CommHandler::tryReopen() {
     }
     _parser.reset();
     _dispatcher->reset();
+    sendKeepalive();  // hello with the session nonce, before any reliable frame
     _lastBaseKeepalive.store(Clock::now());
     _baseLostReported.store(false);
     _connected.store(true);
@@ -297,33 +356,124 @@ bool CommHandler::tryReopen() {
 // Sending
 // ---------------------------------------------------------------------------
 
+uint8_t CommHandler::initialPacketId() {
+    uint32_t seed = 0;
+    try {
+        std::random_device rd;
+        seed = rd();
+    } catch (...) {
+        // no entropy source: the clock below still differs between restarts
+    }
+    seed ^= static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+    seed ^= static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count() >> 10);
+    return static_cast<uint8_t>(seed ^ (seed >> 8) ^ (seed >> 16) ^ (seed >> 24));
+}
+
+void CommHandler::noteStatusRequestLocked() {
+    const int64_t now = steadyMs();
+    while (!_statusGens.empty() && now - _statusGens.front().first > kStatusGenMaxAgeMs) _statusGens.pop_front();
+    _statusGens.emplace_back(now, _setCurrentGen.load());
+}
+
+uint16_t CommHandler::makeSessionNonce() {
+    uint32_t seed = 0;
+    try {
+        std::random_device rd;
+        seed = rd();
+    } catch (...) {
+        // no entropy source: the clocks below still differ between restarts
+    }
+    seed ^= static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+    seed ^= static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count() >> 7);
+    const uint16_t n = static_cast<uint16_t>(seed ^ (seed >> 16));
+    return n == 0 ? uint16_t(1) : n;  // 0 means "no nonce" on the wire
+}
+
+void CommHandler::sendKeepalive() {
+    send(ADDR_BASE, MsgType::KEEPALIVE,
+         {static_cast<uint8_t>(_sessionNonce & 0xFF), static_cast<uint8_t>(_sessionNonce >> 8)});
+}
+
+int CommHandler::peerProtocolVersion(Node node) const {
+    const auto snap = _status.snapshot();
+    const auto& f = snap.node(node).fields;
+    const auto it = f.find("proto_ver");
+    if (it == f.end()) return 1;
+    const auto* v = std::get_if<int64_t>(&it->second);
+    return v && *v >= 1 ? static_cast<int>(*v) : 1;
+}
+
 uint8_t CommHandler::nextPacketId() { return _packetId.fetch_add(1); }
 
 uint8_t CommHandler::send(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload) {
     return sendPacket(Packet(ADDR_PC, dest, nextPacketId(), type, payload));
 }
 
-uint8_t CommHandler::sendPacket(const Packet& pkt) {
+uint8_t CommHandler::sendPacket(const Packet& pkt, bool* sentOut) {
     auto raw = encode(pkt);
     bool sent = false;
     {
         std::lock_guard<std::mutex> lk(_mutex);
-        if (_serial.isOpen()) sent = _serial.write(raw);
+        if (_serial.isOpen()) {
+            const bool statusReq = pkt.msgType == MsgType::GET_STATUS && pkt.dest == ADDR_BASE;
+            if (statusReq) noteStatusRequestLocked();
+            sent = _serial.write(raw);
+            if (statusReq && !sent) _statusGens.pop_back();
+        }
     }
     if (sent) noteTx(pkt, false);
+    if (sentOut) *sentOut = sent;
     return pkt.packetId;
 }
 
 uint8_t CommHandler::sendWithAck(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload) {
+    return sendWithAckImpl(dest, type, payload, nullptr);
+}
+
+uint8_t CommHandler::sendWithAckImpl(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload,
+                                     bool* registered) {
+    if (registered) *registered = false;
     // Register before writing so a fast ACK cannot arrive before the entry exists.
     uint8_t pid = nextPacketId();
     Packet pkt(ADDR_PC, dest, pid, type, payload);
     auto raw = encode(pkt);
+    int superseded = 0;
     {
         std::lock_guard<std::mutex> lk(_mutex);
+        // Item 4b: every SET_CURRENT counts, sent or not; STATUS_RESPs to earlier GET_STATUS no longer tell
+        // the SSR state. Under _mutex so no GET_STATUS write can fall between the bump and this write.
+        if (type == MsgType::SET_CURRENT && dest == ADDR_BASE) ++_setCurrentGen;
         if (!_serial.isOpen()) return pid;  // nothing to retry while disconnected
+        // PM-13 supersede rule, at the single send point for reliable packets: a newer SET_CURRENT
+        // (or SIGNAL_PLAYING/SIGNAL_STOPPED) drops every older un-ACKed one of the same group to the same
+        // node. Otherwise the old frame's retry (old PacketId) can reach the node after the new one, and
+        // the node, which remembers only the last PacketId per source, executes the stale state last.
+        // Erase, register and write under one lock so checkTimeouts cannot retransmit in between.
+        const int group = supersedeGroup(type);
+        if (group != 0) {
+            for (auto it = _pending.begin(); it != _pending.end();) {
+                // Item 2: a state signal (group 2) also drops a pending SIGNAL_ANCHOR, whose section belongs
+                // to the old state. One-directional: an ANCHOR supersedes nothing (a lost PLAYING must still
+                // be retried after the anchor that follows it).
+                const bool staleAnchor = group == 2 && it->second.msgType == MsgType::SIGNAL_ANCHOR;
+                if (it->second.dest == dest && (supersedeGroup(it->second.msgType) == group || staleAnchor)) {
+                    it = _pending.erase(it);
+                    ++superseded;
+                } else {
+                    ++it;
+                }
+            }
+        }
         _pending[pid] = Pending{Clock::now(), 0, type, dest, payload};
+        if (type == MsgType::GET_STATUS && dest == ADDR_BASE) noteStatusRequestLocked();
         _serial.write(raw);
+        if (registered) *registered = true;
+    }
+    if (superseded > 0) {
+        for (Node n : mc::status::nodesForPeer(dest)) {
+            mc::log::debug(n, std::string(msgTypeName(type)) + " supersedes " + std::to_string(superseded) +
+                                  " pending older one(s)");
+        }
     }
     if (dest == ADDR_REMOTE && type != MsgType::DIAG_GET && type != MsgType::GET_INFO) {
         _status.set(Node::Controller, "last_tx", std::string(msgTypeName(type)));
@@ -334,12 +484,133 @@ uint8_t CommHandler::sendWithAck(uint8_t dest, MsgType type, const std::vector<u
     return pid;
 }
 
+// P1-9: the single send point for SIGNAL_* to the remote. Holding _resyncMutex across the send keeps the
+// last anchor and the resync bookkeeping in step with what went on the wire (an ACK waits for it).
+uint8_t CommHandler::sendRemoteSignalLocked(MsgType type, const std::vector<uint8_t>& payload, bool& registered) {
+    const uint8_t pid = sendWithAckImpl(ADDR_REMOTE, type, payload, &registered);
+    if (type == MsgType::SIGNAL_PLAYING) {
+        _remoteMayPlay = true;
+        _lastAnchor.clear();
+        _lastSignalInfo.reset();  // flags belong to the song; the PC sends them again after PLAYING
+        _signalInfoSent = false;
+    } else if (type == MsgType::SIGNAL_RECORDING) {
+        _remoteMayPlay = true;  // the remote shows a recording until an ACKed SIGNAL_STOPPED
+        _recordingRemoteSent = true;
+    } else if (type == MsgType::SIGNAL_STOPPED) {
+        _lastSignalInfo.reset();
+        _signalInfoSent = false;
+        _recordingRemoteSent = false;
+    } else if (type == MsgType::SIGNAL_ANCHOR) {
+        _lastAnchor.assign(payload.begin(), payload.end());
+    } else if (type == MsgType::SIGNAL_INFO && !payload.empty()) {
+        _lastSignalInfo = payload[0];
+        _signalInfoSent = true;
+    }
+    if (!registered) _remoteDirty = true;  // no link: the remote did not get it
+    return pid;
+}
+
+void CommHandler::sendRemoteSignal(MsgType type, const std::vector<uint8_t>& payload) {
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    bool registered = false;
+    sendRemoteSignalLocked(type, payload, registered);
+}
+
+// A6: SIGNAL_INFO [flags] to a protocol v2 remote (a v1 remote would answer NAK UNKNOWN_MSG, and keeps showing
+// add-verse, which is its behaviour today). `flags` is the complete byte; it is recorded before the version gate so a
+// remote whose PROTO_VER becomes known later (onInfoResp) or a resync still gets it. A8 adds
+// SIGNAL_INFO_BASE_UPDATING by calling this with the combined byte.
+void CommHandler::sendSignalInfo(uint8_t flags) {
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    _lastSignalInfo = flags;
+    _signalInfoSent = false;
+    if (peerProtocolVersion(Node::Controller) < 2) return;
+    bool registered = false;
+    sendRemoteSignalLocked(MsgType::SIGNAL_INFO, {flags}, registered);
+}
+
+void CommHandler::noteRemoteSignalEnd(uint8_t pid, MsgType type, bool acked) {
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    if (!acked) {
+        // NAK (UNREACHABLE, BUSY, ...) or no answer after the retries: the remote's state is unknown.
+        _remoteDirty = true;
+        _resyncAwait.clear();  // the running attempt failed; a late ACK of its other packets proves nothing
+        return;
+    }
+    if (type == MsgType::SIGNAL_STOPPED) _remoteMayPlay = false;
+    if (_resyncAwait.erase(pid) > 0 && _resyncAwait.empty()) {
+        _remoteDirty = false;
+        mc::log::info(Node::Controller, "Remote state resynced (ACKed).");
+    }
+}
+
+void CommHandler::doRemoteResync() {
+    _resyncQueued.store(false);
+    // No send during a firmware update (base or remote); the next STATUS_RESP with ble=1 tries again.
+    if (_updating.load() || _remotePaused.load() || !_remoteLink.load()) return;
+    const bool playing = isPlaying();
+    std::string code;
+    {
+        std::lock_guard<std::mutex> lk(_songMutex);
+        code = _songCode;
+    }
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    if (!_remoteDirty) return;
+    _resyncAwait.clear();
+    std::vector<std::pair<uint8_t, bool>> sent;
+    std::string what;
+    if (playing) {
+        bool reg = false;
+        const std::vector<uint8_t> anchor(_lastAnchor.begin(), _lastAnchor.end());  // PLAYING clears it
+        const std::optional<uint8_t> info = _lastSignalInfo;                         // so does it
+        sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_PLAYING,
+                                                 std::vector<uint8_t>(code.begin(), code.end()), reg), reg);
+        what = "SIGNAL_PLAYING " + code;
+        if (info) { _lastSignalInfo = info; _signalInfoSent = false; }  // PLAYING reset them: still this song's flags
+        if (info && peerProtocolVersion(Node::Controller) >= 2) {
+            sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_INFO, {*info}, reg), reg);
+            what += " + SIGNAL_INFO";
+        }
+        if (!anchor.empty()) {
+            sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_ANCHOR, anchor, reg), reg);
+            what += " + SIGNAL_ANCHOR";
+        }
+    } else if (_recordingSignalled.load()) {
+        // A7: a recording runs. A v1 remote cannot show it (NAK UNKNOWN_MSG), so it gets nothing.
+        if (peerProtocolVersion(Node::Controller) < 2) {
+            _remoteDirty = false;
+            return;
+        }
+        bool reg = false;
+        sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_RECORDING, {}, reg), reg);
+        what = "SIGNAL_RECORDING";
+    } else if (_remoteMayPlay) {
+        bool reg = false;
+        sent.emplace_back(sendRemoteSignalLocked(MsgType::SIGNAL_STOPPED, {}, reg), reg);
+        what = "SIGNAL_STOPPED";
+    } else {
+        _remoteDirty = false;  // idle and known to be stopped: nothing to tell it
+        return;
+    }
+    bool all = true;
+    for (const auto& [pid, reg] : sent) {
+        if (reg) _resyncAwait.insert(pid);
+        all = all && reg;
+    }
+    if (!all) _resyncAwait.clear();  // part of it never went out: stay dirty
+    mc::log::info(Node::Controller, "Remote resync: " + what);
+}
+
 bool CommHandler::sendReliable(uint8_t dest, MsgType type, const std::vector<uint8_t>& payload,
                                int timeoutMs, int maxRetries) {
     // Same PacketId on every retry, so the receiver can suppress duplicates.
     const uint8_t pid = nextPacketId();
     const Packet pkt(ADDR_PC, dest, pid, type, payload);
     const auto raw = encode(pkt);
+    {
+        std::lock_guard<std::mutex> lk(_ackMutex);
+        _lastNak.reset();
+    }
     for (int attempt = 0; attempt <= maxRetries; ++attempt) {
         {
             std::lock_guard<std::mutex> lk(_ackMutex);
@@ -369,7 +640,11 @@ bool CommHandler::sendReliable(uint8_t dest, MsgType type, const std::vector<uin
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             continue;
         }
-        if (signalled && result == 2) return false;  // NAK — caller aborts
+        if (signalled && result == 2) {  // NAK: final, caller aborts (the reason stays readable)
+            std::lock_guard<std::mutex> g(_ackMutex);
+            _lastNak = reason;
+            return false;
+        }
         // timeout: retry
     }
     for (Node n : mc::status::nodesForPeer(dest)) _status.count(n, "gave_up");
@@ -378,13 +653,36 @@ bool CommHandler::sendReliable(uint8_t dest, MsgType type, const std::vector<uin
 
 void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
     std::optional<Pending> pending;
+    std::optional<Pending> busyRetry;
     {
         std::lock_guard<std::mutex> lk(_mutex);
         auto it = _pending.find(pid);
         if (it != _pending.end()) {
-            pending = it->second;
-            _pending.erase(it);
+            Pending& p = it->second;
+            // Protocol rule (SYSTEM.md, PROTOCOL.md): NAK BUSY is retried like a timeout, same PacketId, same
+            // budget. Kept pending with a fresh timestamp, checkTimeouts resends it after RETRY_TIMEOUT_MS and
+            // spends one retry; the budget used up falls through to the NAK path below. Background polls keep
+            // their own BUSY rules (DiagPoller: next tick; InfoPoller; the 5 s GET_STATUS poll). Bench
+            // 2026-11-15 (LAT-7): an un-retried SIGNAL_* BUSY left the remote on the old state for ~3.6 s.
+            const bool background = p.msgType == MsgType::DIAG_GET || p.msgType == MsgType::GET_INFO ||
+                                    p.msgType == MsgType::GET_STATUS;
+            if (nak && reason == static_cast<uint8_t>(NakReason::BUSY) && !background && p.retries < MAX_RETRIES) {
+                p.timestamp = Clock::now();
+                busyRetry = p;
+            } else {
+                pending = p;
+                _pending.erase(it);
+            }
         }
+    }
+    if (busyRetry) {
+        for (Node n : mc::status::nodesForPeer(busyRetry->dest)) {
+            _status.count(n, "busy_retries");
+            mc::log::info(n, "NAK BUSY for " + std::string(msgTypeName(busyRetry->msgType)) + " id=" +
+                                 std::to_string(pid) + " to " + nodeName(busyRetry->dest) + ": retrying (" +
+                                 std::to_string(busyRetry->retries + 1) + "/" + std::to_string(MAX_RETRIES) + ")");
+        }
+        return;
     }
     if (nak && _diagPoller) _diagPoller->onNak(pid, reason);  // stops the polling after NAK UNKNOWN_MSG/UNREACHABLE (BUSY only retries on the timer)
     const bool infoGet = pending && pending->msgType == MsgType::GET_INFO;
@@ -410,6 +708,9 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
         _status.set(Node::Controller, "last_tx_result",
                     nak ? "NAK " + std::string(nakReasonName(reason)) : std::string("ACK"));
     }
+    if (pending && pending->dest == ADDR_REMOTE && isRemoteSignal(pending->msgType)) {
+        noteRemoteSignalEnd(pid, pending->msgType, !nak);
+    }
     std::lock_guard<std::mutex> lk(_ackMutex);
     if (_awaitActive && pid == _awaitPid) {
         _awaitResult = nak ? 2 : 1;
@@ -421,6 +722,11 @@ void CommHandler::handleAck(uint8_t pid, bool nak, uint8_t reason) {
 void CommHandler::clearFwStatus() {
     std::lock_guard<std::mutex> lk(_ackMutex);
     _fwStatus.reset();
+}
+
+std::optional<uint8_t> CommHandler::lastNakReason() {
+    std::lock_guard<std::mutex> lk(_ackMutex);
+    return _lastNak;
 }
 
 std::optional<uint8_t> CommHandler::waitFwStatus(int timeoutMs) {
@@ -446,6 +752,11 @@ void CommHandler::checkTimeouts() {
             if (p.retries < MAX_RETRIES) {
                 // Retransmit with the SAME PacketId (receiver de-duplicates).
                 Packet pkt(ADDR_PC, p.dest, it->first, p.msgType, p.payload);
+                // A retried GET_STATUS may be answered again (the base keeps only its last PacketId): one
+                // more entry, so a second answer cannot take a newer request's generation.
+                if (p.msgType == MsgType::GET_STATUS && p.dest == ADDR_BASE && _serial.isOpen()) {
+                    noteStatusRequestLocked();
+                }
                 if (_serial.isOpen() && _serial.write(encode(pkt))) resent.push_back(std::move(pkt));
                 p.timestamp = now;
                 p.retries += 1;
@@ -473,6 +784,7 @@ void CommHandler::checkTimeouts() {
             }
         }
         if (p.dest == ADDR_REMOTE && !background) _status.set(Node::Controller, "last_tx_result", std::string("no answer"));
+        if (p.dest == ADDR_REMOTE && isRemoteSignal(p.msgType)) noteRemoteSignalEnd(pid, p.msgType, false);
     }
 }
 
@@ -570,18 +882,48 @@ void CommHandler::noteRx(const Packet& pkt) {
         _status.set(Node::Base, "status_ble", st.ble);
         if (_diagPoller) _diagPoller->setRemoteLink(st.ble, steadyMs(), _updating.load());  // remote reachable -> DIAG_GET
         _status.set(Node::Base, "status_relay", st.relay);
-        _remoteLink.store(st.ble);
-        bool authoritative;
+        const bool wasLink = _remoteLink.exchange(st.ble);
+        if (st.ble) {
+            // P1-9: a ble 0->1 edge makes the remote's state suspect; while dirty every ble=1 status tries once.
+            bool dirty;
+            {
+                std::lock_guard<std::mutex> lk(_resyncMutex);
+                if (!wasLink) {
+                    _remoteDirty = true;
+                    _lastRemoteBootId.reset();  // a new stretch: the first id is only stored
+                }
+                // A2 (protocol v2): a 7 B STATUS_RESP (v1 base: 4 B, so this never fires) carries the remote's boot id.
+                // A changed id is a reboot shorter than the status poll (no ble 0->1 edge): resync like an edge.
+                if (pkt.payload.size() >= 7 && (pkt.payload[4] & 0x01) != 0) {
+                    const uint16_t id = static_cast<uint16_t>(pkt.payload[5] | (pkt.payload[6] << 8));
+                    if (_lastRemoteBootId && *_lastRemoteBootId != id) {
+                        mc::log::info(Node::Controller, "Remote rebooted (boot id " + std::to_string(*_lastRemoteBootId) + " -> " +
+                                                            std::to_string(id) + ")");
+                        _remoteDirty = true;
+                    }
+                    _lastRemoteBootId = id;
+                }
+                dirty = _remoteDirty;
+            }
+            if (dirty && !_resyncQueued.exchange(true)) post({Command::Kind::RemoteResync, {}, {}, 0});
+        } else {
+            std::lock_guard<std::mutex> lk(_resyncMutex);
+            _lastRemoteBootId.reset();
+        }
+        // Item 4b: judged by the generation of the GET_STATUS it answers (FIFO; the base answers in order).
+        // A repeat of the last STATUS_RESP (same PacketId) or an answer with no request left is not authoritative.
+        uint64_t statusGen = kNoStatusGen;
         {
-            std::lock_guard<std::mutex> lk(_routineMutex);
-            authoritative = _statusGen == _setCurrentGen.load();
+            std::lock_guard<std::mutex> lk(_mutex);
+            if (pkt.packetId != _lastStatusRespPid) {
+                _lastStatusRespPid = pkt.packetId;
+                if (!_statusGens.empty()) {
+                    statusGen = _statusGens.front().second;
+                    _statusGens.pop_front();
+                }
+            }
         }
-        if (authoritative) {
-            // The base's SSR, whoever switched it (PC, base menu, remote): shown on the page and used to decide
-            // whether a song needs the warm-up.
-            _organOn.store(st.relay);
-            _status.set(Node::Base, "organ_power", st.relay);
-        }
+        reconcileOrgan(st.relay, statusGen);
         _status.set(Node::Base, "status_display", st.display);
         _status.set(Node::Base, "status_pc", st.pc);
         _status.setNow(Node::Base, "status_ms");
@@ -637,7 +979,6 @@ void CommHandler::pollStatus() {
         std::lock_guard<std::mutex> lk(_routineMutex);
         _pollPids.insert(pid);
         _pollPid = pid;
-        _statusGen = _setCurrentGen.load();
     }
     sendPacket(Packet(ADDR_PC, ADDR_BASE, pid, MsgType::GET_STATUS));
 }
@@ -665,6 +1006,18 @@ void CommHandler::onInfoResp(const Packet& pkt) {
     _status.set(node, "info_unsupported", false);
     _status.setNow(node, "info_ms");
     _infoPoller->onResp(fromBase ? mc::devinfo::InfoPoller::Base : mc::devinfo::InfoPoller::Remote, steadyMs());
+    // A6: the remote's PROTO_VER just became known (v2) while a song's SIGNAL_INFO is still unsent: resync (PLAYING,
+    // SIGNAL_INFO, ANCHOR) on the control thread. A v1 remote gets nothing.
+    if (!fromBase && peerProtocolVersion(Node::Controller) >= 2) {
+        bool need;
+        {
+            std::lock_guard<std::mutex> lk(_resyncMutex);
+            need = (_lastSignalInfo.has_value() && !_signalInfoSent) ||
+                   (_recordingSignalled.load() && !_recordingRemoteSent);
+            if (need) _remoteDirty = true;
+        }
+        if (need && !_resyncQueued.exchange(true)) post({Command::Kind::RemoteResync, {}, {}, 0});
+    }
 }
 
 void CommHandler::clearInfo(Node node) {
@@ -674,6 +1027,11 @@ void CommHandler::clearInfo(Node node) {
 
 void CommHandler::clearBaseReport() {
     _remoteLink.store(false);
+    {
+        std::lock_guard<std::mutex> lk(_resyncMutex);
+        _lastRemoteBootId.reset();
+    }
+    _ssrReported.store(-1);
     for (const char* key : {"status_ble", "status_relay", "status_display", "status_pc", "status_ms"}) {
         _status.set(Node::Base, key, std::monostate{});
     }
@@ -691,10 +1049,6 @@ std::optional<CommHandler::BaseStatus> CommHandler::requestStatus(int timeoutMs)
     ++_statusWaiters;
     const uint64_t seq = _statusSeq;
     lk.unlock();
-    {
-        std::lock_guard<std::mutex> rl(_routineMutex);
-        _statusGen = _setCurrentGen.load();
-    }
     sendWithAck(ADDR_BASE, MsgType::GET_STATUS);
     lk.lock();
     bool got = _statusCv.wait_for(lk, std::chrono::milliseconds(timeoutMs),
@@ -722,7 +1076,11 @@ void CommHandler::readerLoop() {
             auto now = Clock::now();
             if (now - lastReopen >= std::chrono::seconds(1)) {
                 lastReopen = now;
-                if (tryReopen()) continue;
+                if (tryReopen()) {
+                    noteBootloader(false);
+                    continue;
+                }
+                if (_bootloaderProbe && !_updating.load()) noteBootloader(_bootloaderProbe());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
@@ -758,8 +1116,19 @@ void CommHandler::dispatchPacket(const Packet& pkt) {
     _dispatcher->handle(pkt);
     if (pkt.msgType == MsgType::FW_UPDATE_STATUS && pkt.dest == ADDR_PC && !pkt.payload.empty()) {
         std::lock_guard<std::mutex> lk(_ackMutex);
-        _fwStatus = pkt.payload[0];
-        _ackCv.notify_all();
+        // The device resends an un-ACKed status with the same PacketId (500 ms x 3). A late copy of a status the
+        // caller already took must not be read as the next one (a stale READY would pass for the END result).
+        const auto now = Clock::now();
+        const bool repeat = _fwSeen && _fwSeenPid == pkt.packetId && _fwSeenByte == pkt.payload[0] &&
+                            now - _fwSeenAt < std::chrono::seconds(2);
+        if (!repeat) {
+            _fwStatus = pkt.payload[0];
+            _fwSeen = true;
+            _fwSeenPid = pkt.packetId;
+            _fwSeenByte = pkt.payload[0];
+            _fwSeenAt = now;
+            _ackCv.notify_all();
+        }
     }
     if (_callback) _callback(pkt);
 }
@@ -769,7 +1138,7 @@ void CommHandler::keepaliveLoop() {
     while (_running.load()) {
         _hbKeepalive.store(steadyMs());
         if (_connected.load() && !_updating.load()) {
-            send(ADDR_BASE, MsgType::KEEPALIVE);
+            sendKeepalive();
             auto silent = Clock::now() - _lastBaseKeepalive.load();
             if (silent > std::chrono::milliseconds(KEEPALIVE_LOSS_MS) &&
                 !_baseLostReported.exchange(true)) {
@@ -778,11 +1147,18 @@ void CommHandler::keepaliveLoop() {
                                               std::to_string(KEEPALIVE_LOSS_MS / 1000) + " s).");
             }
             pollStatus();
+            const int64_t idleArmed = _idleOffArmedMs.load();
+            if (idleArmed >= 0 && steadyMs() - idleArmed >= _config.organIdleOffMs &&
+                !_idleOffQueued.exchange(true)) {
+                post({Command::Kind::IdleOff, {}, {}, 0});
+            }
             if (_diagPoller) _diagPoller->tick(steadyMs(), false);  // while updating this block is skipped: no DIAG_GET
             _infoPoller->tick(steadyMs(), true, _remoteLink.load() && !_remotePaused.load());
         } else {
             _infoPoller->tick(steadyMs(), false, false);  // base gone or updating: its details are void
         }
+        // A7: a recorder that died on its own (or whose start failed) ends the recording for the base and the remote.
+        if (_recordingSignalled.load() && !recordingActive()) signalRecordingEnded(true);
         if (steadyMs() - lastMidiCheck >= kMidiCheckMs) {
             lastMidiCheck = steadyMs();
             refreshMidiPort();
@@ -805,7 +1181,77 @@ std::optional<NakReason> CommHandler::playSong(const std::string& code, uint8_t 
 
 void CommHandler::stopSong(uint8_t requester) {
     mc::log::info(Node::Software, "STOP_SONG from " + nodeName(requester));
-    stopSong();
+    post({Command::Kind::Stop, {}, {}, 0, requester});
+}
+
+// A7: RECORD_SONG from the base. The claim is synchronous (a second request gets NAK BUSY at once); the warm-up and
+// the spawn run on _recordThread, and SIGNAL_RECORDING follows only when the recorder really runs.
+std::optional<NakReason> CommHandler::startRecording(uint8_t requester) {
+    mc::log::info(Node::Software, "RECORD_SONG start from " + nodeName(requester));
+    if (auto busy = busyReason()) {
+        mc::log::info(Node::Software, "RECORD_SONG refused (BUSY)");
+        return busy;
+    }
+    bool playBusy = isPlaying();
+    {
+        std::lock_guard<std::mutex> lk(_queueMutex);
+        playBusy = playBusy || _playClaimed;
+    }
+    if (playBusy) {
+        mc::log::info(Node::Software, "RECORD_SONG refused: a song is playing (BUSY)");
+        return NakReason::BUSY;
+    }
+    if (!claimRecorder()) return NakReason::BUSY;
+    std::lock_guard<std::mutex> lk(_recordThreadMutex);
+    if (_recordThread.joinable()) _recordThread.join();  // the previous one has finished (its claim was released)
+    _recordThread = std::thread([this] {
+        if (!runRecorderClaimed()) {
+            // Start failed or was cancelled: nothing runs. The base was told nothing yet except by the ACK.
+            if (peerProtocolVersion(Node::Base) >= 2) sendBaseSignal(MsgType::SIGNAL_STOPPED);
+        }
+    });
+    return std::nullopt;
+}
+
+void CommHandler::stopRecording(uint8_t requester) {
+    mc::log::info(Node::Software, "RECORD_SONG stop from " + nodeName(requester));
+    post({Command::Kind::StopRecording, {}, {}, 0, requester});
+}
+
+std::optional<NakReason> CommHandler::busyReason() {
+    if (updateInProgress()) return NakReason::BUSY;
+    if (recordingActive()) return NakReason::BUSY;  // A7: no second recording, no song during a recording
+    return std::nullopt;
+}
+
+bool CommHandler::recordingActive() {
+    std::lock_guard<std::mutex> lk(_recorderMutex);
+    return _recorderStarting || recorderAliveLocked();
+}
+
+void CommHandler::sendBaseSignal(MsgType type) {
+    if (!_connected.load()) return;
+    sendWithAckImpl(ADDR_BASE, type, {}, nullptr);
+}
+
+void CommHandler::signalRecordingStarted() {
+    _recordingSignalled.store(true);
+    if (peerProtocolVersion(Node::Base) >= 2) sendBaseSignal(MsgType::SIGNAL_RECORDING);
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    if (peerProtocolVersion(Node::Controller) < 2) return;  // v1 remote: resync sends it once the version is known
+    bool registered = false;
+    sendRemoteSignalLocked(MsgType::SIGNAL_RECORDING, {}, registered);
+}
+
+void CommHandler::signalRecordingEnded(bool remoteToo) {
+    if (!_recordingSignalled.exchange(false)) return;
+    if (peerProtocolVersion(Node::Base) >= 2) sendBaseSignal(MsgType::SIGNAL_STOPPED);
+    std::lock_guard<std::mutex> lk(_resyncMutex);
+    if (remoteToo && _recordingRemoteSent) {
+        bool registered = false;
+        sendRemoteSignalLocked(MsgType::SIGNAL_STOPPED, {}, registered);
+    }
+    _recordingRemoteSent = false;
 }
 
 std::optional<NakReason> CommHandler::addVerse() {
@@ -831,6 +1277,11 @@ std::vector<uint8_t> CommHandler::songListPage(size_t offset) {
 // ---------------------------------------------------------------------------
 
 std::optional<NakReason> CommHandler::playSong(const std::string& rawCode) {
+    // A8: no song starts while a device is being updated (the sender gets NAK BUSY, the same code path as any busy PC)
+    if (auto busy = busyReason()) {
+        mc::log::info(Node::Software, "PLAY_SONG refused: firmware update in progress (BUSY)");
+        return busy;
+    }
     auto code = mc::songs::sanitizeCode(rawCode);
     if (!code) {
         mc::log::warn(Node::Software, "Invalid song code: \"" + rawCode + "\"");
@@ -867,29 +1318,129 @@ std::vector<std::string> CommHandler::songList() const {
 }
 
 void CommHandler::organOn() {
-    _organOn.store(true);
-    _status.set(Node::Base, "organ_power", true);
-    ++_setCurrentGen;  // STATUS_RESPs to earlier GET_STATUS no longer tell the SSR state
-    sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {0x01});
+    _organClaimed.store(true);
+    std::lock_guard<std::mutex> lk(_organMutex);
+    setOrganLocked(true);
 }
 
 void CommHandler::organOff() {
-    _organOn.store(false);
-    _status.set(Node::Base, "organ_power", false);
-    ++_setCurrentGen;
-    sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {0x00});
+    std::lock_guard<std::mutex> lk(_organMutex);
+    setOrganLocked(false);
+}
+
+void CommHandler::setOrganLocked(bool on) {
+    disarmIdleOff();  // the PC switches the organ now: its own rules apply
+    _organOn.store(on);
+    _status.set(Node::Base, "organ_power", on);
+    _organIntent = on ? 1 : 0;
+    _organIntentMs = steadyMs();
+    _organReasserts = 0;
+    sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {static_cast<uint8_t>(on ? 0x01 : 0x00)});
+}
+
+// PCC-2. An authoritative STATUS_RESP (its GET_STATUS went out after the last SET_CURRENT) tells the SSR state.
+// While the PC's last command is unconfirmed and young (kOrganIntentWindowMs), a different state means the
+// command was lost (all retries gone, or a stale frame won): re-send it with a new PacketId, at most
+// kOrganReassertMax times, then report loudly. A confirmed command, or one older than the window, is history:
+// whatever the base reports is adopted (someone switched the organ at the base or the remote; never fought).
+// Does not decide anything about KeepPowerOn: it only repeats what the PC itself last commanded.
+void CommHandler::reconcileOrgan(bool relay, uint64_t statusGen) {
+    std::lock_guard<std::mutex> lk(_organMutex);
+    if (statusGen != _setCurrentGen.load()) return;  // the answer may predate the last SET_CURRENT
+    _ssrReported.store(relay ? 1 : 0);
+    if (!relay) disarmIdleOff();  // switched off (base menu, remote, loss guard): nothing left to time out
+    // The base's SSR, whoever switched it (PC, base menu, remote): shown on the page and used to decide
+    // whether a song needs the warm-up.
+    _organOn.store(relay);
+    _status.set(Node::Base, "organ_power", relay);
+    if (_organFault >= 0 && (relay ? 1 : 0) != _organFault) {
+        _organFault = -1;
+        _status.set(Node::Base, "organ_power_fault", std::monostate{});
+    }
+    if (_organIntent < 0) return;
+    const bool want = _organIntent == 1;
+    const std::string wantText = want ? "on" : "off";
+    if (relay == want) {
+        if (_organReasserts > 0) {
+            mc::log::info(Node::Base, "Organ power: the base now reports " + wantText + " after " +
+                                          std::to_string(_organReasserts) + " re-send(s).");
+        }
+        _organIntent = -1;
+        return;
+    }
+    const int64_t age = steadyMs() - _organIntentMs;
+    if (_organReasserts == 0 && age > kOrganIntentWindowMs) {
+        _organIntent = -1;  // too old to be the PC's doing: adopt
+        return;
+    }
+    if (_organReasserts >= kOrganReassertMax || age > kOrganIntentWindowMs) {
+        _organIntent = -1;
+        _organFault = relay ? 1 : 0;
+        const std::string text =
+            "Organ power: the PC switched the organ " + wantText + " but the base still reports " +
+            (relay ? "ON" : "off") + " after " + std::to_string(_organReasserts) + " re-send(s); giving up" +
+            (relay ? ". THE ORGAN IS STILL POWERED." : ".");
+        _status.set(Node::Base, "organ_power_fault", text);
+        if (relay) {
+            mc::log::error(Node::Base, text);
+        } else {
+            mc::log::warn(Node::Base, text);
+        }
+        return;
+    }
+    ++_organReasserts;
+    mc::log::warn(Node::Base, "Organ power: the base reports " + std::string(relay ? "on" : "off") +
+                                  ", the PC switched it " + wantText + "; re-sending (" +
+                                  std::to_string(_organReasserts) + "/" + std::to_string(kOrganReassertMax) + ").");
+    sendWithAck(ADDR_BASE, MsgType::SET_CURRENT, {static_cast<uint8_t>(want ? 0x01 : 0x00)});
 }
 
 void CommHandler::displayClear() {
-    send(ADDR_BASE, MsgType::NOW_PLAYING_INFO,
-         mc::display::encodeNowPlaying(mc::display::clearUpdate()));
+    // P1-10: clear only a code this PC put on the indicator; an idle Stop must not blank the remote's entry.
+    // A clear that was not written (serial closed) leaves the flag set, so a later Stop still clears.
+    if (!_displaySet.exchange(false)) return;
+    bool sent = false;
+    // A3: a v2 base clears only if its number is still on the bus (a manual controller may have written after us);
+    // a v1 base would ignore the 1-byte form and never clear, so it keeps the empty payload.
+    const bool conditional = peerProtocolVersion(Node::Base) >= 2;
+    sendPacket(Packet(ADDR_PC, ADDR_BASE, nextPacketId(), MsgType::NOW_PLAYING_INFO,
+                      mc::display::encodeNowPlaying(mc::display::clearUpdate(conditional))), &sent);
+    if (!sent) _displaySet.store(true);
 }
 
-void CommHandler::recordSong() {
+bool CommHandler::claimRecorder() {
+    // PCC-1: one recorder at a time. A second Record (web/console) while one runs or warms up is
+    // refused; overwriting _recorderPid would orphan the first arecordmidi (it keeps the ALSA port).
+    std::lock_guard<std::mutex> lk(_recorderMutex);
+    if (recorderAliveLocked() || _recorderStarting) {
+        mc::log::warn(Node::Software, "Already recording; Stop first.");
+        return false;
+    }
+    _recorderStarting = true;
+    _recorderCancelled = false;
+    return true;
+}
+
+bool CommHandler::recordSong() {
+    if (!claimRecorder()) return false;
+    return runRecorderClaimed();
+}
+
+bool CommHandler::runRecorderClaimed() {
+    struct StartingGuard {
+        CommHandler& h;
+        ~StartingGuard() {
+            std::lock_guard<std::mutex> lk(h._recorderMutex);
+            h._recorderStarting = false;
+        }
+    } startingGuard{*this};
+
+    _organClaimed.store(true);  // the operator uses the organ: no startup power off
+    if (_idleOffArmedMs.load() >= 0) armIdleOff();  // SYS-REC-05: recording restarts the idle timer
     auto ports = _midiFinder ? _midiFinder() : std::nullopt;
     if (!ports) {
         mc::log::error(Node::Software, "MIDIControl MIDI input port not found; cannot record.");
-        return;
+        return false;
     }
     // arecordmidi expects an ALSA client:port; use the trailing token of the name.
     std::string alsaPort;
@@ -904,27 +1455,49 @@ void CommHandler::recordSong() {
         std::this_thread::sleep_for(std::chrono::milliseconds(_config.warmupMs));
     }
 
-    char buf[64];
-    std::time_t t = std::time(nullptr);
-    std::tm tm {};
-    localtime_r(&t, &tm);
-    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.mid", &tm);
-    std::string fullPath = _config.recFolder + "/" + buf;
+    // Unique per start, also within one second (the name has 1 s resolution).
+    const std::string fullPath = mc::recording::reservePath(_config.recFolder, std::time(nullptr));
+    if (fullPath.empty()) {
+        mc::log::error(Node::Software, "Cannot create a recording file in " + _config.recFolder);
+        return false;
+    }
 
+    // Spawn and store the pid under one lock: a Stop/SerialLost during the warm-up cancels the start,
+    // and stopRecorder can never miss a recorder that is being started.
+    std::unique_lock<std::mutex> lk(_recorderMutex);
+    if (_recorderCancelled) {
+        std::remove(fullPath.c_str());
+        mc::log::info(Node::Software, "Recording cancelled during the organ warm-up.");
+        return false;
+    }
     const int pid = mc::proc::spawn({"arecordmidi", "-p", alsaPort, fullPath});
     if (pid > 0) {
-        std::lock_guard<std::mutex> lk(_recorderMutex);
         _recorderPid = pid;
         _status.set(Node::Software, "recording", true);
         mc::log::info(Node::Software, "Recording to " + fullPath);
-    } else {
-        _status.set(Node::Software, "recording", false);
-        mc::log::error(Node::Software, "Failed to start arecordmidi (rc=" + std::to_string(-pid) + ")");
+        // A7: signal after the lock is released (the signal path takes other locks); _recorderStarting is still set
+        // until the guard runs, so busyReason() stays BUSY throughout.
+        lk.unlock();
+        signalRecordingStarted();
+        return true;
     }
+    std::remove(fullPath.c_str());
+    mc::log::error(Node::Software, "Failed to start arecordmidi (rc=" + std::to_string(-pid) + ")");
+    return false;
+}
+
+bool CommHandler::recorderAliveLocked() {
+    if (_recorderPid > 0 && !mc::proc::running(_recorderPid)) {
+        mc::log::warn(Node::Software, "arecordmidi exited on its own; recording ended.");
+        _recorderPid = -1;
+        _status.set(Node::Software, "recording", false);
+    }
+    return _recorderPid > 0;
 }
 
 void CommHandler::stopRecorder() {
     std::lock_guard<std::mutex> lk(_recorderMutex);
+    if (_recorderStarting) _recorderCancelled = true;  // a Record still in its warm-up must not start
     if (_recorderPid > 0) {
         // Bounded: a recorder that ignores SIGTERM can't hang the control thread.
         if (mc::proc::terminate(_recorderPid) == mc::proc::Ended::Killed) {
@@ -942,9 +1515,41 @@ void CommHandler::stopRecorder() {
 void CommHandler::post(Command cmd) {
     {
         std::lock_guard<std::mutex> lk(_queueMutex);
+        if (cmd.kind == Command::Kind::Play) _playClaimed = true;
         _queue.push_back(std::move(cmd));
     }
     _queueCv.notify_all();
+}
+
+CommHandler::UpdateClaim CommHandler::tryBeginUpdate() {
+    std::lock_guard<std::mutex> lk(_queueMutex);
+    if (_updateClaimed) return UpdateClaim::Busy;
+    if (_playClaimed) return UpdateClaim::Playing;
+    _updateClaimed = true;
+    return UpdateClaim::Granted;
+}
+
+void CommHandler::endUpdate() {
+    std::lock_guard<std::mutex> lk(_queueMutex);
+    _updateClaimed = false;
+}
+
+bool CommHandler::updateClaimed() const {
+    std::lock_guard<std::mutex> lk(_queueMutex);
+    return _updateClaimed;
+}
+
+void CommHandler::releasePlayClaimIfIdle() {
+    bool havePlayer;
+    {
+        std::lock_guard<std::mutex> lk(_playerMutex);  // only this thread changes _player
+        havePlayer = _player != nullptr;
+    }
+    if (havePlayer) return;
+    std::lock_guard<std::mutex> lk(_queueMutex);
+    for (const auto& c : _queue)
+        if (c.kind == Command::Kind::Play) return;
+    _playClaimed = false;
 }
 
 bool CommHandler::waitInterruptible(int ms) {
@@ -956,7 +1561,9 @@ bool CommHandler::waitInterruptible(int ms) {
         const auto slice = std::min(deadline, Clock::now() + std::chrono::seconds(1));
         bool interrupted = _queueCv.wait_until(lk, slice, [&] {
             for (const auto& c : _queue) {
-                if (c.kind != Command::Kind::Finished) return true;  // stale Finished don't count
+                // Stale Finished, the startup check and the idle check don't interrupt a warm-up.
+                if (c.kind != Command::Kind::Finished && c.kind != Command::Kind::StartupReset &&
+                    c.kind != Command::Kind::IdleOff && c.kind != Command::Kind::RemoteResync) return true;
             }
             return false;
         });
@@ -983,7 +1590,21 @@ void CommHandler::controlLoop() {
                 doPlay(cmd);
                 break;
             case Command::Kind::Stop:
+                if (cmd.source == ADDR_REMOTE && recordingActive() && !isPlaying()) {
+                    // A7 (owner rule): only the base ends a recording; a STOP_SONG from the remote is ACKed and ignored
+                    // unless a song is playing (R14: the remote must still be able to stop it).
+                    mc::log::info(Node::Software, "STOP_SONG from the remote ignored: a recording runs.");
+                    break;
+                }
                 doStop(true);
+                break;
+            case Command::Kind::StopRecording:
+                // A7: RECORD_SONG [0]. Ends only the recording; a playing song is left alone.
+                if (recordingActive()) {
+                    stopRecorder();
+                    signalRecordingEnded(true);
+                    if (!_config.keepPowerOn && !isPlaying()) organOff();
+                }
                 break;
             case Command::Kind::Finished:
                 if (cmd.generation == _generation) finishPlayback();
@@ -996,19 +1617,145 @@ void CommHandler::controlLoop() {
                     playbackEnded("stopped (base disconnected)", "songs_stopped");
                 }
                 stopRecorder();
+                {
+                    // A7: nothing can be signalled to the base now, and a stale RECORDING must not be resent later.
+                    std::lock_guard<std::mutex> lkr(_resyncMutex);
+                    _recordingSignalled.store(false);
+                    _recordingRemoteSent = false;
+                }
                 _organOn.store(false);
                 _status.set(Node::Base, "organ_power", std::monostate{});  // unknown until the base reports again
+                // PCC-3: the organ state is unknown now; run the startup reset again when the base is back
+                // (notes off, then the SSR rule: reported on -> idle timer, off/unknown -> power off).
+                disarmIdleOff();
+                {
+                    // PCC-2 never re-sends an unconfirmed "on" across a loss (nothing plays now; the base's
+                    // loss guard may have cut the SSR on purpose). An unconfirmed "off" is still defended.
+                    std::lock_guard<std::mutex> lk(_organMutex);
+                    if (_organIntent == 1) _organIntent = -1;
+                }
+                _startupReset = mc::startup::StartupReset();
+                _organClaimed.store(false);
+                _baseUpMs.store(-1);
+                _startupResetDone.store(false);
+                break;
+            case Command::Kind::StartupReset:
+                _startupResetQueued.store(false);
+                doStartupReset();
+                break;
+            case Command::Kind::IdleOff:
+                _idleOffQueued.store(false);
+                doIdleOff();
+                break;
+            case Command::Kind::RemoteResync:
+                doRemoteResync();
                 break;
             case Command::Kind::Shutdown:
                 if (releasePlayer()) {
                     displayClear();
-                    sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_STOPPED);
+                    sendRemoteSignal(MsgType::SIGNAL_STOPPED);
                 }
                 stopRecorder();
+                signalRecordingEnded(true);
                 if (_organOn.load()) organOff();
                 return;
         }
+        releasePlayClaimIfIdle();
     }
+}
+
+void CommHandler::doStartupReset() {
+    if (_startupReset.finished()) return;
+    // Someone switched the organ on (a song, a recording) before the reset
+    // ran: the operator owns it now.
+    if (_organClaimed.load()) {
+        _startupReset.cancel();
+        _startupResetDone.store(true);
+        return;
+    }
+    const int64_t upMs = _baseUpMs.load();
+    const int64_t since = upMs < 0 ? -1 : steadyMs() - upMs;
+    auto ports = _midiFinder ? _midiFinder() : std::nullopt;
+    const int rep = _ssrReported.load();
+    const auto ssr = rep < 0 ? mc::startup::Ssr::Unknown : (rep ? mc::startup::Ssr::On : mc::startup::Ssr::Off);
+    auto due = _startupReset.due(since, ports.has_value(), ssr);
+    // A5: who switched the SSR on is in the base's INFO_RESP (ORGAN_SRC), polled once at link-up. Decide the
+    // "found on" case only after it arrived (or the base answered NAK / never answers within kInfoWaitMs).
+    int organSrc = -1;  // -1: unknown (v1 base, no tag, or no INFO yet)
+    if (due.armIdleOff) {
+        const auto snap = _status.snapshot();
+        const auto& bf = snap.node(Node::Base).fields;
+        const bool infoKnown = bf.count("info_ms") != 0 && !std::holds_alternative<std::monostate>(bf.at("info_ms"));
+        const auto unsup = bf.find("info_unsupported");
+        const bool infoNak = unsup != bf.end() && std::holds_alternative<bool>(unsup->second) && std::get<bool>(unsup->second);
+        if (!infoKnown && !infoNak && since < kInfoWaitMs) {
+            due.armIdleOff = false;  // try again on the next pass; the notes part (if due) goes ahead
+        } else if (const auto it = bf.find("organ_src"); it != bf.end()) {
+            if (const auto* v = std::get_if<int64_t>(&it->second)) organSrc = static_cast<int>(*v);
+        }
+    }
+    mc::startup::Actions performed;
+    if (due.allNotesOff) {
+        std::string err;
+        if (sendMidiMessages(ports->outIndex, mc::startup::allNotesOffMessages(), &err)) {
+            mc::log::info(Node::Software, "Startup: All Notes Off sent on all 16 channels.");
+        } else {
+            mc::log::warn(Node::Software, "Startup: All Notes Off not sent: " + err);
+        }
+        performed.allNotesOff = true;
+    } else if (due.notesSkipped) {
+        mc::log::warn(Node::Software, "Startup: MIDI output port not found; no All Notes Off.");
+        performed.notesSkipped = true;
+    }
+    if (due.organOff) {
+        organOff();  // indicator bus untouched (no display clear)
+        mc::log::info(Node::Software, std::string("Startup: organ power off") +
+                                          (ssr == mc::startup::Ssr::Unknown ? " (SSR state not reported)." : "."));
+        performed.organOff = true;
+    } else if (due.armIdleOff) {
+        // Q1-1 b (owner 2026-11-14): a manual organ-on survives a PC start.
+        armIdleOff();
+        // A5 (Q2-33): organ_src 1 = the PC's own power-on from a session that crashed (BE-4): not a manual switch-on,
+        // but _organClaimed stays false (nothing plays now). Today both cases use the same idle timer; the owner keys
+        // of B1/B3 split them (TODO B1/B3: PC-owned vs manual idle rule).
+        const char* srcName = organSrc == 1 ? "pc" : organSrc == 2 ? "menu" : organSrc == 3 ? "unknown" : "v1";
+        _status.set(Node::Base, "organ_start_source", std::string(srcName));
+        mc::log::info(Node::Software, std::string("Startup: organ found switched on ") +
+                                          (organSrc == 1 ? "by the PC (previous session)" : "(by hand or unknown)") +
+                                          "; left on, idle power-off in " + idleText(_config.organIdleOffMs) + ".");
+        performed.armIdleOff = true;
+    }
+    _startupReset.done(performed);
+    if (_startupReset.finished()) _startupResetDone.store(true);
+}
+
+void CommHandler::armIdleOff() {
+    _idleOffArmedMs.store(steadyMs());
+    _status.set(Node::Base, "organ_idle_off_armed", true);
+}
+
+void CommHandler::disarmIdleOff() {
+    if (_idleOffArmedMs.exchange(-1) >= 0) _status.set(Node::Base, "organ_idle_off_armed", false);
+}
+
+void CommHandler::doIdleOff() {
+    const int64_t armed = _idleOffArmedMs.load();
+    if (armed < 0 || steadyMs() - armed < _config.organIdleOffMs) return;  // disarmed or restarted meanwhile
+    bool busy = false;
+    {
+        std::lock_guard<std::mutex> lk(_playerMutex);
+        busy = _player != nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> lk(_recorderMutex);
+        busy = busy || recorderAliveLocked();  // a dead recorder must not keep the organ on
+    }
+    if (busy) {
+        armIdleOff();  // in use: start counting again
+        return;
+    }
+    mc::log::info(Node::Software, "Organ idle for " + idleText(_config.organIdleOffMs) + ": power off.");
+    organOff();  // disarms the timer
 }
 
 bool CommHandler::releasePlayer() {
@@ -1041,6 +1788,8 @@ void CommHandler::playbackEnded(const std::string& how, const char* counter) {
 }
 
 void CommHandler::doPlay(const Command& cmd) {
+    _organClaimed.store(true);  // a song owns the organ now: no startup power off
+    disarmIdleOff();            // after the song KeepPowerOn decides (2026-10-26, unchanged)
     if (releasePlayer()) playbackEnded("stopped", "songs_stopped");  // a new song replaces it
     {
         std::lock_guard<std::mutex> lk(_songMutex);
@@ -1066,7 +1815,7 @@ void CommHandler::doPlay(const Command& cmd) {
         mc::log::error(Node::Software, "Cannot play " + cmd.code + ": " + why);
         playbackEnded("failed: " + why, nullptr);
         displayClear();
-        sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_STOPPED);
+        sendRemoteSignal(MsgType::SIGNAL_STOPPED);
         if (!_config.keepPowerOn) organOff();
     };
 
@@ -1094,9 +1843,10 @@ void CommHandler::doPlay(const Command& cmd) {
         return;
     }
 
-    auto player = std::make_unique<Player>(ports->outIndex);
+    auto player = std::make_unique<Player>(ports->outIndex, _midiSinkForTest);
     const uint64_t gen = ++_generation;
     player->onDisplay = [this](const mc::display::Update& u) {
+        _displaySet.store(!u.clear);
         send(ADDR_BASE, MsgType::NOW_PLAYING_INFO, mc::display::encodeNowPlaying(u));
     };
     player->onAnchor = [this](const std::string& label) {
@@ -1110,13 +1860,17 @@ void CommHandler::doPlay(const Command& cmd) {
         std::vector<uint8_t> payload(label.begin(), label.end());
         if (payload.size() > MAX_PAYLOAD_SIZE - 1) payload.resize(MAX_PAYLOAD_SIZE - 1);
         payload.push_back(0x00);
-        sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_ANCHOR, payload);
+        sendRemoteSignal(MsgType::SIGNAL_ANCHOR, payload);  // remembered for a resync
+    };
+    // A6: after SIGNAL_PLAYING, before the first SIGNAL_ANCHOR (Player::play calls it once the file is parsed,
+    // before its thread starts), so the remote knows at once whether it may offer add-verse.
+    player->onSections = [this](bool hasSections) {
+        sendSignalInfo(hasSections ? SIGNAL_INFO_SONG_HAS_SECTIONS : uint8_t(0));
     };
     player->onFinished = [this, gen]() { post({Command::Kind::Finished, {}, {}, gen}); };
 
     // SIGNAL_PLAYING goes out before the first SIGNAL_ANCHOR.
-    sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_PLAYING,
-                std::vector<uint8_t>(cmd.code.begin(), cmd.code.end()));
+    sendRemoteSignal(MsgType::SIGNAL_PLAYING, std::vector<uint8_t>(cmd.code.begin(), cmd.code.end()));
     try {
         player->play(cmd.path, cmd.code, opts);
     } catch (const std::exception& e) {
@@ -1136,7 +1890,7 @@ void CommHandler::doPlay(const Command& cmd) {
 void CommHandler::finishPlayback() {
     if (!releasePlayer()) return;  // already stopped by a Stop that raced the end
     displayClear();
-    sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_STOPPED);
+    sendRemoteSignal(MsgType::SIGNAL_STOPPED);
     if (!_config.keepPowerOn) organOff();
     playbackEnded("ended normally", "songs_ended");
     mc::log::info(Node::Software, "Playback finished" +
@@ -1147,7 +1901,9 @@ void CommHandler::doStop(bool signal) {
     bool wasPlaying = releasePlayer();
     stopRecorder();
     displayClear();
-    if (signal) sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_STOPPED);
+    // A7: the end of a recording is signalled to the base too; the remote gets one STOPPED either way below.
+    signalRecordingEnded(false);
+    if (signal) sendRemoteSignal(MsgType::SIGNAL_STOPPED);
     if (!_config.keepPowerOn) organOff();
     if (wasPlaying) {
         playbackEnded("stopped", "songs_stopped");

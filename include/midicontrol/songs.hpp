@@ -9,14 +9,19 @@
 
 // Song library: a folder of "<code>.mid" files, addressed by song code.
 //
-// A song code is 1-8 ASCII characters [0-9A-Z] ("406A"), the same string that
+// A song code is 1-4 digits (value <= 1999) with an optional A-D suffix ("406A"), the same string that
 // PLAY_SONG / SIGNAL_PLAYING carry and the file name without extension.
 namespace mc::songs {
 
+// PCW-1 / Q1-2 a (owner 2026-11-14): THE song-code rule, shared by every site
+// (protocol, CLI, song list, stops editor, songcheck, display): 1-4 digits,
+// value <= 1999, optional single A-D suffix (either case). No trimming here.
+bool validCode(const std::string& code);
+
 // Normalise a raw code (from the wire or the CLI): strips trailing NULs and
-// surrounding whitespace, upper-cases, then accepts only [0-9A-Z]{1,8}.
+// surrounding whitespace, upper-cases, then accepts only validCode().
 // nullopt for anything else, so a code can never name a path outside the
-// song folder.
+// song folder. (The protocol limit MAX_SONG_CODE_LEN = 8 stays the frame bound.)
 std::optional<std::string> sanitizeCode(const std::string& raw);
 std::optional<std::string> sanitizeCode(const std::vector<uint8_t>& payload);
 
