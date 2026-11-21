@@ -301,8 +301,8 @@ TEST(store_write_failure_is_counted_not_fatal) {
     TmpDir t;
     DiagStore s(t.path);
     s.append(mk("base", 'I', "ok"));
+    if (::geteuid() == 0) return;  // root ignores the permission bits: the write cannot be made to fail
     ::chmod(t.path.c_str(), 0555);
-    if (::access((t.path + "/probe").c_str(), W_OK) == 0) return;  // running as root: cannot make it fail
     uint64_t id = s.append(mk("remote", 'I', "lost"));
     s.append(mk("remote", 'I', "lost again"));
     ::chmod(t.path.c_str(), 0755);

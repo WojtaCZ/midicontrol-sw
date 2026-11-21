@@ -61,11 +61,11 @@ min_to_hhmm() { printf '%02d:%02d\n' $(($1 / 60)) $(($1 % 60)); }
 # parse_window "HH:MM-HH:MM" -> prints "START_HHMM LEN_MIN". Invalid or empty
 # windows fall back to 02:00-04:00 with a message on stderr.
 parse_window() {
-    pw_s=$(hhmm_to_min "${1%%-*}") && pw_e=$(hhmm_to_min "${1#*-}") && [ "$pw_s" != "$pw_e" ] || {
+    if ! { pw_s=$(hhmm_to_min "${1%%-*}") && pw_e=$(hhmm_to_min "${1#*-}") && [ "$pw_s" != "$pw_e" ]; }; then
         echo "updater: invalid UPDATE_WINDOW '$1', using 02:00-04:00" >&2
         echo "02:00 120"
         return 0
-    }
+    fi
     echo "$(min_to_hhmm "$pw_s") $(( (pw_e - pw_s + 1440) % 1440 ))"
 }
 

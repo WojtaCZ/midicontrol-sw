@@ -295,7 +295,7 @@ check updater_disabled_only_sleeps $r
 # ---------------------------------------------------------------- loop
 # run_loop with a fake clock: MC_SLEEP advances it, update_once is replaced by a
 # recorder returning $LOOP_RC. Stops at MC_LOOP_UNTIL.
-# shellcheck disable=SC2034,SC2329 # variables and overrides are used by run_loop
+# shellcheck disable=SC2034,SC2317,SC2329 # variables and overrides are used by run_loop (SC2317 on older shellcheck)
 loop() { # loop START_TIME UNTIL_TIME WINDOW RC
     (
         # shellcheck source=docker/updater/lib.sh

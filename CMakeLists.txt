@@ -106,7 +106,11 @@ target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_definitions(midicontrol_tests
     PRIVATE MC_SONGS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/songs")
 add_test(NAME unit COMMAND midicontrol_tests)
-add_test(NAME sync_system_doc COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/sync_system_doc_test.sh)
+# Dev-repo check (needs git and tools/); absent in the Docker build stage, which copies only the sources.
+find_program(MC_GIT git)
+if(MC_GIT AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/sync-system-doc.sh)
+    add_test(NAME sync_system_doc COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/sync_system_doc_test.sh)
+endif()
 
 # ---------------------------------------------------------------------------
 # Application: needs RtMidi (playback) + pthreads + the serial layer. Built

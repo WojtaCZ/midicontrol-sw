@@ -81,7 +81,9 @@ bad=ok
 for p in "$tmp/a b" "$tmp/a|b" "$tmp/a&b" "$tmp/a:b"; do
     world
     MC_PREFIX=$p run; rc=$?
-    [ "$rc" = 1 ] && has "MC_PREFIX" "$w/out" && [ ! -e "$p/compose.yaml" ] || { bad=bad; echo "  prefix '$p' rc=$rc"; }
+    if ! { [ "$rc" = 1 ] && has "MC_PREFIX" "$w/out" && [ ! -e "$p/compose.yaml" ]; }; then
+        bad=bad; echo "  prefix '$p' rc=$rc"
+    fi
 done
 check prefix_with_unsafe_characters_refused "$bad"
 
