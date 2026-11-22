@@ -33,13 +33,10 @@ markdown_extensions:
       permalink: true
 
 nav:
-  - Úvod: index.md
-  - Ovladač: ovladac.md
-  - Základna: zakladna.md
-  - Tabule: tabule.md
-  - Webová stránka: web.md
-  - Typické postupy: postupy.md
-  - Řešení problémů: problemy.md
-  - Pro správce: sprava.md
-  - Slovníček: slovnicek.md
-  - Rychlý přehled: tahak.md
+  - Začátek: index.md
+  - Hraní písně: hrani.md
+  - Nahrávání: nahravani.md
+  - Nová píseň a rejstříky: nova-pisen.md
+  - Nastavení: nastaveni.md
+  - Konfigurace počítače: pc.md
+  - Opravy a obnova: opravy.md

@@ -138,6 +138,15 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Manual/facts: none.
 - Risk / open points: deleting is irreversible; show the final list first. The docker branch is merged (2026-11-21).
 
+### B13 Stuck notes silenced within 10 s of a player stall (owner 2026-11-22, bench 10.7) - SAFETY, high priority
+- Goal (owner): if a player thread hangs while notes sound, the organ must be silent within at most 10 s. Today the worst case is ~45 s of screaming organ plus the restart time.
+- Current code: `Watchdog::loop` (src/main.cpp:102-124) polls every 5 s; `threadsAlive(10 s)` (src/comm.cpp:263) checks only the control, reader and keepalive heartbeats; `StallMonitor(30 s)` then `_Exit(70)`. Silence comes only after the container restart: startup reset sends All Notes Off + organ off (src/comm.cpp:~1700-1717). The PlaybackEngine thread (src/playback.cpp `run`, the one sending the notes) has NO heartbeat, so a hang there is never detected.
+- Change: (1) heartbeat in PlaybackEngine (update in the `tb.waitUntil` wait loop too, so long held notes are not a stall); include it in `threadsAlive` while a song runs. (2) Watchdog poll 1 s, staleness ~3 s, exit limit ~3 s (total < 8 s). (3) Before `_Exit(70)` the watchdog sends All Notes Off on all 16 channels and organ power off itself, lock-free: its own pre-opened MIDI output handle / pre-encoded frames, written with raw write(2), never through the locks a stalled thread may hold. (4) Audit every worker for legitimately long blocking calls (firmware upload, file I/O, base reconnect) so the shorter limits give no false exits; those paths must keep beating.
+- Bench 10.7 measured (2026-11-22, reader thread frozen): stall seen +13 s, exit decided +43 s, then restart + All Notes Off ~1 s later. Test method: .claude-notes/frz/freeze (ptrace); kill the helper as soon as the 'exiting' line appears, or the exit waits for the detach.
+- Second layer (fw, see midicontrol-fw TODO): the base silences the organ itself when the PC stops talking while a song plays.
+- Tests: StallMonitor/host test with the new limits; integration test freezing the playback thread (SIGSTOP on its TID via a test hook) -> notes-off frames seen within 10 s. Bench: redo 10.7 freezing the playback thread mid-song, measure time to silence on the Otraki/LA.
+- Related owner request (2026-11-22, LATER): a failsafe on the remote controller so the user can quickly cut the organ power (emergency off) - see midicontroller-fw/TODO.md D14.
+
 ### PC side of A-items (protocol changes are specified in midicontrol-protocol/TODO.md)
 - PC side of A1 (session nonce): see midicontrol-protocol/TODO.md. PC touch points: src/dispatch.cpp (per-source remembered frames, kRemembered 8; reset on the new nonce), src/comm.cpp `nextPacketId()` / session start (~395-400) and the DISABLED_ PM-13 tests to re-enable (Q3-3).
 - PC side of A3 (base tracks last indicator writer): see midicontrol-protocol/TODO.md. PC touch points: src/display.cpp:97 (indicator write), src/comm.cpp displayClear call in Kind::Shutdown/doStop (clear only if this PC wrote it last, M-clear-on-stop); VERIFY the PC needs no new state if the base arbitrates.
@@ -146,6 +155,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - PC side of A7 (recording): see midicontrol-protocol/TODO.md. PC touch points: src/dispatch.cpp (new case near ~105), src/comm.cpp:1192 recordSong (see B11).
 - PC side of A8 (update in progress): see midicontrol-protocol/TODO.md. PC touch points: src/comm.cpp `setUpdating` and the update path in src/console_exec.cpp (`update()`, `startUpload()`, `tryBeginUpdate`); VERIFY whether the PC must send or only receive the flag.
 - PC side of A9 (song list paging): see midicontrol-protocol/TODO.md. PC touch points: src/dispatch.cpp:105-127 (GET_SONG_LIST / SONG_LIST_RESP), src/comm.cpp:1054-1056 (`songListPage`, `buildSongListPage`), include/midicontrol/songs.hpp:43 (`buildSongListPage` offset/limit); relates to the base "more than 32 songs shows nothing" gap (zakladna.md:202).
+- PC side of D13 (remote asks for the state on connect, bench 2.3, owner 2026-11-22): see midicontroller-fw/TODO.md D13. PC touch points: src/dispatch.cpp (new state-request case, answer = set `_remoteDirty` and run the resync in src/comm.cpp ~560-601), or the PC-only variant: send GET_INFO to the remote as soon as the remote link comes up instead of waiting for the InfoPoller.
 
 ### E1 Manual edits for every M-* answer (docs/manual/docs/*.md)
 - Goal: apply each M-* answer from audit/OWNER-ANSWERS.md (lines 64-98) and remove the TODO markers it settles; `cd midicontrol-sw && docs-build todo` lists them (49 markers on 2026-11-16, read-only).

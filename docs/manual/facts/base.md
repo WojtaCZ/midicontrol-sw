@@ -51,7 +51,7 @@ Main menu title "Hlavni menu"; title is "Sparuj ovladac" while no remote is stor
 | Item | Action | Note |
 |---|---|---|
 | Prehraj | Requests the song list from the PC and opens "Pisne" | Does nothing if the PC is not alive (src/menu.cpp:449) |
-| Nahraj | Nothing happens (empty callback, src/menu.cpp:461-463) | See Open questions Q2 |
+| Nahraj | Starts a recording on the PC, or stops a running one (recording::Machine, src/menu.cpp:464-468); no state is shown yet (TODO C3) | Q2 |
 | Nastaveni | Opens the settings menu | |
 
 Settings menu "Nastaveni" (src/menu.cpp:94-103). Long labels are cut by the screen width (e.g. "Ident. MI", "Napajeni", "Sparovat ovladac" shows as "at ovladac" when scrolled; see PNGs 06-13):
@@ -92,7 +92,7 @@ Info pages (any key goes back; src/menu.cpp:477-531, :206-218):
 
 ## 7. Recording
 
-- The base menu has "Nahraj" but its callback is empty: nothing happens when selected (src/menu.cpp:461-463). The base only observes SIGNAL_RECORDING and does not show it (src/router.cpp:289-309, :416). The PC console command `record` exists on the PC side. See Open questions Q2, and docs/SYSTEM.md SYS-REC-01 (wants recording started from the base menu).
+- "Nahraj" sends RECORD_SONG start/stop to the PC (A7, src/menu.cpp:464-468, src/logic/recording.cpp). The state machine tracks Starting/Recording/Stopping/Busy/NoSupport/Failed, but no screen shows it yet (TODO C3). The PC console `record` also works.
 - DIN-in to USB-MIDI forwarding exists (section 8), which is what a PC recording would read.
 
 ## 8. DIN and USB MIDI
@@ -131,7 +131,7 @@ Source file src/menu.cpp unless noted. Count: 63 distinct strings.
 | 3 | Hlavni menu | main menu title (:115, :591) | normal |
 | 4 | Sparuj ovladac | main title (:591) / overlay hint (:138) | no remote stored |
 | 5 | Prehraj | main item (:110) | open song list |
-| 6 | Nahraj | main item (:111) | does nothing |
+| 6 | Nahraj | main item (:111) | start/stop recording, no on-screen state |
 | 7 | Nastaveni | main item / settings title (:112, :105) | settings |
 | 8 | LED | settings item (:95) | master LED switch |
 | 9 | Ident. MIDI | settings item (:96) | MIDI A/B colours |
@@ -255,7 +255,7 @@ Not covered by a picture: the bootloader screen (boot:), the stop-failed info li
 ## Open questions
 
 - Q1. Front and rear panel labels, connector types, power input and other physical details are not in firmware: the owner must give them (or photos).
-- Q2. "Nahraj" does nothing on the base (src/menu.cpp:461-463) and the base ignores SIGNAL_RECORDING (src/router.cpp:416), but SYS-REC-01 says recording starts and stops from the base menu. Is the manual to say "not available yet" or is the feature coming before the manual is final? Pending owner (gap 15).
+- Q2. Resolved by A7: "Nahraj" starts/stops recording. Open: the screens for the state (C3).
 - Q3. docs/SYSTEM.md SYS-USE-24 wants an encoder turn on the now-playing screen to choose Stop or "Pridat sloku" (add verse). Code: only Enter = stop, a turn does nothing. Manual follows the code unless the owner says otherwise.
 - Q4. Foreign indicator-bus numbers: the base copies them into its state, the Displej page and USB echo; docs say the base OLED and the remote mirror them. No code found that mirrors them on Prehravam/main screens. Confirm what the user should expect.
 - Q5. The 2 h organ backstop: SYSTEM.md says the PC owns idle-off (30 min). What to tell the organist when no PC runs? The manual states 2 h from the code.
@@ -268,7 +268,7 @@ Not covered by a picture: the bootloader screen (boot:), the stop-failed info li
 
 ## Possible bugs
 
-- B1. "Nahraj" is shown but does nothing (see Q2).
+- B1. "Nahraj" gives no on-screen feedback (TODO C3).
 - B2. src/base.cpp:110 `dfuCheck()` has no callers (dead code); harmless because the bootloader handles PB1.
 - B3. Master LED off still keeps the MIDI A/B steady colours (red/green) on, because only the blink is gated by `master` (src/led.cpp:299-306). The user may expect all LEDs off.
 - B4. Song limit: `setSong` caps at 1999 but the live path applyNowPlaying (src/display.cpp:211) passes any thousands digit; the NPI payload can carry e.g. 2406 (gap 32, SYS-USE-17).

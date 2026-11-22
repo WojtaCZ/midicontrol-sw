@@ -110,11 +110,11 @@ The organist normally controls the player from the remote (separate facts file);
 - Status fields (web, console): `playback` (idle/warming up/playing), `song`, `section`, `stops`, `last_song`, `last_sections`, `last_end` ("ended normally", "stopped", "failed: <why>").
 
 ### 2.3 Recording a new song
-- Only entry point: console command `record` (and `stop` ends it). The remote or the base cannot start it: RECORD_SONG is not handled and gets NAK UNKNOWN_MSG (`src/dispatch.cpp:138`, `src/console_exec.cpp:62-65`). No web button.
+- Entry points (A7): the base menu item `Nahraj` (RECORD_SONG start/stop, `src/dispatch.cpp:102-113`) and the console commands `record` / `stop`. The remote cannot start it. No web button. One recording at a time; a second request or a request during a song gets NAK BUSY, and a song during a recording is refused too.
 - Behaviour (`src/comm.cpp:1192-1276`): second `record` logs "Already recording; Stop first."; no MIDI input logs "MIDIControl MIDI input port not found; cannot record."; if the organ is off it is switched on first (warm-up). It runs `arecordmidi -p <alsa port> <file>`; log "Recording to <path>"; failure "Failed to start arecordmidi (rc=N)". `stop` ends it (SIGTERM, else kill). Console reply on failure: "Recording not started (see the log)".
 - File: `<RecordFolder>/YYYY-MM-DDTHH:MM:SS.mid`; on a name clash `-2` to `-99` is appended; "Cannot create a recording file in <folder>" if impossible (`:1235`).
 - To play it back: it is **not** in the play folder. The owner has to copy/rename it to a valid code in PlayFolder (e.g. `408.mid`); presumably so, not documented (open question).
-- Not implemented compared with SYSTEM.md SYS-REC-*/D29: base-only start, name `REC_YYYY-MM-DD_HHMM.mid`, cutting the leading silence, writing `<name>.conf` from the stops at the first note, SIGNAL_RECORDING (`.trail/learnings/2026-11-12-recordings-take-their-stops-from-the*.md`).
+- Still not implemented compared with SYSTEM.md SYS-REC-*/D29: name `REC_YYYY-MM-DD_HHMM.mid` (the file keeps the timestamp name above), cutting the leading silence, writing `<name>.conf` from the stops at the first note, SIGNAL_RECORDING (`.trail/learnings/2026-11-12-recordings-take-their-stops-from-the*.md`).
 
 ### 2.4 Organ stops per song
 - File `<PlayFolder>/<CODE>.conf` next to `<CODE>.mid` (e.g. `406B.conf`). Written by the web page or by hand (`src/stops_file.cpp:118-177`).
@@ -208,7 +208,7 @@ Only on branch `docker-deployment` (worktree `midicontrol-sw-docker`, last commi
 
 ## 4. PC messages that reach the remote or the base screens
 - The PC sends to the remote only: SIGNAL_PLAYING (code), SIGNAL_ANCHOR (ASCII label, 2.5), SIGNAL_STOPPED, song list pages, replies to requests (ACK / NAK). To the base indicator: NOW_PLAYING_INFO (2.5). Free text is limited to the section label.
-- NAK reasons (`include/midicontrol/protocol/types.hpp:63-71`; names `src/protocol/names.cpp`): UNKNOWN_MSG 1, INVALID_PAYLOAD 2, CRC_ERROR 3, BUSY 4, NOT_PLAYING 5, UNREACHABLE 6 (base: destination not connected), NOT_FOUND 7. The PC produces: INVALID_PAYLOAD for a bad code or bad stop payload (`src/dispatch.cpp:88,100`), NOT_FOUND for a missing song (`src/comm.cpp:1076`), NOT_PLAYING for add verse when idle, UNKNOWN_MSG for unsupported requests such as RECORD_SONG (`src/dispatch.cpp:138`). A BUSY NAK to a SIGNAL_* is retried (`src/comm.cpp:551-579`).
+- NAK reasons (`include/midicontrol/protocol/types.hpp:63-71`; names `src/protocol/names.cpp`): UNKNOWN_MSG 1, INVALID_PAYLOAD 2, CRC_ERROR 3, BUSY 4, NOT_PLAYING 5, UNREACHABLE 6 (base: destination not connected), NOT_FOUND 7. The PC produces: INVALID_PAYLOAD for a bad code or bad stop payload (`src/dispatch.cpp:88,100`), NOT_FOUND for a missing song (`src/comm.cpp:1076`), NOT_PLAYING for add verse when idle, UNKNOWN_MSG for unsupported requests (RECORD_SONG is handled since A7; BUSY when a recording or song runs). A BUSY NAK to a SIGNAL_* is retried (`src/comm.cpp:551-579`).
 - **No text is attached to a NAK by the PC.** Only the console translates NAK codes (to "invalid song code", "song not found", "nothing is playing", "refused"; `src/console_exec.cpp:19-26`). What the remote shows for each NAK is decided in the remote firmware (see facts/remote.md).
 - Texts on the base screen such as "PC neodpovida", "PC zaneprazdneno", "PC nedostupne", "Odpojeno / Cekam na PC" come from the base firmware (`docs/SYSTEM.md`), not from this code; see facts/base.md.
 - Retransmitted requests are answered again from a remembered reply and not executed twice; broadcasts are executed but not answered (`src/dispatch.cpp`).
@@ -224,7 +224,7 @@ Caveats: the controller is "Nepřipojen" (fake base has no remote), firmware "no
 
 ## Open questions
 1. How is a recording turned into a playable song (copy to PlayFolder, rename to a code)? Is that the intended workflow until SYS-REC-* is done? Who may do it (organist or admin)?
-2. Recording is console-only today; the manual cannot tell the organist to record from the base. Which target state should the manual describe (D29, base-only) or the present one?
+2. Recording starts from the base menu `Nahraj` (A7); the manual describes this. The base shows no recording state yet (TODO C3), so the manual says so.
 3. Pause/resume (SYS-USE-09/21): pause behaves as stop and resume does not exist. What should the manual say?
 4. Default registration for songs without a `.conf` (SYS-USE-20): not implemented; confirm "organ stays as it is" is the text for the manual.
 5. Idle power-off 30 min is fixed in code (SYS-ORG-05). Say "30 minutes" in the manual?
