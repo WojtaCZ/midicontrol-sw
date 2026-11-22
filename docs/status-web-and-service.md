@@ -429,7 +429,7 @@ These came out of the review and are not fixed yet:
 The reviewer also flagged a few things it did not judge:
 - how robust the existing MIDI file parser is against crashing (as opposed to throwing) files, now that it runs every 60 s;
 - a pre-existing data race on `SerialPort::_failed`;
-- in the interactive standalone mode, Ctrl-C exits without cleanup, so the organ may stay on (pre-existing).
+- (fixed in B6) in the interactive standalone mode, Ctrl-C used to exit without cleanup; SIGINT, SIGTERM and SIGHUP now all end the prompt through the normal shutdown.
 
 ---
 

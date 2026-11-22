@@ -194,7 +194,7 @@ Example file in the repo: `config.conf` (the one in the project root) and `share
   - `status`: "connected=.. base_alive=.. playing=.." plus ` section="<label>"`, then "Base: BLE=.., relay=.., display=.., pc_alive=.." or "Base did not answer GET_STATUS".
   - `diag`: last fault per node and last 20 log lines; "Diagnostics are not available" (`:102`).
   - `update`: progress bar `[####    ] N%  (done/total)`, ends "Firmware update complete." or "Firmware update FAILED."; refusals "busy: ..." / "refused: ..." (`:162-175`); exception "firmware update: <what>".
-  - Headless messages: "Running headless; send SIGTERM or SIGINT to stop.", "Received signal N, shutting down.", "Done.". Log "Using config file <path>".
+  - Headless messages: "Running headless; send SIGTERM or SIGINT to stop." (SIGHUP, and in the interactive prompt SIGINT/SIGTERM/SIGHUP/"quit"/EOF, give the same shutdown), "Received signal N, shutting down.", "Done.". Log "Using config file <path>".
 - Diagnostics store: the base log USB port "MIDIControl log" is read by the PC; per node JSONL files (1 MiB x 3) and `diag-ack.json` in the diag folder; the remote's faults are polled every 10 s. Shown on Pokročilé > Diagnostics and via `/api/diag`. "Mark seen" writes the acknowledgement.
 - Base link: keepalive every 2 s; after 6 s without reply: log "Base is not answering keepalives (no reply for 6 s)." (`src/protocol/constants.hpp:49-50`, `src/comm.cpp:1007`). Messages are retried 3 times.
 
