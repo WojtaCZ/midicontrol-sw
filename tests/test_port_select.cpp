@@ -126,7 +126,12 @@ TEST(port_select_env_sysfs_and_dev_root) {
 TEST(port_select_env_bootloader_probe) {
     FakeSys bl;
     bl.usbTty("1-1", "ttyACM0", "abcd", "1235", "00", "");
-    CHECK(!mc::baseInBootloader());
+    {
+        // hermetic: an empty fake sysfs, not the real /sys (a docker build sees the host's, the base may sit in its bootloader)
+        FakeSys none;
+        EnvGuard e("MIDICONTROL_SYSFS_ROOT", none.root);
+        CHECK(!mc::baseInBootloader());
+    }
     EnvGuard a("MIDICONTROL_SYSFS_ROOT", bl.root);
     CHECK(mc::baseInBootloader());
 }
