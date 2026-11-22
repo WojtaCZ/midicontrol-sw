@@ -122,6 +122,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: the file is tracked history; a move keeps it.
 
 ### B10 Full test coverage for SYS-PC-05 (Q3-6)
+- DONE 2026-11-22 (partly): tests/test_comm_organ.cpp `comm_b10_shutdown_while_playing_stops_clears_and_switches_off` and `..._while_recording_ends_the_recorder` (comm_tests target); process level in tools/systest/test_virtual_shutdown.py (SIGTERM/SIGINT/SIGHUP headless, interactive quit/EOF/SIGHUP/SIGINT; B6). NOT done: (4) shutdown waits for a running update has no automated test (the wait is main.cpp `waitForUpload`, B2; checked by service_unit_test.sh + bench only); flipping SYS-PC-05 to [T] in audit/test-matrix.md: that file is not in the repo (audit/ holds only findings/).
 - Goal: the whole SYS-PC-05 row (shutdown: stop, clear, SIGNAL_STOPPED, organ off; plus the B6 paths) is tested end to end, not only at CommHandler level.
 - Current code: audit/test-matrix.md:75 and :310: organ-off on CommHandler::shutdown is asserted at tests/test_comm_organ.cpp ~178-232; the SIGTERM handler, the display clear and SIGNAL_STOPPED are not tested; tests/test_process.cpp covers only a child SIGTERM.
 - Change: tests only: (1) CommHandler::shutdown while playing: SET_CURRENT off, SIGNAL_STOPPED to the remote, display clear frame to the base (FakeBase log). (2) while recording: recorder stopped. (3) process-level: SIGTERM, SIGHUP (B6), SIGINT, interactive "quit" and EOF each end with the same log. (4) update in progress: shutdown waits (B2).
