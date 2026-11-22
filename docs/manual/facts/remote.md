@@ -68,7 +68,11 @@ Sources: `src/menu.cpp:456-470, 469`; `src/player_screen.cpp` (keypress, addDigi
 - Shown percent only moves down on battery, up on USB; the opposite direction needs 3 points of margin (`battery_soc.hpp:52-57`).
 - Icon: top right at x=101, shown on main, settings, player and a ready song list (`src/menu.cpp:404-449`). Charging animation: one level per 13 frames, 5 levels.
 - Battery screen (Nastaveni > Baterie, `src/menu.cpp:191-212`): lines `Napeti: x.xx V` (or `Napeti: --`), `Uroven: n %`, `Stav:` Nabiji (charging) / Nabito (charge complete) / Nenabiji (USB present, not charging) / Vybiji (discharging), `USB: Pripojeno|Odpojeno`, `CC:` 3.0 A / 1.5 A / USB (0.5 A) / -- (`src/logic/input_limit.cpp:26-33`).
-- Warning: below 3450 mV (100 mV hysteresis) only a diagnostic LOW_BATTERY record is written, NOTHING is shown on the remote (`src/battery.cpp:26, 150-156`). See Possible bugs / Open questions.
+- Warning (D2): at 15 % a 5 s "Slaba baterie" splash is shown once (Enter/Back dismiss it, USB suppresses it, re-arms at 20 %); a diagnostic LOW_BATTERY record is also written (`src/logic/low_warning`, `src/battery.cpp`).
+- Invalid measurement (D1): no ADC samples, ADC init failure or 3 empty seconds -> "Chyba mereni", no percentage, no critical shutdown (`src/logic/battery_validity`).
+- Charger watchdog (D4): REG05 is read back in every poll; a mismatch is rewritten and logged as CHARGER_FAULT arg 0x200 | REG05 (`src/logic/bq_regs.hpp`).
+- Song list (D12): GET_SONG_LIST carries a u16 offset (1 byte below 256, 2 bytes from 256), the next page starts after the entries received, no page cap (`src/logic/song_page.hpp`).
+- Replace-base confirm "Nahradit zakl.?" (D5), unknown state "Stav neznamy" (D7), recording info screen "Nahravani" (D10); no record entry on the remote (D9).
 - Critical: batt mean < 3300 mV for 5 consecutive 1 s measurements, not on USB -> shutdown with "Slaba baterie" (`src/battery.cpp:28-29, 158-163, 204`; `main.cpp:467-470`).
 - Charging: BQ24195 charger; charging when pre-charge or fast-charge state (`src/battery.cpp:176-178`). Charger termination 256 mA, 12 h timer (`docs/HARDWARE.md` 4.3).
 - Display does not sleep while the Baterie or Bluetooth info screens are open (`src/menu.cpp`, noted in sec. earlier).
@@ -190,7 +194,8 @@ FW update (remote receives an image): title "Aktualizace", hint "Prijem dat" (re
 | Stisk: Nastaveni | Overlay | hint: press OK | `:380` |
 | Vypnuti | Message, power-hold | shutdown title | `:320, 324` |
 | Drzte 5 s | Power-hold | hold 5 s | `:324` |
-| Slaba baterie | Shutdown message | critical battery | `main.cpp:467-470` |
+| Slaba baterie | Shutdown message / 5 s splash | critical battery, 15 % warning (D2) | `main.cpp:467-470` |
+| Chyba mereni | Battery screens | invalid battery measurement (D1) | `battery.cpp` |
 | Necinnost: vypnuti | Shutdown message | idle auto-off | `base.cpp:329` |
 | Aktualizace | FW update | title | `:328` |
 | Prijem dat / Instalace / Chyba aktualizace | FW update | receiving / installing / failed | `fwupdate.cpp:140-142` |

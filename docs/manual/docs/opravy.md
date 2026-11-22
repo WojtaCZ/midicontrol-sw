@@ -10,7 +10,11 @@ Nepomohlo-li nic z tabulky, zapište přesný text z displeje a dejte vědět sp
 | `Neznama` | Zkontrolujte kód; píseň musí být ve složce `songs`. |
 | `PC zaneprazdneno` | Počkejte; probíhá nahrávání nebo aktualizace. |
 | `Bez odpovedi` | Stiskněte OK znovu. |
-| `Slaba baterie` | Nabijte ovladač přes USB-C. |
+| `Slaba baterie` | Zbývá asi 15 % baterie. Zobrazení po 5 s zmizí (nebo ho zavřete OK či Zpět). Nabijte ovladač přes USB-C. |
+| `Chyba mereni` | Baterii se nepodařilo změřit; nezobrazuje se procento. Ovladač vypněte a zapněte, nepomůže-li to, dejte vědět správci. |
+| `Nahradit zakl.?` | Ovladač je spárován s jinou základnou. Potvrďte jen při výměně základny. |
+| `Stav neznamy` | Ovladač neví, zda se hraje nebo nahrává (po zapnutí nebo ztrátě spojení). Počkejte na PC nebo stiskněte OK. |
+| `Nahravani` | Probíhá nahrávání z základny; ovladač jen zobrazuje stav, nahrávání se z něj nespouští. |
 | Displej zhasl | Stiskněte libovolné tlačítko. Nepomůže-li, zapněte ovladač ON/OFF. |
 | Po výpadku proudu | Napájení varhan je vypnuté; zapne se samo při další písni. |
 
