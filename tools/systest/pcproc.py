@@ -56,14 +56,24 @@ class PcInstance:
         self.logpath = os.path.join(self.tmp, "pc.log")
         self.proc = None
 
-    def start(self):
+    def start(self, interactive=False):
+        """`interactive`: stdin is a pty (the daemon then shows its prompt); self.tty_master is our end of it."""
         # Safety: a binary without the env seam would open the REAL /dev/ttyACM* (bench hardware).
         with open(PC_BIN, "rb") as f:
             if b"MIDICONTROL_SYSFS_ROOT" not in f.read():
                 raise RuntimeError(f"{PC_BIN} lacks the MIDICONTROL_SYSFS_ROOT seam: rebuild it, never run it on real /dev")
         self._log = open(self.logpath, "wb")
-        self.proc = subprocess.Popen([PC_BIN, "--config", self.config, "--headless"], env=self.env,
-                                     stdout=self._log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        stdin = subprocess.DEVNULL
+        args = [PC_BIN, "--config", self.config, "--headless"]
+        if interactive:
+            import pty
+            self.tty_master, slave = pty.openpty()
+            stdin = slave
+            args = args[:-1]
+        self.proc = subprocess.Popen(args, env=self.env, stdout=self._log, stderr=subprocess.STDOUT,
+                                     stdin=stdin, start_new_session=interactive)
+        if interactive:
+            os.close(slave)
         return self
 
     @property

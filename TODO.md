@@ -13,7 +13,6 @@ Per-song stops are implemented (stops editor on the home page, one `<CODE>.conf`
 - Program numbers: press ST01 and ST60 with a MIDI monitor on the organ's OUT; adjust `ProgramOffset` or `ProgramN`.
 - The all-off SysEx works and 100 ms after it is enough.
 - Bench: the stops arrive before the first note.
-- Move `songs/rejstriky.mid` out of the play folder. OWNER QUESTION (audit Q-US-5 / Q-PC-1): not moved yet. The tracked recording has an invalid song-code name, so the test `songcheck_real_files` fails until it is moved or renamed.
 
 ## Organ power behaviour between songs
 
@@ -83,6 +82,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: a superseded pid that was part of a resync stays in the awaited set (known, accepted in Item 2).
 
 ### B6 Interactive quit and SIGHUP do the same cleanup as SIGTERM (Q2-24)
+- DONE 2026-11-22: SIGHUP/SIGINT/SIGTERM blocked in every thread; headless sigwait, interactive uses a signal thread + poll() on stdin (src/main.cpp). Tests: tools/systest/test_virtual_shutdown.py (virtual tier, SIGTERM/SIGINT/SIGHUP, quit, EOF, interactive signals). A one-shot --cmd keeps default signal handling.
 - Goal: Ctrl-D/quit/EOF in interactive mode and SIGHUP (terminal closed) end the program through the normal shutdown path (stop playback, clear display, SIGNAL_STOPPED, organ off).
 - Current code: src/main.cpp: `interactive()` (~65-74) loops on getline, returns on ExecResult::Quit; headless uses `sigwait` on SIGINT/SIGTERM (termSignals ~175-180, `waitForTermination` ~61); SIGHUP is not handled. After the wait the shared cleanup runs (~250-262): sdNotify, watchdog.reset, control.stop, web stop, waitForUpload, logReader.stop, `handler.shutdown()`. `Kind::Shutdown` (comm.cpp ~1400) does releasePlayer, displayClear, SIGNAL_STOPPED, stopRecorder, organOff.
 - Change: add SIGHUP to the blocked/waited set (headless) and handle it in interactive mode (a signal thread or sigwait with the same set plus a stdin reader; VERIFY the simplest design: interactive() polls stdin and a std::atomic flag set by a SIGHUP handler or a dedicated sigwait thread). Make sure the interactive branch falls through to the same cleanup (it does after return; the gap is SIGHUP/SIGINT killing the process by default). Ctrl-C in interactive mode: VERIFY the intended result (same cleanup).
@@ -92,6 +92,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: the shutdown wait for an upload (B2) now also applies to SIGHUP; a closed terminal must not hang more than TimeoutStopSec.
 
 ### B7 Diag ack via POST only, Origin/Host check, no play controls on the web (Q2-25)
+- DONE 2026-11-22: `POST /api/diag/ack` (body `id=<n>`), GET `ack=` = 400; `writeAllowed()` in src/http.cpp (Host = IP literal / localhost / `[WEB] AllowedHosts`; Origin, if sent, == Host; no Origin passes for curl and scripts; 403 otherwise). Owner question: the PC hostname to put into AllowedHosts (default empty = IP/localhost only). Docker proxies: none in the repo, so Host is unchanged. Also fixed test port_select_env_bootloader_probe, which probed the real /sys (failed when a bench base sat in its bootloader). Run tools/sync-system-doc.sh (SYSTEM.md SYS-WEB-05 changed).
 - Goal: a web page on another site cannot change state through the status server (CSRF / DNS rebinding).
 - Current code: the ack is a GET: `/api/diag?...&ack=<id>` (src/diag_api.cpp ~84-92, `store.ack`), called from src/web_page.cpp:580 (`fetch("/api/diag?limit=1&ack="+...)`). src/http.cpp ~141-170: PUT for stops (`kStopsPrefix`), POST for firmware, GET for the rest; `/api/diag` at ~167. No Host/Origin check (owner decision 2026-11-12, FAULTS 2.7, was "accepted"; TODO section "Web: Host header not checked" above is superseded).
 - Change: (1) Move ack to `POST /api/diag/ack` (body `id=<n>`) and make GET with `ack=` ignored or 400. (2) In http.cpp for every non-GET (PUT/POST): require an `Origin` (if present) whose host equals the `Host` header, and a `Host` that is an IP literal, `localhost` or the configured hostname/allowed list (VERIFY the allowed-name list with the owner; M-fixed-ip says the PC will also get a hostname). Respond 403 otherwise. (3) Keep the rule: no play/stop/organ controls on the web page; add a test that the page contains no play endpoint.
@@ -101,6 +102,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: VERIFY: scripts or the console using the old GET ack (grep tools/ and docs); proxies in the Docker deployment change the Host header.
 
 ### B8 Configurable default registration for songs without a stop file (SYS-USE-20, M-default-registration)
+- DONE 2026-11-22: `[ORGAN] DefaultStops` (organ.cpp parse+validate 1..stopCount, sorted/unique), `planFor` (stops_file.cpp), `"default":[..]` in /api/stops, editor badge/row "výchozí". Existing empty file = all off (default does not apply). Not done: comm-level preamble test (no existing harness for the stops preamble; planFor is the unit used by doPlay); user manual sprava.md lives in another repo (E2). Run tools/sync-system-doc.sh. Owner: which stops go in the default list (O-14).
 - Goal: a song with no `<CODE>.conf` gets a configured default set of stops instead of "not set" (organ unchanged).
 - Current code: src/stops_file.cpp `planFor()` (~299-313) returns text "not set" and no preamble when `!stops`; used at comm.cpp:1559. Organ config parsing in src/organ.cpp (~163-170: StopsEnabled, DropSongProgramChanges); OrganConfig in include/midicontrol/organ.hpp:33-39.
 - Change: new organ key (proposed `[ORGAN] DefaultStops=1,5,12` using the same stop-number list syntax as the .conf files; empty = today's behaviour). `planFor` builds the preamble from the default set when there is no file; plan text "default <list>". The stops editor on the home page shows "default" for a song without a file. Validate against the stop count in config load.
@@ -110,6 +112,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: VERIFY: whether the default also applies on a song whose file exists but is empty (today "all off"): owner said "without a stop file" only. All-off SysEx plus power-cycling is a separate bench question.
 
 ### B9 Fix the rejstriky.mid test data (Q3-2)
+- DONE 2026-11-22: `git mv songs/rejstriky.mid docs/examples/rejstriky.mid` (organ stop-list reference recording, not a song); the special case in `songcheck_real_files` is removed, so every .mid in songs/ must be clean. The docs example name in the song-check table stays valid as a bad-name example.
 - Goal: `songcheck_real_files` passes.
 - Current code: songs/rejstriky.mid is a tracked recording with an invalid song-code name; the test `songcheck_real_files` (tests/test_songcheck.cpp) fails only on it (FAULTS/step 2 baseline 299/300). The existing TODO "Move `songs/rejstriky.mid` out of the play folder" (top of this file) is the same item.
 - Change: owner says fix the test/data: `git mv songs/rejstriky.mid` to a non-play location (VERIFY: `docs/examples/` or a `recordings/` folder, and that nothing references the path: grep tests/ docs/). Alternatively rename it to a valid code if it is meant to be playable (owner to say). Then remove the open TODO line at the top.
@@ -119,6 +122,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: the file is tracked history; a move keeps it.
 
 ### B10 Full test coverage for SYS-PC-05 (Q3-6)
+- DONE 2026-11-22 (partly): tests/test_comm_organ.cpp `comm_b10_shutdown_while_playing_stops_clears_and_switches_off` and `..._while_recording_ends_the_recorder` (comm_tests target); process level in tools/systest/test_virtual_shutdown.py (SIGTERM/SIGINT/SIGHUP headless, interactive quit/EOF/SIGHUP/SIGINT; B6). NOT done: (4) shutdown waits for a running update has no automated test (the wait is main.cpp `waitForUpload`, B2; checked by service_unit_test.sh + bench only); flipping SYS-PC-05 to [T] in audit/test-matrix.md: that file is not in the repo (audit/ holds only findings/).
 - Goal: the whole SYS-PC-05 row (shutdown: stop, clear, SIGNAL_STOPPED, organ off; plus the B6 paths) is tested end to end, not only at CommHandler level.
 - Current code: audit/test-matrix.md:75 and :310: organ-off on CommHandler::shutdown is asserted at tests/test_comm_organ.cpp ~178-232; the SIGTERM handler, the display clear and SIGNAL_STOPPED are not tested; tests/test_process.cpp covers only a child SIGTERM.
 - Change: tests only: (1) CommHandler::shutdown while playing: SET_CURRENT off, SIGNAL_STOPPED to the remote, display clear frame to the base (FakeBase log). (2) while recording: recorder stopped. (3) process-level: SIGTERM, SIGHUP (B6), SIGINT, interactive "quit" and EOF each end with the same log. (4) update in progress: shutdown waits (B2).
@@ -161,6 +165,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Related owner request (2026-11-22, LATER): a failsafe on the remote controller so the user can quickly cut the organ power (emergency off) - see midicontroller-fw/TODO.md D14.
 
 ### PC side of A-items (protocol changes are specified in midicontrol-protocol/TODO.md)
+- CHECK 2026-11-22 (B2 worker): PC side of A1 (ad31ae1; no DISABLED_ test left), A2 (56ab445), A3 (37a33e8), A4 (f7843ae), A5 (595327c), A6 (9b4c713, e33ad31), A7 (6e6b42d), A8 (20a768d), A9 (36d0671) is present in main by commit; no gap found. D13 PC part: the PC already sends GET_INFO and resyncs at once on a ble 0->1 edge; a remote reboot shorter than the STATUS poll (kStatusPollMs, no edge) is found only by the next 7-byte STATUS_RESP boot id, which is the residual delay of bench 2.3. The real fix is the remote's own hello (variant a, firmware); lowering the PC status poll interval is the PC-only alternative: OWNER QUESTION, not changed.
 - PC side of A1 (session nonce): see midicontrol-protocol/TODO.md. PC touch points: src/dispatch.cpp (per-source remembered frames, kRemembered 8; reset on the new nonce), src/comm.cpp `nextPacketId()` / session start (~395-400) and the DISABLED_ PM-13 tests to re-enable (Q3-3).
 - PC side of A3 (base tracks last indicator writer): see midicontrol-protocol/TODO.md. PC touch points: src/display.cpp:97 (indicator write), src/comm.cpp displayClear call in Kind::Shutdown/doStop (clear only if this PC wrote it last, M-clear-on-stop); VERIFY the PC needs no new state if the base arbitrates.
 - PC side of A4 (FW_UPDATE_STATUS ACK): see midicontrol-protocol/TODO.md. PC touch points: src/comm.cpp:989 (`FW_UPDATE_STATUS` handling), src/dispatch.cpp:133 (currently falls to the no-answer group); must answer ACK and tolerate the retry (dedup).

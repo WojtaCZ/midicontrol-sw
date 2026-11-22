@@ -61,7 +61,8 @@ void sendAll(int fd, const std::string& data) {
 
 WebServer::WebServer(mc::status::StatusRegistry& status, std::string bind, int port,
                      std::string playFolder, const mc::organ::OrganConfig& organ,
-                     mc::diag::DiagStore* diag, mc::fwupload::Start firmware)
+                     mc::diag::DiagStore* diag, mc::fwupload::Start firmware,
+                     std::vector<std::string> allowedHosts)
     : _status(status),
       _bind(std::move(bind)),
       _port(port),
@@ -69,6 +70,7 @@ WebServer::WebServer(mc::status::StatusRegistry& status, std::string bind, int p
       _organ(organ),
       _stops(_playFolder, _organ.stopCount()),
       _diag(diag),
+      _allowedHosts(std::move(allowedHosts)),
       _firmware(std::move(firmware)) {
     std::error_code ec;
     if (std::filesystem::exists(_playFolder + "/" + mc::stops::kLegacyFileName, ec))
@@ -158,9 +160,12 @@ bool WebServer::readConn(Conn& c) {
                 continue;
             case mc::http::ParseResult::Ok: {
                 mc::http::DiagHandler diag;
+                mc::http::Extras extras;
+                extras.allowedHosts = _allowedHosts;
                 if (_diag) {
-                    diag = [this](const std::string& query) {
-                        return mc::diag::apiDiag(*_diag, query, [this] { mc::diag::publishFaultStatus(*_diag, _status); });
+                    diag = [this](const std::string& query) { return mc::diag::apiDiag(*_diag, query); };
+                    extras.diagAck = [this](const std::string& body) {
+                        return mc::diag::apiDiagAck(*_diag, body, [this] { mc::diag::publishFaultStatus(*_diag, _status); });
                     };
                 }
                 mc::http::StopsApi api;
@@ -180,7 +185,7 @@ bool WebServer::readConn(Conn& c) {
                 try {
                     respond(c.fd, mc::http::route(req, mc::web::statusPageHtml(), [this] {
                         return mc::status::toJson(_status.snapshot());
-                    }, diag, &api, &fw));
+                    }, diag, &api, &fw, &extras));
                 } catch (const std::exception& e) {
                     mc::log::warn(Node::Software, std::string("status page: ") + e.what());
                     respond(c.fd, mc::http::Response{500, "text/plain; charset=utf-8", std::string(e.what()) + "\n"});

@@ -1,3 +1,5 @@
+#include <errno.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -43,7 +45,7 @@ const char* kUsage =
     "\n"
     "  -c, --config PATH  config file (default: $MIDICONTROL_CONFIG, then\n"
     "                     $XDG_CONFIG_HOME/midicontrol/config.conf, then ./config.conf)\n"
-    "      --headless     service mode: no prompt; run until SIGINT/SIGTERM\n"
+    "      --headless     service mode: no prompt; run until SIGINT/SIGTERM/SIGHUP\n"
     "                     (implied when stdin is not a terminal)\n"
     "      --exit-on-stall exit with status 70 when a worker thread has stalled for\n"
     "                     30 s, so a container supervisor restarts the process\n"
@@ -70,14 +72,40 @@ void waitForTermination(const sigset_t& set) {
     mc::log::info(Node::Software, "Received signal " + std::to_string(sig) + ", shutting down.");
 }
 
+// B6: set by the signal thread of interactive mode (SIGINT/SIGTERM/SIGHUP).
+std::atomic<int> g_interactiveSignal{0};
+
+// Interactive prompt. Reads stdin with poll() so a signal caught by the signal thread (Ctrl-C, SIGTERM,
+// SIGHUP when the terminal closes) ends the loop as well as "quit" and EOF; the caller then runs the
+// same cleanup as for SIGTERM in headless mode.
 void interactive(ConsoleExecutor& exec) {
     std::cout << "\nMIDIControl - interactive control\n" << console::kCommandsHelp << "\n";
     const console::Reply out = [](const std::string& text) { std::cout << text << std::flush; };
-    std::string line;
-    while (true) {
-        std::cout << "> " << std::flush;
-        if (!std::getline(std::cin, line)) break;
-        if (exec.execute(line, out, false) == console::ExecResult::Quit) break;
+    std::string pending;
+    bool prompt = true;
+    while (g_interactiveSignal.load() == 0) {
+        if (prompt) std::cout << "> " << std::flush;
+        prompt = false;
+        pollfd pfd{STDIN_FILENO, POLLIN, 0};
+        const int pr = poll(&pfd, 1, 200);
+        if (pr < 0 && errno != EINTR) break;
+        if (pr <= 0) continue;
+        char buf[512];
+        const ssize_t n = read(STDIN_FILENO, buf, sizeof buf);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;  // EOF or hangup
+        pending.append(buf, static_cast<size_t>(n));
+        size_t nl;
+        while ((nl = pending.find('\n')) != std::string::npos) {
+            const std::string line = pending.substr(0, nl);
+            pending.erase(0, nl + 1);
+            if (exec.execute(line, out, false) == console::ExecResult::Quit) return;
+            prompt = true;
+        }
+    }
+    if (const int sig = g_interactiveSignal.load()) {
+        std::cout << "\n";
+        mc::log::info(Node::Software, "Received signal " + std::to_string(sig) + ", shutting down.");
     }
 }
 
@@ -237,7 +265,16 @@ int main(int argc, char** argv) {
     sigemptyset(&termSignals);
     sigaddset(&termSignals, SIGINT);
     sigaddset(&termSignals, SIGTERM);
-    if (headless) pthread_sigmask(SIG_BLOCK, &termSignals, nullptr);
+    sigaddset(&termSignals, SIGHUP);  // B6: a closed terminal shuts down like SIGTERM
+    // Blocked before any thread exists, so every thread inherits the mask. Headless: main sigwaits.
+    // Interactive: a signal thread sigwaits and the prompt loop notices its flag.
+    if (!oneShot) pthread_sigmask(SIG_BLOCK, &termSignals, nullptr);  // a one-shot stays interruptible
+    if (!headless && !oneShot) {
+        std::thread([termSignals] {
+            int sig = 0;
+            if (sigwait(&termSignals, &sig) == 0) g_interactiveSignal.store(sig);
+        }).detach();
+    }
 
     mc::status::StatusRegistry status(wallMs);
     mc::log::setRegistry(&status);
@@ -286,7 +323,8 @@ int main(int argc, char** argv) {
     if (config.webEnabled) {
         web = std::make_unique<WebServer>(status, config.webBind, config.webPort, config.playFolder,
                                               config.organ, &diagStore,
-                                              [&exec](mc::fwupload::Accepted a) { return exec.startUpload(std::move(a)); });
+                                              [&exec](mc::fwupload::Accepted a) { return exec.startUpload(std::move(a)); },
+                                              config.webAllowedHosts);
         web->start();
     }
     ControlServer control(

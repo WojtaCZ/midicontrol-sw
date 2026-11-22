@@ -5,6 +5,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 // Minimal HTTP/1.1 for the status page: request parsing, routing and response
 // building as pure functions (the socket loop lives in the app layer). GET
@@ -25,6 +26,8 @@ struct Request {
     std::string query;  // after '?', undecoded; empty if none
     std::string contentType;  // Content-Type header value, lower-cased; empty if none
     std::string body;         // exactly Content-Length bytes
+    std::string host = {};    // Host header value (lower-cased, with port); empty if none
+    std::string origin = {};  // Origin header value (lower-cased); empty if none
 };
 
 enum class ParseResult { Incomplete, Ok, Bad, TooLarge, LengthRequired };
@@ -66,16 +69,36 @@ struct FirmwareApi {
     std::function<Response(const std::string& target, const std::string& body)> post;
 };
 
+// B7: handler for POST /api/diag/ack; `body` is "id=<n>" (form style). false = invalid (400).
+using DiagAck = std::function<bool(const std::string& body)>;
+
+// Optional parts of the router. `allowedHosts`: names (lower-case, no port) a write request may carry in
+// its Host header besides IP literals and "localhost" (config [WEB] AllowedHosts).
+struct Extras {
+    DiagAck diagAck;
+    std::vector<std::string> allowedHosts;
+};
+
+// B7: true when a state-changing request (PUT/POST) passes the CSRF / DNS-rebinding check: Host must be an IP
+// literal, "localhost" or one of `allowedHosts` (a rebound DNS name is none of these), and an Origin header, if
+// the client sends one (every browser does on cross-origin writes), must name the same host:port as Host.
+// A client without Origin (curl, the updater scripts) passes. GET is never checked (read-only).
+bool writeAllowed(const Request& req, const std::vector<std::string>& allowedHosts);
+
 // GET / -> the page, GET /api/status -> statusJson(), GET /api/diag -> diagJson(query) (404 without a
 // handler), GET /api/stops -> stops->get(), PUT /api/stops/<code> -> stops->put(code, body) (415 unless
 // Content-Type is application/json, so a plain cross-site form cannot post; 404 without `stops`),
 // POST /api/firmware/<target> -> firmware->post(target, body) (415 unless Content-Type is
 // application/octet-stream, which a cross-site form cannot send; 404 without `firmware`; other
 // methods on /api/firmware/<target> 405 with Allow: POST; POST /api/firmware without a target 404,
-// other methods there 405), other paths 404, other methods 405. Every 405 carries Allow.
+// other methods there 405), POST /api/diag/ack -> extras->diagAck(body) (acknowledges a fault; 415 unless
+// 400 for a bad id; 404 without a handler; GET there 405),
+// other paths 404, other methods 405. Every 405 carries Allow. Every PUT/POST first passes
+// writeAllowed() (403 otherwise). There is deliberately no play/stop/organ route (owner rule).
 Response route(const Request& req, const std::string& html,
                const std::function<std::string()>& statusJson, const DiagHandler& diagJson = nullptr,
-               const StopsApi* stops = nullptr, const FirmwareApi* firmware = nullptr);
+               const StopsApi* stops = nullptr, const FirmwareApi* firmware = nullptr,
+               const Extras* extras = nullptr);
 
 }  // namespace mc::http
 

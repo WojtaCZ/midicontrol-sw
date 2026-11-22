@@ -581,7 +581,7 @@ function faultTable(name,node,fl,unseen){
   if(fl&&unseen>0){
     aside=el("span");
     const b=el("button","btn sm","Mark seen");
-    b.onclick=async()=>{b.disabled=true;try{await fetch("/api/diag?limit=1&ack="+fl.id,{cache:"no-store"});}catch(e){}pollOnce();};
+    b.onclick=async()=>{b.disabled=true;try{await fetch("/api/diag/ack",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"id="+fl.id,cache:"no-store"});}catch(e){}pollOnce();};
     aside.append(el("span","badge warn","unseen"),b);aside.style.display="contents";
   }
   if(!fl)return panel(name+": last fault",el("div","pb empty","no fault recorded"));
@@ -940,7 +940,7 @@ async function spLoad(){
   const E=SP.E;
   try{
     const j=await spFetch("/api/stops");
-    SP.groups=j.groups;SP.names=j.names;SP.codes=j.songs.map(s=>s.code);SP.saved={};
+    SP.groups=j.groups;SP.def=j.default||[];SP.names=j.names;SP.codes=j.songs.map(s=>s.code);SP.saved={};
     for(const s of j.songs)SP.saved[s.code]=s.stops;
     SP.total=Math.max(0,...SP.groups.map(g=>g.last));
     SP.loaded=true;SP.loadErr=false;E.load.replaceChildren();
@@ -978,7 +978,7 @@ function spDraw(){
   E.count.textContent="";E.state.hidden=!has;
   if(has){
     if(SP.dirty){E.state.textContent="neuložené změny";E.state.className="badge warn";}
-    else if(saved===null){E.state.textContent="nenastaveno: varhany zůstanou, jak jsou";E.state.className="badge";}
+    else if(saved===null){E.state.textContent=(SP.def&&SP.def.length)?"nenastaveno: výchozí registrace ("+SP.def.join(" ")+")":"nenastaveno: varhany zůstanou, jak jsou";E.state.className="badge";}
     else{E.state.textContent=saved.length?"uloženo":"uloženo: vše vypnuto";E.state.className="badge ok";}
     if(SP.dirty||saved!==null)E.count.textContent=SP.draft.size+" z "+SP.total+" zapnuto";
   }
@@ -1017,7 +1017,7 @@ function spDrawSongs(){
     li.tabIndex=0;li.dataset.code=r.code;li.setAttribute("role","option");
     li.setAttribute("aria-selected",r.code===SP.cur?"true":"false");
     const cnt=el("span","cnt"),list=el("span","list");
-    if(r.v===null){cnt.append(el("span","sp-none","nenastaveno"));}
+    if(r.v===null){cnt.append(el("span","sp-none",(SP.def&&SP.def.length)?"výchozí":"nenastaveno"));}
     else if(!r.v.length){cnt.textContent="vše vypnuto";}
     else{cnt.textContent=cz(r.n,"rejstřík","rejstříky","rejstříků");list.textContent=r.v.join(" ");}
     li.append(el("span","code",r.code),cnt);
@@ -1117,7 +1117,7 @@ function stops(){
   E.alloff.onclick=()=>{if(SP.draft.size||SP.saved[SP.cur]===null){SP.draft.clear();spChanged();}};
   E.notset.onclick=()=>{
     if(confirm("Zrušit nastavení rejstříků písně "+SP.cur+"?"+(SP.dirty?" Neuložené změny se také zahodí.":"")+
-               " Při spuštění této písně pak varhany zůstanou, jak jsou."))spPut(null);
+               (SP.def&&SP.def.length?" Při spuštění této písně pak platí výchozí registrace.":" Při spuštění této písně pak varhany zůstanou, jak jsou.")))spPut(null);
   };
   E.notset.title="Smaže uložený výběr: při spuštění písně se rejstříky nemění";
   E.actions.append(E.save,E.alloff,E.msg,E.notset);

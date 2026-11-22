@@ -1,5 +1,6 @@
 #include "midicontrol/organ.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <sstream>
 #include <stdexcept>
@@ -170,6 +171,17 @@ OrganConfig parseOrgan(const std::map<std::string, std::string>& section) {
         o.dropSongProgramChanges = toBool("DropSongProgramChanges", *v);
     }
 
+    std::vector<int> defaultStops;
+    bool haveDefault = false;
+    if (auto v = get("DefaultStops")) {
+        haveDefault = true;
+        std::string t = *v;
+        for (char& c : t) if (c == ',' || c == ';') c = ' ';
+        std::istringstream is(t);
+        std::string tok;
+        while (is >> tok) defaultStops.push_back(toInt("DefaultStops", tok, 1, 9999));
+    }
+
     if (auto v = get("Groups")) {
         o.groups = toGroups(*v);
         // Stops beyond the defaults get a placeholder name and need a ProgramN.
@@ -200,6 +212,14 @@ OrganConfig parseOrgan(const std::map<std::string, std::string>& section) {
                                      " has no valid program (check ST" + std::to_string(s.number) +
                                      ", Program" + std::to_string(s.number) + ", ProgramOffset)");
         }
+    }
+    if (haveDefault) {
+        std::sort(defaultStops.begin(), defaultStops.end());
+        defaultStops.erase(std::unique(defaultStops.begin(), defaultStops.end()), defaultStops.end());
+        for (int n : defaultStops) {
+            if (n > o.stopCount()) bad("DefaultStops", std::to_string(n));
+        }
+        o.defaultStops = defaultStops;
     }
     return o;
 }

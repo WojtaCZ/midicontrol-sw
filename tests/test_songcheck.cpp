@@ -48,11 +48,7 @@ TEST(songcheck_real_files) {
         ++files;
         auto c = checkFile(std::string(MC_SONGS_DIR) + "/" + name);
         CHECK_EQ(c.file, name);
-        if (name == "rejstriky.mid") {
-            // Organ stop-list reference file, not a song: its name is not a song code.
-            if (!hasProblem(c, "file name is not a valid song code"))
-                FAIL_AT("rejstriky.mid: no bad-name problem");
-        } else if (name == "512.mid" || name == "513.mid") {
+        if (name == "512.mid" || name == "513.mid") {
             // Shifted display digits (D24), checked in songcheck_warns_real_shifted_files.
             if (c.problems.size() != 1) FAIL_AT(name + ": expected exactly the shifted-digits warning");
         } else if (!c.problems.empty()) {

@@ -37,6 +37,7 @@ struct OrganConfig {
     int allOffDelayMs = 100;
     int stopDelayMs = 20;
     bool dropSongProgramChanges = true;
+    std::vector<int> defaultStops;     // ascending, unique, 1..stopCount; empty = songs without a file leave the organ alone (B8)
     std::vector<StopGroup> groups;     // ranges contiguous from 1, no overlap
     std::vector<Stop> stops;           // stops[i].number == i + 1
     int stopCount() const { return static_cast<int>(stops.size()); }

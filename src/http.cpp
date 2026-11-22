@@ -11,6 +11,7 @@ const char* reasonPhrase(int status) {
         case 200: return "OK";
         case 202: return "Accepted";
         case 400: return "Bad Request";
+        case 403: return "Forbidden";
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
         case 409: return "Conflict";
@@ -80,7 +81,11 @@ ParseResult parseRequest(const std::string& buffer, Request& out, size_t maxSize
         if (colon == std::string::npos) continue;
         const std::string name = lower(h.substr(0, colon));
         const std::string value = trim(h.substr(colon + 1));
-        if (name == "content-type") {
+        if (name == "host") {
+            out.host = lower(value);
+        } else if (name == "origin") {
+            out.origin = lower(value);
+        } else if (name == "content-type") {
             contentType = lower(value);
         } else if (name == "content-length") {
             if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos) {
@@ -137,10 +142,59 @@ Response notAllowed(const char* allow) {
 }
 }  // namespace
 
+namespace {
+// "[::1]:8080" / "host:80" / "host" -> host part without port, brackets kept for IPv6.
+std::string hostOnly(const std::string& hostPort) {
+    if (!hostPort.empty() && hostPort[0] == '[') {
+        const size_t e = hostPort.find(']');
+        return e == std::string::npos ? hostPort : hostPort.substr(0, e + 1);
+    }
+    return hostPort.substr(0, hostPort.find(':'));
+}
+
+bool isIpLiteral(const std::string& h) {
+    if (h.size() >= 2 && h.front() == '[' && h.back() == ']') return true;  // IPv6 literal
+    if (h.empty()) return false;
+    int dots = 0;
+    for (char ch : h) {
+        if (ch == '.') ++dots;
+        else if (ch < '0' || ch > '9') return false;
+    }
+    return dots == 3 && h.front() != '.' && h.back() != '.' && h.find("..") == std::string::npos;
+}
+}  // namespace
+
+bool writeAllowed(const Request& req, const std::vector<std::string>& allowedHosts) {
+    if (req.method != "PUT" && req.method != "POST") return true;
+    if (req.host.empty()) return false;
+    const std::string h = hostOnly(req.host);
+    bool ok = isIpLiteral(h) || h == "localhost";
+    for (const auto& a : allowedHosts) ok = ok || h == a;
+    if (!ok) return false;
+    if (!req.origin.empty()) {
+        // "null" (sandboxed/opaque origins) and anything not http(s)://<Host> is refused.
+        const std::string http = "http://", https = "https://";
+        std::string rest;
+        if (req.origin.rfind(http, 0) == 0) rest = req.origin.substr(http.size());
+        else if (req.origin.rfind(https, 0) == 0) rest = req.origin.substr(https.size());
+        else return false;
+        if (rest != req.host) return false;
+    }
+    return true;
+}
+
 Response route(const Request& req, const std::string& html,
                const std::function<std::string()>& statusJson, const DiagHandler& diagJson,
-               const StopsApi* stops, const FirmwareApi* firmware) {
+               const StopsApi* stops, const FirmwareApi* firmware, const Extras* extras) {
     constexpr const char* kStopsPrefix = "/api/stops/";
+    constexpr const char* kDiagAck = "/api/diag/ack";
+    if (!writeAllowed(req, extras ? extras->allowedHosts : std::vector<std::string>{})) return errorResponse(403);
+    if (req.path == kDiagAck) {
+        if (req.method != "POST") return notAllowed("POST");
+        if (!extras || !extras->diagAck) return errorResponse(404);
+        // A cross-site form can send urlencoded bodies; the Origin check above is what stops it.
+        return extras->diagAck(req.body) ? Response{200, "application/json", "{}"} : errorResponse(400);
+    }
     if (req.path.rfind(kFirmwarePrefix, 0) == 0) {
         if (req.method != "POST") return notAllowed("POST");
         if (!firmware || !firmware->post) return errorResponse(404);

@@ -39,6 +39,9 @@ struct Config {
     bool webEnabled = true;
     int webPort = 50118;
     std::string webBind = "0.0.0.0";   // IPv4 address to listen on
+    // B7: host names (lower-case, no port) a write request (stop edit, firmware upload, fault ack) may name in its
+    // Host header besides IP literals and "localhost"; empty = IP/localhost only
+    std::vector<std::string> webAllowedHosts;
 
     // [DIAG] base log + remote diagnostics
     std::string diagLogPort;           // e.g. "/dev/ttyACM1"; empty = auto-detect "MIDIControl log"

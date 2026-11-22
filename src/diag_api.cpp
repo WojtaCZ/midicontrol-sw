@@ -61,12 +61,12 @@ std::vector<DiagEntry> resetEntries(const DiagStore& store, const std::string& n
 
 }  // namespace
 
-std::optional<std::string> apiDiag(DiagStore& store, const std::string& query, const std::function<void()>& afterAck) {
+std::optional<std::string> apiDiag(const DiagStore& store, const std::string& query) {
     const auto q = parseQuery(query);
     std::vector<std::string> nodes = {"base", "remote"};
     char level = 'D';
-    uint64_t before = 0, limit = kDefaultLimit, ack = 0;
-    bool doAck = false, resets = false;
+    uint64_t before = 0, limit = kDefaultLimit;
+    bool resets = false;
     for (const auto& [k, v] : q) {
         if (k == "node") {
             if (v != "base" && v != "remote") return std::nullopt;
@@ -82,15 +82,10 @@ std::optional<std::string> apiDiag(DiagStore& store, const std::string& query, c
             if (v != "reset") return std::nullopt;
             resets = true;
         } else if (k == "ack") {
-            if (!parseUint(v, ack)) return std::nullopt;
-            doAck = true;
+            return std::nullopt;  // B7: acknowledging changes state, so it is POST /api/diag/ack only
         }
     }
     limit = std::min<uint64_t>(std::max<uint64_t>(limit, 1), kMaxLimit);
-    if (doAck) {
-        store.ack(ack);
-        if (afterAck) afterAck();
-    }
 
     std::vector<DiagEntry> all;
     for (const auto& n : nodes) {
@@ -148,6 +143,16 @@ std::string formatDiag(const DiagStore& store) {
         }
     }
     return out;
+}
+
+bool apiDiagAck(DiagStore& store, const std::string& body, const std::function<void()>& afterAck) {
+    const auto q = parseQuery(body);  // "id=<n>" (form style)
+    const auto it = q.find("id");
+    uint64_t id = 0;
+    if (q.size() != 1 || it == q.end() || !parseUint(it->second, id)) return false;
+    store.ack(id);
+    if (afterAck) afterAck();
+    return true;
 }
 
 }  // namespace mc::diag

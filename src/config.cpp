@@ -136,6 +136,18 @@ Config parseConfig(const std::string& iniText) {
             if (it->second.empty()) throw std::runtime_error("config: Bind is empty");
             cfg.webBind = it->second;
         }
+        if (auto it = web.find("AllowedHosts"); it != web.end()) {
+            std::string cur;
+            for (size_t i = 0; i <= it->second.size(); ++i) {
+                const char ch = i < it->second.size() ? it->second[i] : ',';
+                if (ch == ',' || ch == ' ') {
+                    if (!cur.empty()) cfg.webAllowedHosts.push_back(cur);
+                    cur.clear();
+                } else {
+                    cur += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                }
+            }
+        }
     }
 
     auto diagIt = sections.find("DIAG");

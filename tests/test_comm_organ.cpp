@@ -2119,3 +2119,70 @@ TEST(comm_b1_keep_power_on_arms_idle_off_after_stop) {
     CHECK(waitFor([&] { return countSetV(base.log(), 0) == offs0 + 1; }, 8000));
     h.shutdown();
 }
+
+// B10 / SYS-PC-05: CommHandler::shutdown while a song plays is the same path as a service stop. The
+// base must see the organ switched off, SIGNAL_STOPPED and a display clear, and the player is gone.
+TEST(comm_b10_shutdown_while_playing_stops_clears_and_switches_off) {
+    FakeBase base;
+    base.protoVer = 2;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(1500ms);
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] {
+        if (!h.isPlaying()) return false;
+        for (const auto& m : base.log()) if (m.type == MsgType::NOW_PLAYING_INFO && m.payload.size() == 5) return true;
+        return false;
+    }, 15000));
+    const size_t mark = base.log().size();
+    h.shutdown();
+    CHECK(!h.isPlaying());
+    auto log = base.log();
+    bool stopped = false, clear = false;
+    int lastSetCurrent = -1;
+    for (size_t i = mark; i < log.size(); ++i) {
+        if (log[i].type == MsgType::SIGNAL_STOPPED) stopped = true;
+        if (log[i].type == MsgType::NOW_PLAYING_INFO && log[i].payload.size() < 5) clear = true;
+    }
+    for (const auto& m : log)
+        if (m.type == MsgType::SET_CURRENT && !m.payload.empty()) lastSetCurrent = m.payload[0];
+    CHECK(stopped);
+    CHECK(clear);
+    CHECK_EQ(lastSetCurrent, 0);                       // organ off is the last power command
+    CHECK(!base.ssr.load());
+}
+
+// B10 / SYS-PC-05: shutdown while a recording runs ends the recorder process.
+TEST(comm_b10_shutdown_while_recording_ends_the_recorder) {
+    FakeRecorder fr;
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.recFolder = fr.recDir.string();
+    cfg.warmupMs = 0;
+    CommHandler h(cfg, [] { return recPorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(100ms);
+    CHECK(h.recordSong());
+    CHECK(waitFor([&] { return fr.lines().size() == 1; }, 3000));
+    const int pid = std::stoi(fr.lines()[0].substr(0, fr.lines()[0].find(' ')));
+    CHECK(kill(pid, 0) == 0);                          // running
+    h.shutdown();
+    bool gone = false;
+    for (int i = 0; i < 50 && !gone; ++i) {
+        // A killed child may linger as a zombie of the test process until reaped: treat both as ended.
+        if (kill(pid, 0) != 0) gone = true;
+        else {
+            std::ifstream st("/proc/" + std::to_string(pid) + "/stat");
+            std::string line;
+            std::getline(st, line);
+            auto p = line.rfind(')');
+            if (p != std::string::npos && p + 2 < line.size() && line[p + 2] == 'Z') gone = true;
+        }
+        if (!gone) std::this_thread::sleep_for(100ms);
+    }
+    CHECK(gone);
+}

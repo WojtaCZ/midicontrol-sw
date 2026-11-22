@@ -199,7 +199,7 @@ Stops = 3 4 5 14
 
 **Stop names** default to Czech organ terminology as used in Czech parish dispositions (divisions "Pedál", "I. manuál – hlavní stroj", "II. manuál – žaluziový stroj"; stops noun first, e.g. "Flétna trubicová 8'", mixtures by ranks, e.g. "Mixtura 3řadá"), mapped from the Opus 910 console's Dutch labels (the mapping is commented in `src/organ.cpp`). `NameN` and `Groups` override them.
 
-**`[ORGAN]` keys** (all optional, defaults are the Johannus Opus 910; see `config.conf`): `StopsEnabled`, `Channel`, `ProgramOffset` (program = octal ST number + offset), `ST1`..`ST42`, `Program1`..`Program42` (override), `DropSongProgramChanges`, `AllOffSysex`, `AllOffDelayMs`, `StopDelayMs`, `Groups`, `Name1`..`Name42`.
+**`[ORGAN]` keys** (all optional, defaults are the Johannus Opus 910; see `config.conf`): `StopsEnabled`, `Channel`, `ProgramOffset` (program = octal ST number + offset), `ST1`..`ST42`, `Program1`..`Program42` (override), `DropSongProgramChanges`, `DefaultStops` (stop numbers for songs without a file, e.g. `1,5,12`; empty = such songs leave the organ alone; a file, even an empty one, wins; the log shows `default 1 5 12`), `AllOffSysex`, `AllOffDelayMs`, `StopDelayMs`, `Groups`, `Name1`..`Name42`.
 
 **API** (`Content-Type: application/json` required on PUT, else 415, so a plain cross-site form cannot post):
 
@@ -270,6 +270,7 @@ A new optional section in `config.conf`:
 # Port = 50118
 # IPv4 address to listen on; 0.0.0.0 = every interface (trusted LAN only).
 # Bind = 0.0.0.0
+# AllowedHosts =
 ```
 
 | Key | Default | Rules |
@@ -277,6 +278,9 @@ A new optional section in `config.conf`:
 | `Enabled` | `true` | boolean (`true/false/yes/no/on/off/1/0`) |
 | `Port` | `50118` | 1–65535, else the config fails to load |
 | `Bind` | `0.0.0.0` | non-empty; must be an IPv4 address. This is checked only when binding: an invalid value logs an ERROR and keeps retrying. |
+| `AllowedHosts` | empty | comma/space separated host names (no port) accepted in the `Host` header of a write besides IP addresses and `localhost`, e.g. the PC's hostname. |
+
+Writes (`PUT /api/stops/<code>`, `POST /api/firmware/<target>`, `POST /api/diag/ack`) are refused with 403 unless the `Host` header is an IP address, `localhost` or listed in `AllowedHosts`, and a browser `Origin` header, if present, names the same host and port. This stops a web page on another site (including a DNS-rebinding one) from changing anything through the status server; `curl` and the updater scripts send no `Origin` and pass. Acknowledging a fault is `POST /api/diag/ack` (body `id=<n>`); the old `GET /api/diag?ack=` is a 400. The page has no play, stop or organ controls, and the daemon has no play/record HTTP route.
 
 There is no login and no HTTPS, by design: the page is meant for a trusted LAN (its only write is the stops editor). Use `Bind = 127.0.0.1` to keep it local.
 
@@ -429,7 +433,7 @@ These came out of the review and are not fixed yet:
 The reviewer also flagged a few things it did not judge:
 - how robust the existing MIDI file parser is against crashing (as opposed to throwing) files, now that it runs every 60 s;
 - a pre-existing data race on `SerialPort::_failed`;
-- in the interactive standalone mode, Ctrl-C exits without cleanup, so the organ may stay on (pre-existing).
+- (fixed in B6) in the interactive standalone mode, Ctrl-C used to exit without cleanup; SIGINT, SIGTERM and SIGHUP now all end the prompt through the normal shutdown.
 
 ---
 

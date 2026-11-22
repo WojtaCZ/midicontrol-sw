@@ -47,7 +47,7 @@ Top to bottom: notices, panel "Systém", panel "Rejstříky písní" (`src/web_p
 - Row right side: "nenastaveno" (no file), "vše vypnuto" (file with empty list), or "N rejstřík/rejstříky/rejstříků" and the numbers under the code (screenshot: 406B has "6 rejstříků", numbers 1 2 3 17 18 19).
 - Empty list: "Žádná píseň neodpovídá výběru." (filter) or "Ve složce nejsou žádné písně." (`:1031`). Footer: "Zobrazeno X z Y" or "N písní" plus " · nastaveno N" (`:1035`).
 - Editor heading "Píseň <code>" (`:972`) or "Ve složce nejsou žádné písně" / "Rejstříky nenačteny" / "Načítám rejstříky…". Stop buttons are grouped under the group names (defaults: "Spojky a pomocná zařízení" 1-7, "Pedál" 8-16, "I. manuál – hlavní stroj" 17-29, "II. manuál – žaluziový stroj" 30-42; `src/organ.cpp:140`). Each button shows the number and name; a click toggles it; counter "N z M zapnuto" (`:978`).
-- State badge: "neuložené změny", "nenastaveno: varhany zůstanou, jak jsou", "uloženo", "uloženo: vše vypnuto".
+- State badge: "neuložené změny", "nenastaveno: varhany zůstanou, jak jsou" (with `[ORGAN] DefaultStops` set: "nenastaveno: výchozí registrace (<seznam>)", list row "výchozí"), "uloženo", "uloženo: vše vypnuto".
 - Buttons: "Uložit" (after a save shows "Uloženo" for 1.2 s), "Vše vypnout", "Zrušit nastavení" (title "Smaže uložený výběr: při spuštění písně se rejstříky nemění", `:1107-1117`).
 - Messages: "Ukládám…" (`:1055`), "Neuloženo: <reason>" (`:1063`), load error "Rejstříky se nepodařilo načíst: <reason> " with button "Zkusit znovu" (`:948-949`).
 - Confirm dialogs: "Zahodit neuložené změny písně <code>?" when switching song with edits (`:1046`); "Zrušit nastavení rejstříků písně <code>?" plus " Neuložené změny se také zahodí." and " Při spuštění této písně pak varhany zůstanou, jak jsou." (`:1114`). Closing or reloading the tab with unsaved edits triggers the browser's own warning (`:1198`).
@@ -89,7 +89,7 @@ Server-side checks and replies (`POST /api/firmware/<base|remote>`, `src/firmwar
 - The device checks the image again (bootloader). If the base update stops half way, the base stays in its USB bootloader (ABCD:1235); `status` then says "Base is in its USB bootloader (ABCD:1235): a firmware update did not finish; re-flash it with: update base <file>" (`src/console_exec.cpp:87`).
 
 ### 1.5 HTTP API (for the administrator)
-`GET /`, `GET /api/status`, `GET /api/diag?node=&level=&before=&limit=&ack=&kind=reset`, `GET /api/stops`, `PUT /api/stops/<code>` (JSON), `POST /api/firmware/<base|remote>` (`src/http.cpp:140-173`). Other methods: 405 with `Allow`. Request limits 8 KiB headers, 4 KiB body (firmware 512 KiB), 3 s per request, 60 s for firmware (`src/http.cpp:96-104`). `PUT /api/stops` errors: 400 (invalid code, code not among the songs, bad body), 500 (cannot save, text of the error) (`src/stops_file.cpp:335-349`).
+`GET /`, `GET /api/status`, `GET /api/diag?node=&level=&before=&limit=&kind=reset`, `GET /api/stops`, `PUT /api/stops/<code>` (JSON), `POST /api/firmware/<base|remote>`, `POST /api/diag/ack` (body `id=<n>`, "Mark seen") (`src/http.cpp`). Writes (PUT/POST) are refused with 403 unless the Host header is an IP address, `localhost` or in `[WEB] AllowedHosts`, and an Origin header, if sent, equals Host; there is no login. GET with `ack=` is 400. No play/stop/organ route exists. Other methods: 405 with `Allow`. Request limits 8 KiB headers, 4 KiB body (firmware 512 KiB), 3 s per request, 60 s for firmware (`src/http.cpp:96-104`). `PUT /api/stops` errors: 400 (invalid code, code not among the songs, bad body), 500 (cannot save, text of the error) (`src/stops_file.cpp:335-349`).
 The song folder is rescanned every 60 s (`src/web_server.cpp:28`); problems are written to the log as "song <file>: <problem>" (`:208-224`). Problem texts: "empty display anchor", "no display anchors", "file name is not a valid song code", "cannot parse: <reason>" (`src/songcheck.cpp:67-89`).
 
 ## 2. Player behaviour visible to the organist
@@ -164,6 +164,7 @@ Search order: `--config PATH`, `$MIDICONTROL_CONFIG`, `$XDG_CONFIG_HOME/midicont
 | WEB | Bind | 0.0.0.0 | IPv4 address to listen on | `:129` |
 | DIAG | LogPort | empty = auto-detect the "MIDIControl log" USB port | serial device of the base log | `:138` |
 | DIAG | Dir | `$XDG_STATE_HOME/midicontrol`, else `~/.local/state/midicontrol`, else `/tmp/midicontrol-<uid>/diag` | diagnostics store | `:139,183-190` |
+| ORGAN | DefaultStops | empty | stop numbers sent at the start of a song that has no `<CODE>.conf` (a file, even empty, wins) | `src/organ.cpp` |
 | ORGAN | StopsEnabled | true | master switch for per-song stops | `src/organ.cpp:163` |
 | ORGAN | Channel | 12 | MIDI channel 1-16 for Program Changes | `:164` |
 | ORGAN | ProgramOffset | -1 | stop number to program number offset, -127..127 | `:165` |
@@ -194,7 +195,7 @@ Example file in the repo: `config.conf` (the one in the project root) and `share
   - `status`: "connected=.. base_alive=.. playing=.." plus ` section="<label>"`, then "Base: BLE=.., relay=.., display=.., pc_alive=.." or "Base did not answer GET_STATUS".
   - `diag`: last fault per node and last 20 log lines; "Diagnostics are not available" (`:102`).
   - `update`: progress bar `[####    ] N%  (done/total)`, ends "Firmware update complete." or "Firmware update FAILED."; refusals "busy: ..." / "refused: ..." (`:162-175`); exception "firmware update: <what>".
-  - Headless messages: "Running headless; send SIGTERM or SIGINT to stop.", "Received signal N, shutting down.", "Done.". Log "Using config file <path>".
+  - Headless messages: "Running headless; send SIGTERM or SIGINT to stop." (SIGHUP, and in the interactive prompt SIGINT/SIGTERM/SIGHUP/"quit"/EOF, give the same shutdown), "Received signal N, shutting down.", "Done.". Log "Using config file <path>".
 - Diagnostics store: the base log USB port "MIDIControl log" is read by the PC; per node JSONL files (1 MiB x 3) and `diag-ack.json` in the diag folder; the remote's faults are polled every 10 s. Shown on Pokročilé > Diagnostics and via `/api/diag`. "Mark seen" writes the acknowledgement.
 - Base link: keepalive every 2 s; after 6 s without reply: log "Base is not answering keepalives (no reply for 6 s)." (`src/protocol/constants.hpp:49-50`, `src/comm.cpp:1007`). Messages are retried 3 times.
 
