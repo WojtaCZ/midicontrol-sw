@@ -182,3 +182,21 @@ TEST(song_list_offers_only_codes_play_can_find) {
     CHECK(list.size() == 1u && list[0] == "14A");
     fs::remove_all(dir);
 }
+
+TEST(b4_leading_zero_file_found_by_plain_code) {
+    fs::path dir = fs::temp_directory_path() / "mc_songs_test_b4";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::ofstream(dir / "0406.mid") << "x";
+    auto p = findSongFile(dir.string(), "406");
+    CHECK(p.has_value());
+    CHECK(endsWith(*p, "0406.mid"));
+    CHECK(findSongFile(dir.string(), "0406").has_value());
+    auto list = listSongs(dir.string());
+    CHECK_EQ(list.size(), 1u);
+    CHECK(list[0] == "406");
+    mc::songs::setNormalise(false);
+    CHECK_FALSE(findSongFile(dir.string(), "406").has_value());
+    mc::songs::setNormalise(true);
+    fs::remove_all(dir);
+}

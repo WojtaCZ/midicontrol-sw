@@ -493,6 +493,8 @@ function base(){
   items.push(mp==null?["grey","MIDI port unknown"]:(mp?["green","MIDI port"]:["yellow","No MIDI port"]));
   const op=f(n,"organ_power");  // the SSR as the base reports it (STATUS_RESP), whoever switched it
   items.push(op==null?["grey","Organ power unknown"]:op?["green","Organ power on"]:["grey","Organ power off"]);
+  if(f(n,"organ_idle_off_armed"))items.push(["grey","Idle-off armed"]);
+  if(f(n,"organ_power_fault"))items.push(["red","Organ power fault"]);
   if(hasInfo(n)&&f(n,"ble_secured")===false&&f(n,"ble_connected"))items.push(["yellow","BLE link not secured"]);
   if(f(n,"fw_dirty"))items.push(["yellow","Firmware with uncommitted changes"]);
   if(conn&&f(n,"status_answered")===false)items.push(["yellow","GET_STATUS not answered"]);
@@ -507,6 +509,8 @@ function base(){
     {label:"Serial port",value:f(n,"device")!=null?f(n,"device")+(f(n,"vidpid")?" · "+f(n,"vidpid"):""):null,mono:true},
     {label:"MIDI out",value:f(n,"midi_out"),mono:true},
     {label:"Last keepalive ACK",value:ago(f(n,"keepalive_ack_ms"))},
+    {label:"Organ power fault",value:f(n,"organ_power_fault")||"none"},
+    {label:"Idle power-off",value:f(n,"organ_idle_off_armed")?"armed (organ switches off after the idle time)":"not armed"},
     {label:"Connected since",value:(conn&&since!=null?stamp(since):"not connected")+" (reconnects: "+(f(n,"reconnects")||0)+")"},
     {label:"Base reports",value:reports},
     {label:"Church display",value:flag(f(n,"display"),"connected","not connected")}];
@@ -798,6 +802,7 @@ function notices(){
   if(f(b,"updating"))add(false,"Probíhá aktualizace firmwaru základny.","#adv/base");
   else if(!f(b,"connected"))add(false,"Základna není připojena. Zkontrolujte USB kabel mezi počítačem a základnou.","#adv/base");
   else if(f(b,"alive")===false)add(true,"Základna neodpovídá.","#adv/base");
+  if(f(b,"organ_power_fault"))add(true,"Varhany se nepodařilo vypnout ani po opakování. Zkontrolujte, zda jsou varhany vypnuté, a dejte vědět správci.","#adv/base");
   // A firmware fault resets the device; it recovers by itself, so the organist only needs to pass it on.
   if(data.nodes.base.unseen_faults>0)add(false,"Základna se po poruše firmwaru sama restartovala. Pokud vše hraje, stačí to říct správci.","#adv/diag");
   if(data.nodes.controller.unseen_faults>0)add(false,"Ovladač se po poruše firmwaru sám restartoval. Pokud vše hraje, stačí to říct správci.","#adv/diag");
@@ -858,7 +863,7 @@ function systemPanel(list){
   }
   const op=f("base","organ_power");
   const bs1=node("base","Základna",conn?bs.dot:"grey",bState,
-    fact("power",op==null?"Varhany: neznámo":op?"Varhany zapnuty":"Varhany vypnuty"),"#adv/base");
+    fact("power",op==null?"Varhany: neznámo":op?"Varhany zapnuty"+(f("base","organ_idle_off_armed")?" (časovač vypnutí běží)":""):"Varhany vypnuty"),"#adv/base");
   // Ovladač (seen through the base's report)
   const fresh=baseReportFresh(),ble=fresh&&f("base","status_ble");
   let cState=!conn||!fresh?"Stav neznámý":ble?"Připojen":"Nepřipojen";

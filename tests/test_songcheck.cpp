@@ -193,3 +193,20 @@ TEST(songcheck_warns_real_shifted_files) {
         CHECK(hasProblem(c, kWarnSongShifted));
     }
 }
+
+TEST(b4_leading_zero_and_duplicate_warned) {
+    const std::string dir = tempDir();
+    std::ofstream(dir + "/406.mid") << "x";
+    std::ofstream(dir + "/0406.mid") << "x";
+    Scanner sc;
+    auto r = sc.rescan(dir);
+    int dup = 0, zero = 0;
+    for (const auto& c : r.all)
+        for (const auto& p : c.problems) {
+            if (p.find("same song code") != std::string::npos) ++dup;
+            if (p.find("leading zeros") != std::string::npos) ++zero;
+        }
+    CHECK_EQ(dup, 2);
+    CHECK_EQ(zero, 1);
+    for (const auto& c : r.all) CHECK(c.code == "406");
+}

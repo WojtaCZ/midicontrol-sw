@@ -421,6 +421,7 @@ private:
     // thread re-checks and powers off.
     void armIdleOff();
     void disarmIdleOff();
+    void armIdleOffIfOn();  // B1
     void doIdleOff();
     std::atomic<int64_t> _idleOffArmedMs{-1};  // steady ms when armed, -1 = not armed
     std::atomic<bool> _idleOffQueued{false};

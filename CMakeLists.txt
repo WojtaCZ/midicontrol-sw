@@ -109,6 +109,9 @@ target_compile_definitions(midicontrol_tests
             MC_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
 add_test(NAME unit COMMAND midicontrol_tests)
 # Dev-repo check (needs git and tools/); absent in the Docker build stage, which copies only the sources.
+add_test(NAME service_unit_stop_timeout COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/service_unit_test.sh
+         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/midicontrol.service.in ${CMAKE_CURRENT_SOURCE_DIR}/docker/compose.template.yaml)
+
 find_program(MC_GIT git)
 if(MC_GIT AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/sync-system-doc.sh)
     add_test(NAME sync_system_doc COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/sync_system_doc_test.sh)

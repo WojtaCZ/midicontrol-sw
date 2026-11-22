@@ -50,3 +50,21 @@ TEST(pcw1_validator_is_shared) {
     CHECK(!mc::songs::validCode("2000"));
     CHECK(!mc::songs::validCode(""));
 }
+
+// B4 (Q2-15): leading zeros do not name another song.
+TEST(b4_normalize_code_table) {
+    using mc::songs::normalizeCode;
+    CHECK(normalizeCode("0406") == "406");
+    CHECK(normalizeCode("0406B") == "406B");
+    CHECK(normalizeCode("0000") == "0");
+    CHECK(normalizeCode("0") == "0");
+    CHECK(normalizeCode("12") == "12");
+    CHECK(normalizeCode("0406", false) == "0406");
+    CHECK(normalizeCode("ABC") == "ABC");
+    CHECK(sanitizeCode(std::string(" 0406 ")) == std::optional<std::string>("406"));
+    CHECK(sanitizeCode(std::string("0007a")) == std::optional<std::string>("7A"));
+    CHECK(!sanitizeCode(std::string("00001")).has_value());
+    mc::songs::setNormalise(false);
+    CHECK(sanitizeCode(std::string("0406")) == std::optional<std::string>("0406"));
+    mc::songs::setNormalise(true);
+}

@@ -15,6 +15,7 @@
 
 #include "midicontrol/comm.hpp"
 #include "midicontrol/config.hpp"
+#include "midicontrol/songs.hpp"
 #include "midicontrol/console.hpp"
 #include "midicontrol/console_exec.hpp"
 #include "midicontrol/control_socket.hpp"
@@ -228,6 +229,7 @@ int main(int argc, char** argv) {
         std::cerr << e.what() << "\n";
         return 1;
     }
+    mc::songs::setNormalise(config.songCodeNormalise);
 
     // In headless mode SIGINT/SIGTERM are taken synchronously by sigwait();
     // block them before any thread exists so every thread inherits the mask.

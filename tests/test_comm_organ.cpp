@@ -338,12 +338,20 @@ TEST(comm_pcc2_gives_up_loudly) {
     h.organOff();
     std::this_thread::sleep_for(32000ms);
     const int dropped = base.droppedOff.load();
-    const std::string fault = fieldText(reg, status::Node::Base, "organ_power_fault");
+ const std::string fault = fieldText(reg, status::Node::Base, "organ_power_fault");
+    bool armed = false;
+    {
+        auto snap = reg.snapshot();
+        auto it = snap.node(status::Node::Base).fields.find("organ_idle_off_armed");
+        if (it != snap.node(status::Node::Base).fields.end())
+            if (auto* b = std::get_if<bool>(&it->second)) armed = *b;
+    }
     h.shutdown();
     std::cout << "  dropped offs=" << dropped << " fault=\"" << fault << "\"\n";
     CHECK(dropped > 4);                   // re-sent after the first give-up
     CHECK(dropped <= 4 * 4 + 4);          // bounded (1 + 3 re-sends, 4 frames each; slack for shutdown)
     CHECK(!fault.empty());
+    CHECK(armed);                         // B1: still powered after the give-up: idle-off timer runs
 }
 
 // ---------------------------------------------------------------------------
@@ -1039,6 +1047,36 @@ TEST(comm_item2_stopped_supersedes_pending_anchor) {
     CHECK(playing);
     CHECK(stopAt < log.size());
     CHECK_EQ(countType(log, stopAt, MsgType::SIGNAL_ANCHOR), size_t(0));
+}
+
+// B5 (Q2-21a): with the remote not ACKing anchors, only the newest anchor is retried. After a newer anchor
+// is sent, the older one (old PacketId) never goes out again.
+TEST(comm_b5_newer_anchor_supersedes_pending_anchor) {
+    FakeBase base;
+    base.ble = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    statusNow(h);
+    base.dropAnchors = 1000;
+    const std::vector<uint8_t> a1{'A', '1', 0}, a2{'A', '2', 0};
+    h.sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_ANCHOR, a1);
+    std::this_thread::sleep_for(100ms);
+    h.sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_ANCHOR, a2);
+    const size_t mark = base.log().size();
+    std::this_thread::sleep_for(1800ms);              // retries of a pending anchor would go out here
+    auto log = base.log();
+    h.shutdown();
+    size_t old = 0, newest = 0;
+    for (size_t i = mark; i < log.size(); ++i) {
+        if (log[i].type != MsgType::SIGNAL_ANCHOR) continue;
+        if (log[i].payload == a1) ++old;
+        if (log[i].payload == a2) ++newest;
+    }
+    CHECK_EQ(old, size_t(0));
+    CHECK(newest >= size_t(1));                       // the newest is still retried
 }
 
 // Item 2 guard: the supersede is one-directional. A first SIGNAL_PLAYING lost on the air is still retried
@@ -2058,4 +2096,26 @@ TEST(comm_a7_resync_resends_signal_recording) {
         return cntTo(r.base.log(), m, MsgType::SIGNAL_RECORDING, ADDR_REMOTE) > 0;
     }, 10000));
     r.h->shutdown();
+}
+
+// B1: KeepPowerOn=true: after a Stop the organ stays on but the idle-off timer runs and switches it off.
+TEST(comm_b1_keep_power_on_arms_idle_off_after_stop) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = songConfig();
+    cfg.keepPowerOn = true;
+    cfg.organIdleOffMs = 2000;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(3000ms);
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] { return h.isPlaying(); }, 15000));
+    CHECK(!fieldBool(reg, status::Node::Base, "organ_idle_off_armed"));  // playing: not armed
+    const size_t offs0 = countSetV(base.log(), 0);  // the startup reset's off
+    h.stopSong();
+    CHECK(waitFor([&] { return fieldBool(reg, status::Node::Base, "organ_idle_off_armed"); }, 3000));
+    CHECK_EQ(countSetV(base.log(), 0), offs0);
+    CHECK(waitFor([&] { return countSetV(base.log(), 0) == offs0 + 1; }, 8000));
+    h.shutdown();
 }

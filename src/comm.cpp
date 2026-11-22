@@ -43,6 +43,7 @@ int supersedeGroup(MsgType t) {
         case MsgType::SIGNAL_RECORDING:
         case MsgType::SIGNAL_STOPPED: return 2;       // remote's playing/recording/stopped state
         case MsgType::SIGNAL_INFO: return 3;          // A6: remote's song/system flags; independent of group 2
+        case MsgType::SIGNAL_ANCHOR: return 4;        // B5 (Q2-21a): only the newest section/verse anchor is retried
         default: return 0;
     }
 }
@@ -452,7 +453,7 @@ uint8_t CommHandler::sendWithAckImpl(uint8_t dest, MsgType type, const std::vect
         const int group = supersedeGroup(type);
         if (group != 0) {
             for (auto it = _pending.begin(); it != _pending.end();) {
-                // Item 2: a state signal (group 2) also drops a pending SIGNAL_ANCHOR, whose section belongs
+                // B5: a newer ANCHOR (group 4) drops older pending ANCHORs. Item 2: a state signal (group 2) also drops a pending SIGNAL_ANCHOR, whose section belongs
                 // to the old state. One-directional: an ANCHOR supersedes nothing (a lost PLAYING must still
                 // be retried after the anchor that follows it).
                 const bool staleAnchor = group == 2 && it->second.msgType == MsgType::SIGNAL_ANCHOR;
@@ -1388,6 +1389,7 @@ void CommHandler::reconcileOrgan(bool relay, uint64_t statusGen) {
         _status.set(Node::Base, "organ_power_fault", text);
         if (relay) {
             mc::log::error(Node::Base, text);
+            armIdleOffIfOn();  // B1: still powered after the give-up: the idle timer must run
         } else {
             mc::log::warn(Node::Base, text);
         }
@@ -1608,7 +1610,9 @@ void CommHandler::controlLoop() {
                 if (recordingActive()) {
                     stopRecorder();
                     signalRecordingEnded(true);
-                    if (!_config.keepPowerOn && !isPlaying()) organOff();
+                    if (!isPlaying()) {
+                        if (!_config.keepPowerOn) organOff(); else armIdleOffIfOn();
+                    }
                 }
                 break;
             case Command::Kind::Finished:
@@ -1739,6 +1743,11 @@ void CommHandler::armIdleOff() {
     _status.set(Node::Base, "organ_idle_off_armed", true);
 }
 
+// B1: an organ the PC knows is on never stays on without a running idle-off timer.
+void CommHandler::armIdleOffIfOn() {
+    if (_organOn.load() && _idleOffArmedMs.load() < 0) armIdleOff();
+}
+
 void CommHandler::disarmIdleOff() {
     if (_idleOffArmedMs.exchange(-1) >= 0) _status.set(Node::Base, "organ_idle_off_armed", false);
 }
@@ -1821,7 +1830,7 @@ void CommHandler::doPlay(const Command& cmd) {
         playbackEnded("failed: " + why, nullptr);
         displayClear();
         sendRemoteSignal(MsgType::SIGNAL_STOPPED);
-        if (!_config.keepPowerOn) organOff();
+        if (!_config.keepPowerOn) organOff(); else armIdleOffIfOn();
     };
 
     // The song's stops (<CODE>.conf is read here, never through the web server's store).
@@ -1898,7 +1907,7 @@ void CommHandler::finishPlayback() {
     if (!releasePlayer()) return;  // already stopped by a Stop that raced the end
     displayClear();
     sendRemoteSignal(MsgType::SIGNAL_STOPPED);
-    if (!_config.keepPowerOn) organOff();
+    if (!_config.keepPowerOn) organOff(); else armIdleOffIfOn();
     playbackEnded("ended normally", "songs_ended");
     mc::log::info(Node::Software, "Playback finished" +
                                       std::string(_config.keepPowerOn ? "." : ", organ power off."));
@@ -1911,7 +1920,7 @@ void CommHandler::doStop(bool signal) {
     // A7: the end of a recording is signalled to the base too; the remote gets one STOPPED either way below.
     signalRecordingEnded(false);
     if (signal) sendRemoteSignal(MsgType::SIGNAL_STOPPED);
-    if (!_config.keepPowerOn) organOff();
+    if (!_config.keepPowerOn) organOff(); else armIdleOffIfOn();
     if (wasPlaying) {
         playbackEnded("stopped", "songs_stopped");
         mc::log::info(Node::Software, "Playback stopped.");

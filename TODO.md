@@ -33,6 +33,7 @@ Source: audit/OWNER-ANSWERS.md; plan: plans/2026-11-16-owner-answers-impl.md. Wo
 Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re-grep the symbol. Czech OLED strings have no diacritics.
 
 ### B1 Idle-off timer after fault give-up and after a KeepPowerOn song end (Q2-1)
+- DONE 2026-11-22: armIdleOffIfOn() after KeepPowerOn song end/Stop/failed start/record stop and after an off give-up with relay on; tests comm_b1_*, comm_pcc2_*. Manual console on still arms nothing (open question).
 - Goal: an organ the PC knows is on never stays on without an armed idle-off timer.
 - Current code: `armIdleOff()`/`disarmIdleOff()`/`doIdleOff()` at src/comm.cpp ~1457-1483. `armIdleOff` is called only by the startup reset (~1446) and by recordSong (~1213, only if already armed). `reconcileOrgan()` (~1130-1170) gives up with `_organFault` after kOrganReassertMax and does not arm. `finishPlayback()` (~1609), `doStop()` (~1620) and the doPlay fail lambda (~1544) only call `organOff()` when `!keepPowerOn`; with KeepPowerOn=true nothing arms. doPlay disarms at ~1517, `setOrganLocked()` (~1114) disarms.
 - Change: add helper `armIdleOffIfOn()` (arms when `_organOn` and not armed). Call it (a) in `reconcileOrgan()` on give-up when the base reports relay on, (b) in finishPlayback/doStop/doPlay-fail when keepPowerOn is true and the organ is on. Keep the keepalive check (~1011-1015) as is.
@@ -42,6 +43,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: VERIFY: should a manual console `on` or an adopted base-menu "on" also arm (outside Q2-1; ask the owner, FAULTS question 12 is related). Recording warm-up cancel (Stop during warm-up) leaves the organ on with no timer; the same helper covers it.
 
 ### B2 TimeoutStopSec and shutdown waits for a running update (Q2-4)
+- DONE 2026-11-22: unit TimeoutStopSec=300 (compose already 300s); wait in main.cpp is unbounded (waitForUpload joins); check tests/service_unit_test.sh. Bench: stop during remote update pending.
 - Goal: a service stop or reboot never kills an update in progress (remote update measured 152 s, base 13 s, docs/FAULTS.md:82).
 - Current code: packaging/midicontrol.service.in has no TimeoutStopSec (systemd default 90 s). src/main.cpp ~276-281: `control.stop()`, `web->stop()`, `exec.waitForUpload()`, then `handler.shutdown()`; ControlServer::stop (src/control_socket.cpp:77-87) waits for client commands, so a running update finishes.
 - Change: add `TimeoutStopSec=180` to the [Service] section (>= 180 s as owner said; VERIFY: 180 s is 18% over the 152 s measured; 300 s matches the manual's "up to 5 minutes" and is safer). Keep the wait in main.cpp. Make sure the wait is not bounded by a shorter internal timeout (VERIFY in exec.waitForUpload). Update docs/status-web-and-service.md:404 (mentions 90 s).
@@ -51,6 +53,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: SIGKILL after the timeout still kills a hung update; the bootloader recovery stays the fallback.
 
 ### B3 `organIdleOffMs` config key; web shows organ_power_fault and idle-off armed (Q2-7)
+- DONE 2026-11-22: [PLAYBACK] OrganIdleOffMs (ms >= 1000; 0 rejected, no disable), chip + Czech notice + Advanced rows for idle-off armed / organ_power_fault; tests config_organ_idle_off_ms, web_page_shows_*.
 - Goal: the idle limit is configurable and the status page shows the organ power fault and an armed idle-off.
 - Current code: include/midicontrol/config.hpp:35 `int64_t organIdleOffMs = 30LL*60*1000;` ("not a config.conf key yet"). [PLAYBACK] keys parsed in src/config.cpp ~99-114 (WarmupMs, KeepPowerOn, VerseGapMs). Status registry sets `organ_power`, `organ_power_fault`, `organ_idle_off_armed` on Node::Base. The web page does not show the last two: src/web_page.cpp base() summary ~478-498, home-view `notices()` ~793-810, overview fields ~859.
 - Change: parse `[PLAYBACK] OrganIdleOffMs` (milliseconds, same style as WarmupMs; VERIFY: 0 = idle-off disabled, and reject negative values like the other keys). Add it to config.conf with a comment. Web: a chip "idle-off armed" and a Czech notice for `organ_power_fault` on the home view (text without diacritics only on OLEDs; the web page may use diacritics), plus both fields in the English Pokrocile overview.
@@ -60,6 +63,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: keep the config key name stable once documented; unit in ms vs minutes is an owner style choice (ms matches the neighbours).
 
 ### B4 Song code normalisation, configurable (Q2-15)
+- DONE 2026-11-22: song codes ignore leading zeros (songs::normalizeCode, [FILES] SongCodeNormalise default true); 0406.mid plays as 406, songcheck warns about leading zeros and duplicates
 - Goal: "0406", "406" and " 406 " mean the same song; leading zeros are stripped by default; configurable.
 - Current code: src/songs.cpp `validCode` (1-4 digits, value <= 1999, optional A-D suffix), `sanitizeCode` (trim + upper-case, keeps leading zeros, so "0", "0000", "0406" are valid), `findSongFile` (case-insensitive stem match), `listSongs` (`code == upper(stem)`). Call sites: src/dispatch.cpp:86, src/comm.cpp:1069/1074/1101 (playSong is the single place), src/stops_file.cpp:113/338, src/songcheck.cpp:84, src/display.cpp:97, src/web_server.cpp:168/172.
 - Change: add `normalizeCode(code, bool stripZeros)` in songs.cpp ("0" and "0000" become "0"; keep suffix: "0406b" -> "406B"). Config key (proposed `[FILES] SongCodeNormalise=true`; VERIFY the section name). Apply in CommHandler::playSong, in the stops-file lookups, and on the stem side in findSongFile/listSongs (so a file 0406.mid is still found as 406). songcheck warns on a leading-zero file name and on duplicates after normalisation (406.mid + 0406.mid). Display (display.cpp:97) shows the normalised code, right-aligned (see E1 M-short-codes).
@@ -69,6 +73,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: VERIFY: whether "0" (all zeros) must stay valid; with strip enabled it is song 0. VERIFY: stops file names `<CODE>.conf` follow the same rule (406B.conf vs 0406B.conf). Existing files with leading zeros keep working only if the stem side is normalised too.
 
 ### B5 A newer SIGNAL_ANCHOR supersedes an older pending one (Q2-21a, Q-W2-1)
+- DONE 2026-11-22: SIGNAL_ANCHOR is its own supersede group 4: a newer anchor drops older pending ones (add-verse has no PC queue, so supersede is at anchor level)
 - Goal: while the remote is slow, only the newest section/verse anchor is retried; no stale anchor after a newer one. (The part of Q2-21 on the base skipping a repeated PacketId is base work, see midicontrol-fw/TODO.md.)
 - Current code: src/comm.cpp `supersedeGroup()` (~37-46) has groups 1 (SET_CURRENT) and 2 (PLAYING/RECORDING/STOPPED); SIGNAL_ANCHOR is group 0. The supersede loop is in sendWithAckImpl (~395-430): a group-2 signal already drops a pending ANCHOR (`staleAnchor`, Item 2, test `comm_item2_stopped_supersedes_pending_anchor`, tests/test_comm_organ.cpp:880). `sendRemoteSignalLocked` (~447) keeps `_lastAnchor` (the newest one, used by the resync at ~502).
 - Change: give SIGNAL_ANCHOR its own group 3 (same destination only), so a new ANCHOR erases older pending ANCHORs. Keep ANCHOR superseding nothing in group 2 (a lost PLAYING must still be retried; guard test `comm_item2_anchor_does_not_supersede_playing`). VERIFY: the add-verse request itself (`CommHandler::addVerse`/`requestAddVerse`, comm.cpp:1046/1085, PlaybackEngine::addVerse playback.cpp:131) has no pending queue on the PC; "newer add-verse supersedes older pending" is implemented at the anchor level here; confirm the owner meant that.

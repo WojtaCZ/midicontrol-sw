@@ -103,7 +103,7 @@ std::optional<std::string> findFile(const std::string& playFolder, const std::st
         if (!entry.is_regular_file(ec2)) continue;
         const fs::path& p = entry.path();
         if (upper(p.extension().string()) != upper(kExtension)) continue;
-        if (upper(p.stem().string()) == code) return p.string();
+        if (mc::songs::normalizeCode(upper(p.stem().string()), mc::songs::normalising()) == code) return p.string();
     }
     return std::nullopt;
 }

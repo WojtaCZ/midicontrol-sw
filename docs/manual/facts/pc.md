@@ -131,7 +131,7 @@ The organist normally controls the player from the remote (separate facts file);
 - Remote: SIGNAL_PLAYING (payload = song code) before the first SIGNAL_ANCHOR; SIGNAL_ANCHOR payload = ASCII section label ("Predehra" for the intro, "Sloka N" for verse N, with " +k" for pending repeats); SIGNAL_STOPPED at the end (`src/comm.cpp:1515-1632`, `src/playback.cpp:57-61`).
 
 ### 2.6 Organ power
-- Switched on by play (and record); off at the end of the song unless `KeepPowerOn`. Idle power-off after **30 min**: hard-coded in `include/midicontrol/config.hpp:35` (not a config key; SYS-ORG-05 gap). Deferred while a song plays or a recording runs. Console `on` / `off` switch the organ manually.
+- Switched on by play (and record); off at the end of the song unless `KeepPowerOn`. Idle power-off after **30 min**, config key `[PLAYBACK] OrganIdleOffMs` (ms, integer >= 1000, B3; 0 is rejected: no 'never' setting). Deferred while a song plays or a recording runs. The timer is also armed after a song end, Stop or failed start with `KeepPowerOn = true`, and when an organ-off command gave up with the relay still on (B1), so an organ the PC knows is on never stays on without it. Console `on` / `off` switch the organ manually.
 - Start-up log lines: "Startup: organ power off", "Startup: MIDI output port not found; no All Notes Off.", "Startup: organ found switched on; left on, idle power-off in <time>.", "Organ idle for <time>: power off." (`src/comm.cpp:1441-1484`).
 
 ## 3. Administration
@@ -156,6 +156,8 @@ Search order: `--config PATH`, `$MIDICONTROL_CONFIG`, `$XDG_CONFIG_HOME/midicont
 | BINDINGS | (any) | unused | parsed, reserved | `include/midicontrol/config.hpp:18` |
 | PLAYBACK | WarmupMs | 3000 | wait after switching the organ on, integer >= 0 | `src/config.cpp:112` |
 | PLAYBACK | KeepPowerOn | false | leave the organ on after a song | `:113` |
+| FILES | SongCodeNormalise | true | leading zeros ignored: 0406 = 406 (B4) | `src/config.cpp` |
+| PLAYBACK | OrganIdleOffMs | 1800000 | idle power-off time, ms, integer >= 1000 | `src/config.cpp` |
 | PLAYBACK | VerseGapMs | 0 | pause before a repeated verse, >= 0 | `:114` |
 | WEB | Enabled | true | web server on/off | `:120` |
 | WEB | Port | 50118 | 1-65535 | `:123` |
@@ -227,7 +229,7 @@ Caveats: the controller is "Nepřipojen" (fake base has no remote), firmware "no
 2. Recording starts from the base menu `Nahraj` (A7); the manual describes this. The base shows no recording state yet (TODO C3), so the manual says so.
 3. Pause/resume (SYS-USE-09/21): pause behaves as stop and resume does not exist. What should the manual say?
 4. Default registration for songs without a `.conf` (SYS-USE-20): not implemented; confirm "organ stays as it is" is the text for the manual.
-5. Idle power-off 30 min is fixed in code (SYS-ORG-05). Say "30 minutes" in the manual?
+5. Idle power-off is 30 min by default, `OrganIdleOffMs` (B3). Status page: chip "Idle-off armed", Czech notice for `organ_power_fault`.
 6. SYSTEM.md lines 360-520 were not re-read in this pass; status of remaining PC-side requirements there is unverified.
 7. Backups: does the owner want a recommended procedure or a script?
 8. Docker deployment: when is it merged? The admin chapter must not describe it as available now.
