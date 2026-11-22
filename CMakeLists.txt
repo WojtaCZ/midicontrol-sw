@@ -97,6 +97,7 @@ add_executable(midicontrol_tests
     tests/test_diag_poller.cpp
     tests/test_diag_api.cpp
     tests/test_stall_monitor.cpp
+    tests/test_playback_guard.cpp
     tests/test_startup_reset.cpp
     tests/test_recording.cpp
     tests/test_songcode.cpp

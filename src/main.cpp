@@ -24,6 +24,8 @@
 #include "midicontrol/log.hpp"
 #include "midicontrol/log_reader.hpp"
 #include "midicontrol/midi_ports.hpp"
+#include "midicontrol/playback_guard.hpp"
+#include "midicontrol/player.hpp"
 #include "midicontrol/sd_notify.hpp"
 #include "midicontrol/serial_port.hpp"
 #include "midicontrol/stall_monitor.hpp"
@@ -83,6 +85,10 @@ void interactive(ConsoleExecutor& exec) {
 // leads to a restart; the web thread is deliberately not part of the check.
 // With `exitOnStall` (containers, no systemd) the process instead exits with 70
 // once the check has failed continuously for 30 s.
+// B13: the playback thread is checked every 0.5 s on its own lock-free heartbeat. A song whose
+// thread has not beaten for 2 s gets All Notes Off + All Sound Off on all 16 channels through a
+// fresh MIDI output (at most 1 s wait), then, with `exitOnStall`, an immediate exit 70 (the restart
+// sends notes-off again). Without it the ping is withheld, so systemd restarts it after WatchdogSec.
 class Watchdog {
 public:
     // `extraAlive`: more heartbeats that must show progress (the base log reader thread).
@@ -99,17 +105,44 @@ public:
     }
 
 private:
+    static void rawLog(const char* msg, size_t len) {
+        // Raw write(2): the logger takes locks a stalled thread may hold.
+        const ssize_t wr = ::write(STDERR_FILENO, msg, len);
+        (void)wr;
+    }
+
     void loop() {
+        using namespace std::chrono;
         bool stalled = false;
-        StallMonitor monitor(std::chrono::seconds(30));
+        StallMonitor monitor(seconds(30));
+        PlaybackStallGuard playGuard(2000);
+        auto nextThreadCheck = steady_clock::now() + seconds(5);
         std::unique_lock<std::mutex> lk(_mutex);
-        while (!_cv.wait_for(lk, std::chrono::seconds(5), [&] { return _stop; })) {
-            const bool alive = _handler.threadsAlive(std::chrono::seconds(10)) && (!_extraAlive || _extraAlive());
-            if (_exitOnStall && monitor.shouldExit(alive, std::chrono::steady_clock::now())) {
-                // Raw write(2): the logger takes locks a stalled thread may hold.
+        while (!_cv.wait_for(lk, milliseconds(500), [&] { return _stop; })) {
+            const int64_t playAge = _handler.playbackHeartbeatAgeMs();
+            if (playGuard.shouldSilence(playAge)) {
+                static const char m1[] = "midicontrol: the playback thread stalled for 2 s; sending All Notes Off\n";
+                rawLog(m1, sizeof m1 - 1);
+                const bool sent = emergencyNotesOff(_handler.playbackPort(), seconds(1));
+                if (!sent) {
+                    static const char m2[] = "midicontrol: All Notes Off did not complete within 1 s\n";
+                    rawLog(m2, sizeof m2 - 1);
+                }
+                if (_exitOnStall) {
+                    static const char m3[] = "midicontrol: exiting for a restart (playback stall)\n";
+                    rawLog(m3, sizeof m3 - 1);
+                    std::_Exit(70);
+                }
+            }
+
+            const auto now = steady_clock::now();
+            if (now < nextThreadCheck) continue;
+            nextThreadCheck = now + seconds(5);
+            const bool alive = _handler.threadsAlive(seconds(10)) && (!_extraAlive || _extraAlive()) &&
+                               !playGuard.stalled(playAge);
+            if (_exitOnStall && monitor.shouldExit(alive, now)) {
                 static const char msg[] = "midicontrol: a worker thread stalled for 30 s; exiting for a restart\n";
-                const ssize_t wr = ::write(STDERR_FILENO, msg, sizeof msg - 1);
-                (void)wr;
+                rawLog(msg, sizeof msg - 1);
                 std::_Exit(70);
             }
             if (alive) {
@@ -118,8 +151,7 @@ private:
             } else if (!stalled) {
                 stalled = true;
                 static const char msg[] = "midicontrol: a worker thread stalled; withholding the watchdog ping\n";
-                const ssize_t wr = ::write(STDERR_FILENO, msg, sizeof msg - 1);  // not the logger: its locks may be held
-                (void)wr;
+                rawLog(msg, sizeof msg - 1);
             }
         }
     }

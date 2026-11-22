@@ -31,7 +31,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/midicontrol            # in a terminal: attaches to the running service, else runs standalone
 ./build/midicontrol --headless # service mode (implied when stdin is not a TTY); stops on SIGINT/SIGTERM
-./build/midicontrol --headless --exit-on-stall  # container mode: exit 70 on a stalled worker thread (env MIDICONTROL_EXIT_ON_STALL=1; off when NOTIFY_SOCKET is set)
+./build/midicontrol --headless --exit-on-stall  # container mode: exit 70 on a stalled worker thread (env MIDICONTROL_EXIT_ON_STALL=1; off when NOTIFY_SOCKET is set); a playback thread stalled 2 s gets All Notes Off first, then exit 70 (B13)
 ./build/midicontrol --cmd "update base fw-update.bin"  # one command (service or standalone), exit 0 = ok
 ./build/midicontrol_tests      # run unit tests (no hardware required)
 ctest --test-dir build         # same tests via CTest

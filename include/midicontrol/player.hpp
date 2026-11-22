@@ -2,6 +2,7 @@
 #define MIDICONTROL_PLAYER_HPP
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
@@ -10,6 +11,7 @@
 
 #include "midicontrol/display.hpp"
 #include "midicontrol/playback.hpp"
+#include "midicontrol/playback_guard.hpp"
 
 class RtMidiOut;
 
@@ -28,6 +30,11 @@ namespace mc {
 bool sendMidiMessages(int outPortIndex, const std::vector<std::vector<uint8_t>>& messages,
                       std::string* err);
 
+// B13: All Notes Off + All Sound Off on all 16 channels through a fresh output on `outPortIndex`, sent from a
+// helper thread; waits at most `budget` (the MIDI stack may hang with the stalled player). Lock-free for the
+// caller apart from thread creation. True when the messages went out in time.
+bool emergencyNotesOff(int outPortIndex, std::chrono::milliseconds budget);
+
 class Player {
 public:
     // Where the MIDI bytes go instead of an RtMidi port (tests: no real port is ever opened).
@@ -44,6 +51,9 @@ public:
     // onAnchor): whether the song has sections (verse markers). A6.
     std::function<void(bool)> onSections;
     std::function<void()> onFinished;  // natural end only (not after stop())
+    // B13: beaten by the playback thread while the song runs, stopped when it ends. Set before play();
+    // must outlive the player.
+    PlaybackHeartbeat* heartbeat = nullptr;
 
     // Load `filepath` and start playing it in a background thread. Throws on a
     // parse error or when the MIDI port cannot be opened.

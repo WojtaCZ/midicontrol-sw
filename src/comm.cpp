@@ -1849,6 +1849,8 @@ void CommHandler::doPlay(const Command& cmd) {
     }
 
     auto player = std::make_unique<Player>(ports->outIndex, _midiSinkForTest);
+    player->heartbeat = &_playbackHb;
+    _playbackPort.store(ports->outIndex);
     const uint64_t gen = ++_generation;
     player->onDisplay = [this](const mc::display::Update& u) {
         _displaySet.store(!u.clear);

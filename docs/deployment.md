@@ -113,7 +113,7 @@ Setting `UPDATE_ENABLED=0` only matters while `IMAGE_TAG` stays `stable` or `edg
 
 ## Stall detection
 
-The player started by the container runs with `--exit-on-stall` (env `MIDICONTROL_EXIT_ON_STALL=1` does the same; it is ignored when `NOTIFY_SOCKET` is set, i.e. under systemd, which has its own watchdog). When a worker thread stops making progress the player exits with status **70** and `restart: always` brings it back. Detection takes up to about 45 s after the last good heartbeat.
+The player started by the container runs with `--exit-on-stall` (env `MIDICONTROL_EXIT_ON_STALL=1` does the same; it is ignored when `NOTIFY_SOCKET` is set, i.e. under systemd, which has its own watchdog). When a worker thread stops making progress the player exits with status **70** and `restart: always` brings it back. Detection takes up to about 45 s after the last good heartbeat. The playback thread is watched more closely: if it stops for 2 s while a song plays, the player first sends All Notes Off and All Sound Off on all 16 channels and then exits with 70 at once, so a hung song is silent within about 3 s (log line `the playback thread stalled for 2 s`).
 
 ## Uninstall
 

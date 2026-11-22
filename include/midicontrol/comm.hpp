@@ -111,6 +111,10 @@ public:
     std::vector<std::string> songList() const;
 
     bool isPlaying() const;
+    // B13, lock-free (watchdog): age of the playback heartbeat in ms (-1 = no song running) and the MIDI
+    // output port index of the current song (-1 = none yet).
+    int64_t playbackHeartbeatAgeMs() const { return _playbackHb.ageMs(PlaybackHeartbeat::nowMs()); }
+    int playbackPort() const { return _playbackPort.load(); }
     std::string sectionLabel() const;
     bool isConnected() const;
     // Protocol version the node reported in its INFO_RESP (PROTO_VER); 1 while unknown or when the node does not send it.
@@ -384,6 +388,8 @@ private:
     // guards the pointer for readers on other threads.
     mutable std::mutex _playerMutex;
     std::unique_ptr<Player> _player;
+    PlaybackHeartbeat _playbackHb;      // B13: outlives every player (declared before it is used, never reset)
+    std::atomic<int> _playbackPort{-1};
     uint64_t _generation = 0;  // control thread only
     std::atomic<bool> _organOn{false};
     // PCC-2: the organ state the PC last commanded and not yet confirmed by an authoritative STATUS_RESP.
