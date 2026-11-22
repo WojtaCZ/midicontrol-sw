@@ -13,7 +13,6 @@ Per-song stops are implemented (stops editor on the home page, one `<CODE>.conf`
 - Program numbers: press ST01 and ST60 with a MIDI monitor on the organ's OUT; adjust `ProgramOffset` or `ProgramN`.
 - The all-off SysEx works and 100 ms after it is enough.
 - Bench: the stops arrive before the first note.
-- Move `songs/rejstriky.mid` out of the play folder. OWNER QUESTION (audit Q-US-5 / Q-PC-1): not moved yet. The tracked recording has an invalid song-code name, so the test `songcheck_real_files` fails until it is moved or renamed.
 
 ## Organ power behaviour between songs
 
@@ -113,6 +112,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: VERIFY: whether the default also applies on a song whose file exists but is empty (today "all off"): owner said "without a stop file" only. All-off SysEx plus power-cycling is a separate bench question.
 
 ### B9 Fix the rejstriky.mid test data (Q3-2)
+- DONE 2026-11-22: `git mv songs/rejstriky.mid docs/examples/rejstriky.mid` (organ stop-list reference recording, not a song); the special case in `songcheck_real_files` is removed, so every .mid in songs/ must be clean. The docs example name in the song-check table stays valid as a bad-name example.
 - Goal: `songcheck_real_files` passes.
 - Current code: songs/rejstriky.mid is a tracked recording with an invalid song-code name; the test `songcheck_real_files` (tests/test_songcheck.cpp) fails only on it (FAULTS/step 2 baseline 299/300). The existing TODO "Move `songs/rejstriky.mid` out of the play folder" (top of this file) is the same item.
 - Change: owner says fix the test/data: `git mv songs/rejstriky.mid` to a non-play location (VERIFY: `docs/examples/` or a `recordings/` folder, and that nothing references the path: grep tests/ docs/). Alternatively rename it to a valid code if it is meant to be playable (owner to say). Then remove the open TODO line at the top.
