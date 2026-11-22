@@ -35,7 +35,8 @@ public:
     // `diag` (optional) serves GET /api/diag; `firmware` (optional) enables POST /api/firmware/<target>.
     WebServer(mc::status::StatusRegistry& status, std::string bind, int port,
               std::string playFolder, const mc::organ::OrganConfig& organ,
-              mc::diag::DiagStore* diag = nullptr, mc::fwupload::Start firmware = nullptr);
+              mc::diag::DiagStore* diag = nullptr, mc::fwupload::Start firmware = nullptr,
+              std::vector<std::string> allowedHosts = {});
     ~WebServer();
 
     WebServer(const WebServer&) = delete;
@@ -66,6 +67,7 @@ private:
     mc::organ::OrganConfig _organ;
     mc::stops::Store _stops;  // owned here; doPlay reads the song's .conf itself, never through this
     mc::diag::DiagStore* _diag;
+    std::vector<std::string> _allowedHosts;  // B7: extra Host names accepted on writes
     mc::fwupload::Start _firmware;
     mc::songcheck::Scanner _scanner;
     int _listenFd = -1;

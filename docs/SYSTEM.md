@@ -273,7 +273,7 @@ power policy and serves a status web page.
 | SYS-WEB-02 | "Prehled" (Czech): health, now playing, stops; "Pokrocile" (English): debug | implemented, not bench-verified | PC web_page |
 | SYS-WEB-03 | Controller dot green only if STATUS_RESP <= 15 s old | implemented, not bench-verified | PC status |
 | SYS-WEB-04 | Stops editor writes `<CODE>.conf` | implemented, not bench-verified | PC stops_file |
-| SYS-WEB-05 | No authentication, no Host check: accepted. Assumption: the church LAN is trusted; page stays open (D4) | implemented | PC http.cpp |
+| SYS-WEB-05 | No authentication; the church LAN is trusted and the page stays open (D4). Writes (stops, firmware, fault ack) are POST/PUT only and refused (403) unless Host is an IP address, localhost or in `[WEB] AllowedHosts` and any Origin matches Host (CSRF / DNS rebinding, Q2-25, B7). No play/stop/organ controls on the page | implemented | PC http.cpp, diag_api.cpp |
 
 ### 4.13 Recording (new group, D6, D9)
 

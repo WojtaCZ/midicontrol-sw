@@ -125,6 +125,7 @@ TEST(api_diag_rejects_bad_parameters) {
     CHECK(!apiDiag(s, "before=abc").has_value());
     CHECK(!apiDiag(s, "limit=-1").has_value());
     CHECK(!apiDiag(s, "ack=").has_value());
+    CHECK(!apiDiag(s, "ack=1").has_value());  // B7: a GET never acknowledges
 }
 
 TEST(api_diag_ack_clears_unseen_faults_and_calls_back) {
@@ -134,8 +135,13 @@ TEST(api_diag_ack_clears_unseen_faults_and_calls_back) {
     uint64_t id = s.append(mk("remote", 'E', "f2", true));
     CHECK_EQ(s.unseenFaults("base"), size_t(1));
     int called = 0;
-    auto r = apiDiag(s, "ack=" + std::to_string(id), [&] { ++called; });
-    CHECK(r.has_value());
+    CHECK(!apiDiag(s, "ack=" + std::to_string(id)).has_value());
+    CHECK_EQ(s.unseenFaults("remote"), size_t(1));  // GET ack changed nothing
+    CHECK(!apiDiagAck(s, "id=abc", [&] { ++called; }));
+    CHECK(!apiDiagAck(s, "", [&] { ++called; }));
+    CHECK(!apiDiagAck(s, "id=1&x=2", [&] { ++called; }));
+    CHECK_EQ(called, 0);
+    CHECK(apiDiagAck(s, "id=" + std::to_string(id), [&] { ++called; }));
     CHECK_EQ(called, 1);
     CHECK_EQ(s.unseenFaults("base"), size_t(1));  // acknowledged per node: the base fault stays unseen
     CHECK_EQ(s.unseenFaults("remote"), size_t(0));
@@ -161,7 +167,7 @@ TEST(status_json_has_last_fault_unseen_and_amber_dot_until_ack) {
     CHECK(has(j1, "\"last_fault\":{\"id\":" + std::to_string(id)));
     CHECK(has(j1, "\"kind\":\"HARDFAULT\""));
 
-    apiDiag(s, "ack=" + std::to_string(id), [&] { publishFaultStatus(s, reg); });
+    apiDiagAck(s, "id=" + std::to_string(id), [&] { publishFaultStatus(s, reg); });
     auto j2 = mc::status::toJson(reg.snapshot());
     CHECK(has(j2, "\"base\":{\"dot\":\"green\""));
     CHECK(has(j2, "\"unseen_faults\":0"));
@@ -186,7 +192,7 @@ TEST(http_route_diag) {
     req.query = "bad";
     CHECK_EQ(route(req, "<html>", status, diag).status, 400);
     CHECK_EQ(route(Request{"GET", "/api/diag", "", "", ""}, "<html>", status).status, 404);  // no diag handler
-    CHECK_EQ(route(Request{"POST", "/api/diag", "", "", ""}, "<html>", status, diag).status, 405);
+    CHECK_EQ(route(Request{"POST", "/api/diag", "", "", "", "127.0.0.1:50118"}, "<html>", status, diag).status, 405);
 }
 
 TEST(console_diag_text_last_fault_per_node_and_last_20_lines) {

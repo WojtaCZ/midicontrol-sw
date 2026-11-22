@@ -581,7 +581,7 @@ function faultTable(name,node,fl,unseen){
   if(fl&&unseen>0){
     aside=el("span");
     const b=el("button","btn sm","Mark seen");
-    b.onclick=async()=>{b.disabled=true;try{await fetch("/api/diag?limit=1&ack="+fl.id,{cache:"no-store"});}catch(e){}pollOnce();};
+    b.onclick=async()=>{b.disabled=true;try{await fetch("/api/diag/ack",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"id="+fl.id,cache:"no-store"});}catch(e){}pollOnce();};
     aside.append(el("span","badge warn","unseen"),b);aside.style.display="contents";
   }
   if(!fl)return panel(name+": last fault",el("div","pb empty","no fault recorded"));

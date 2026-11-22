@@ -126,7 +126,11 @@ TEST(port_select_env_sysfs_and_dev_root) {
 TEST(port_select_env_bootloader_probe) {
     FakeSys bl;
     bl.usbTty("1-1", "ttyACM0", "abcd", "1235", "00", "");
-    CHECK(!mc::baseInBootloader());
+    {
+        FakeSys empty;  // never probe the real /sys: a bench base may be in its bootloader right now
+        EnvGuard e("MIDICONTROL_SYSFS_ROOT", empty.root);
+        CHECK(!mc::baseInBootloader());
+    }
     EnvGuard a("MIDICONTROL_SYSFS_ROOT", bl.root);
     CHECK(mc::baseInBootloader());
 }

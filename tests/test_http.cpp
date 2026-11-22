@@ -7,7 +7,7 @@ using namespace mc::http;
 
 namespace {
 Response get(const std::string& path, const std::string& method = "GET") {
-    return route(Request{method, path, "", "", ""}, "<html>", [] { return std::string("{\"a\":1}"); });
+    return route(Request{method, path, "", "", "", "127.0.0.1:1"}, "<html>", [] { return std::string("{\"a\":1}"); });
 }
 }  // namespace
 
@@ -86,16 +86,16 @@ TEST(http_route_stops) {
     CHECK_EQ(r.status, 200);
     CHECK_EQ(r.contentType, "application/json");
     CHECK_EQ(r.body, "{\"stops\":[]}");
-    r = call(Request{"PUT", "/api/stops/401", "", "application/json", "{\"a\":1}"}, &api);
+    r = call(Request{"PUT", "/api/stops/401", "", "application/json", "{\"a\":1}", "127.0.0.1:50118"}, &api);
     CHECK_EQ(r.status, 200);
     CHECK_EQ(gotCode, "401");
     CHECK_EQ(gotBody, "{\"a\":1}");
     gotCode.clear();
-    CHECK_EQ(call(Request{"PUT", "/api/stops/401", "", "text/plain", "x"}, &api).status, 415);
+    CHECK_EQ(call(Request{"PUT", "/api/stops/401", "", "text/plain", "x", "127.0.0.1:50118"}, &api).status, 415);
     CHECK_EQ(gotCode, "");
-    CHECK_EQ(call(Request{"PUT", "/api/status", "", "application/json", "{}"}, &api).status, 405);
-    CHECK_EQ(call(Request{"PUT", "/api/stops/401", "", "application/json", "{}"}, nullptr).status, 404);
-    CHECK_EQ(call(Request{"POST", "/", "", "", ""}, &api).status, 405);
+    CHECK_EQ(call(Request{"PUT", "/api/status", "", "application/json", "{}", "127.0.0.1:50118"}, &api).status, 405);
+    CHECK_EQ(call(Request{"PUT", "/api/stops/401", "", "application/json", "{}", "127.0.0.1:50118"}, nullptr).status, 404);
+    CHECK_EQ(call(Request{"POST", "/", "", "", "", "127.0.0.1:50118"}, &api).status, 405);
 }
 
 TEST(http_parse_firmware_upload_limit) {
@@ -142,20 +142,20 @@ TEST(http_route_firmware) {
     auto call = [&](const Request& r, const FirmwareApi* fw) {
         return route(r, "<html>", [] { return std::string("{}"); }, nullptr, nullptr, fw);
     };
-    auto r = call(Request{"POST", "/api/firmware/base", "", "application/octet-stream", "img"}, &api);
+    auto r = call(Request{"POST", "/api/firmware/base", "", "application/octet-stream", "img", "127.0.0.1:50118"}, &api);
     CHECK_EQ(r.status, 202);
     CHECK_EQ(gotTarget, "base");
     CHECK_EQ(gotBody, "img");
     gotTarget.clear();
     // A cross-site form can only send form/text types: refused before the handler runs.
-    CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "multipart/form-data; boundary=x", "img"}, &api).status, 415);
-    CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "text/plain", "img"}, &api).status, 415);
+    CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "multipart/form-data; boundary=x", "img", "127.0.0.1:50118"}, &api).status, 415);
+    CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "text/plain", "img", "127.0.0.1:50118"}, &api).status, 415);
     CHECK_EQ(gotTarget, "");
-    CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "application/octet-stream", "img"}, nullptr).status, 404);
+    CHECK_EQ(call(Request{"POST", "/api/firmware/base", "", "application/octet-stream", "img", "127.0.0.1:50118"}, nullptr).status, 404);
     CHECK_EQ(call(Request{"GET", "/api/firmware/base", "", "", ""}, &api).status, 405);
-    CHECK_EQ(call(Request{"PUT", "/api/firmware/remote", "", "application/octet-stream", "img"}, &api).status, 405);
-    CHECK_EQ(call(Request{"POST", "/api/firmware", "", "application/octet-stream", "img"}, &api).status, 404);
-    CHECK_EQ(call(Request{"POST", "/api/status", "", "application/octet-stream", ""}, &api).status, 405);
+    CHECK_EQ(call(Request{"PUT", "/api/firmware/remote", "", "application/octet-stream", "img", "127.0.0.1:50118"}, &api).status, 405);
+    CHECK_EQ(call(Request{"POST", "/api/firmware", "", "application/octet-stream", "img", "127.0.0.1:50118"}, &api).status, 404);
+    CHECK_EQ(call(Request{"POST", "/api/status", "", "application/octet-stream", "", "127.0.0.1:50118"}, &api).status, 405);
 }
 
 TEST(http_405_carries_allow) {
@@ -175,9 +175,9 @@ TEST(http_405_carries_allow) {
     CHECK(serialize(r).find("\r\nAllow: POST\r\n") != std::string::npos);
     CHECK_EQ(call(Request{"DELETE", "/api/firmware", "", "", ""}).allow, "POST");
     CHECK_EQ(call(Request{"GET", "/api/firmware/base", "", "", ""}).allow, "POST");
-    CHECK_EQ(call(Request{"POST", "/api/stops/401", "", "application/json", "{}"}).allow, "PUT");
-    CHECK_EQ(call(Request{"POST", "/api/status", "", "", ""}).allow, "GET");
-    CHECK_EQ(call(Request{"PUT", "/", "", "application/json", "{}"}).allow, "GET");
+    CHECK_EQ(call(Request{"POST", "/api/stops/401", "", "application/json", "{}", "127.0.0.1:50118"}).allow, "PUT");
+    CHECK_EQ(call(Request{"POST", "/api/status", "", "", "", "127.0.0.1:50118"}).allow, "GET");
+    CHECK_EQ(call(Request{"PUT", "/", "", "application/json", "{}", "127.0.0.1:50118"}).allow, "GET");
     // Not a 405: no Allow header.
     auto ok = call(Request{"GET", "/api/status", "", "", ""});
     CHECK_EQ(ok.allow, "");
@@ -196,4 +196,83 @@ TEST(http_serialize) {
     CHECK_EQ(e.body, "404 Not Found\n");
     CHECK(serialize(errorResponse(415)).rfind("HTTP/1.1 415 Unsupported Media Type\r\n", 0) == 0);
     CHECK(serialize(errorResponse(413)).rfind("HTTP/1.1 413 Payload Too Large\r\n", 0) == 0);
+}
+
+namespace {
+Request wr(const std::string& method, const std::string& path, const std::string& host, const std::string& origin = "") {
+    Request r;
+    r.method = method;
+    r.path = path;
+    r.contentType = "application/json";
+    r.host = host;
+    r.origin = origin;
+    return r;
+}
+}  // namespace
+
+TEST(http_b7_parse_reads_host_and_origin) {
+    Request req;
+    CHECK(parseRequest("POST /api/diag/ack HTTP/1.1\r\nHost: 192.168.1.5:50118\r\nOrigin: http://Evil.example\r\n"
+                       "Content-Length: 0\r\n\r\n", req) == ParseResult::Ok);
+    CHECK_EQ(req.host, "192.168.1.5:50118");
+    CHECK_EQ(req.origin, "http://evil.example");
+}
+
+TEST(http_b7_write_host_and_origin_check) {
+    const std::vector<std::string> none;
+    CHECK(writeAllowed(wr("GET", "/", "evil.example"), none));  // reads are not checked
+    CHECK(writeAllowed(wr("PUT", "/x", "192.168.1.5:50118"), none));       // IP literal, no Origin (curl)
+    CHECK(writeAllowed(wr("POST", "/x", "localhost:50118"), none));
+    CHECK(writeAllowed(wr("POST", "/x", "[::1]:50118"), none));
+    CHECK(writeAllowed(wr("PUT", "/x", "192.168.1.5:50118", "http://192.168.1.5:50118"), none));
+    CHECK(!writeAllowed(wr("PUT", "/x", "192.168.1.5:50118", "http://evil.example"), none));    // foreign Origin
+    CHECK(!writeAllowed(wr("PUT", "/x", "192.168.1.5:50118", "http://192.168.1.5:1"), none));   // other port
+    CHECK(!writeAllowed(wr("PUT", "/x", "192.168.1.5:50118", "null"), none));
+    CHECK(!writeAllowed(wr("POST", "/x", "attacker.example:50118"), none));         // DNS rebinding name
+    CHECK(!writeAllowed(wr("POST", "/x", "1.2.3.example"), none));
+    CHECK(!writeAllowed(wr("POST", "/x", ""), none));                               // no Host
+    CHECK(writeAllowed(wr("POST", "/x", "organ-pc:50118", "http://organ-pc:50118"), {"organ-pc"}));
+    CHECK(!writeAllowed(wr("POST", "/x", "organ-pc:50118"), none));
+}
+
+TEST(http_b7_route_refuses_foreign_writes_and_acks_by_post) {
+    StopsApi api;
+    api.put = [](const std::string&, const std::string&) { return Response{200, "application/json", "{}"}; };
+    FirmwareApi fw;
+    fw.post = [](const std::string&, const std::string&) { return Response{202, "application/json", "{}"}; };
+    std::string acked;
+    Extras ex;
+    ex.diagAck = [&](const std::string& b) { acked = b; return b.rfind("id=", 0) == 0; };
+    auto run = [&](Request r) { return route(r, "<html>", [] { return std::string("{}"); }, nullptr, &api, &fw, &ex); };
+
+    CHECK_EQ(run(wr("PUT", "/api/stops/401", "10.0.0.2:50118", "http://10.0.0.2:50118")).status, 200);
+    CHECK_EQ(run(wr("PUT", "/api/stops/401", "10.0.0.2:50118", "http://evil.example")).status, 403);
+    Request f = wr("POST", "/api/firmware/base", "10.0.0.2:50118", "http://evil.example");
+    f.contentType = "application/octet-stream";
+    CHECK_EQ(run(f).status, 403);
+    f.origin = "";
+    CHECK_EQ(run(f).status, 202);
+
+    Request a = wr("POST", "/api/diag/ack", "10.0.0.2:50118", "http://10.0.0.2:50118");
+    a.contentType = "application/x-www-form-urlencoded";
+    a.body = "id=7";
+    CHECK_EQ(run(a).status, 200);
+    CHECK_EQ(acked, "id=7");
+    a.body = "junk";
+    CHECK_EQ(run(a).status, 400);
+    a.origin = "http://evil.example";
+    a.body = "id=8";
+    acked.clear();
+    CHECK_EQ(run(a).status, 403);
+    CHECK(acked.empty());
+    a.origin = "";
+    a.method = "GET";
+    Response g = run(a);
+    CHECK_EQ(g.status, 405);
+    CHECK_EQ(g.allow, "POST");
+    // no ack handler wired: 404
+    CHECK_EQ(route(wr("POST", "/api/diag/ack", "10.0.0.2"), "", [] { return std::string(); }).status, 404);
+    // no play / record / organ routes exist
+    for (const char* p : {"/api/play", "/api/record", "/api/stop", "/api/organ"})
+        CHECK_EQ(run(wr("POST", p, "10.0.0.2")).status, 405);
 }

@@ -38,7 +38,8 @@ TEST(web_page_has_diagnostics_tab) {
     const std::string& html = mc::web::statusPageHtml();
     CHECK(has(html, "Diagnostics"));
     CHECK(has(html, "/api/diag"));
-    CHECK(has(html, "ack="));          // "mark seen"
+    CHECK(has(html, "/api/diag/ack")); // "mark seen" is a POST (B7)
+    CHECK(!has(html, "&ack="));
     CHECK(has(html, "last_fault"));    // per-node last fault comes from /api/status
     CHECK(has(html, "0x1FF"));         // interrupted exception = xpsr & 0x1FF
     CHECK(has(html, "BFARVALID"));     // BFAR/MMFAR only when valid
@@ -123,4 +124,13 @@ TEST(web_page_shows_organ_power_fault_and_idle_off) {
     CHECK(has(html, "Idle-off armed"));
     CHECK(has(html, "Organ power fault"));
     CHECK(has(html, "časovač vypnutí"));
+}
+
+// Owner rule 2026-11-22: the page has no play/stop/organ controls and the daemon no play/record route.
+TEST(web_page_has_no_play_controls) {
+    const std::string& html = mc::web::statusPageHtml();
+    CHECK(!has(html, "/api/play"));
+    CHECK(!has(html, "/api/record"));
+    CHECK(!has(html, "/api/stop\""));
+    CHECK(!has(html, "/api/organ"));
 }

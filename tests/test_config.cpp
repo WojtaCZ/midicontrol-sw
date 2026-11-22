@@ -205,3 +205,12 @@ TEST(config_song_code_normalise) {
     CHECK(parseConfig("[FILES]\nPlayFolder = /a\nRecordFolder = /b\nSongCodeNormalise = true\n").songCodeNormalise);
     CHECK_THROWS(parseConfig("[FILES]\nPlayFolder = /a\nRecordFolder = /b\nSongCodeNormalise = maybe\n"));
 }
+
+// B7: [WEB] AllowedHosts.
+TEST(config_b7_web_allowed_hosts) {
+    CHECK(parseConfig("[FILES]\nPlayFolder=/tmp/p\nRecordFolder=/tmp/r\n").webAllowedHosts.empty());
+    Config c = parseConfig("[FILES]\nPlayFolder=/tmp/p\nRecordFolder=/tmp/r\n[WEB]\nAllowedHosts = Organ-PC, organ.local\n");
+    CHECK_EQ(c.webAllowedHosts.size(), size_t(2));
+    CHECK_EQ(c.webAllowedHosts[0], "organ-pc");
+    CHECK_EQ(c.webAllowedHosts[1], "organ.local");
+}

@@ -323,7 +323,8 @@ int main(int argc, char** argv) {
     if (config.webEnabled) {
         web = std::make_unique<WebServer>(status, config.webBind, config.webPort, config.playFolder,
                                               config.organ, &diagStore,
-                                              [&exec](mc::fwupload::Accepted a) { return exec.startUpload(std::move(a)); });
+                                              [&exec](mc::fwupload::Accepted a) { return exec.startUpload(std::move(a)); },
+                                              config.webAllowedHosts);
         web->start();
     }
     ControlServer control(
