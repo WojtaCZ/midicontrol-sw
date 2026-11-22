@@ -1049,6 +1049,36 @@ TEST(comm_item2_stopped_supersedes_pending_anchor) {
     CHECK_EQ(countType(log, stopAt, MsgType::SIGNAL_ANCHOR), size_t(0));
 }
 
+// B5 (Q2-21a): with the remote not ACKing anchors, only the newest anchor is retried. After a newer anchor
+// is sent, the older one (old PacketId) never goes out again.
+TEST(comm_b5_newer_anchor_supersedes_pending_anchor) {
+    FakeBase base;
+    base.ble = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    statusNow(h);
+    base.dropAnchors = 1000;
+    const std::vector<uint8_t> a1{'A', '1', 0}, a2{'A', '2', 0};
+    h.sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_ANCHOR, a1);
+    std::this_thread::sleep_for(100ms);
+    h.sendWithAck(ADDR_REMOTE, MsgType::SIGNAL_ANCHOR, a2);
+    const size_t mark = base.log().size();
+    std::this_thread::sleep_for(1800ms);              // retries of a pending anchor would go out here
+    auto log = base.log();
+    h.shutdown();
+    size_t old = 0, newest = 0;
+    for (size_t i = mark; i < log.size(); ++i) {
+        if (log[i].type != MsgType::SIGNAL_ANCHOR) continue;
+        if (log[i].payload == a1) ++old;
+        if (log[i].payload == a2) ++newest;
+    }
+    CHECK_EQ(old, size_t(0));
+    CHECK(newest >= size_t(1));                       // the newest is still retried
+}
+
 // Item 2 guard: the supersede is one-directional. A first SIGNAL_PLAYING lost on the air is still retried
 // after the SIGNAL_ANCHOR that follows it (ANCHOR supersedes nothing).
 TEST(comm_item2_anchor_does_not_supersede_playing) {

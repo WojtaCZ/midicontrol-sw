@@ -43,6 +43,7 @@ int supersedeGroup(MsgType t) {
         case MsgType::SIGNAL_RECORDING:
         case MsgType::SIGNAL_STOPPED: return 2;       // remote's playing/recording/stopped state
         case MsgType::SIGNAL_INFO: return 3;          // A6: remote's song/system flags; independent of group 2
+        case MsgType::SIGNAL_ANCHOR: return 4;        // B5 (Q2-21a): only the newest section/verse anchor is retried
         default: return 0;
     }
 }
@@ -452,7 +453,7 @@ uint8_t CommHandler::sendWithAckImpl(uint8_t dest, MsgType type, const std::vect
         const int group = supersedeGroup(type);
         if (group != 0) {
             for (auto it = _pending.begin(); it != _pending.end();) {
-                // Item 2: a state signal (group 2) also drops a pending SIGNAL_ANCHOR, whose section belongs
+                // B5: a newer ANCHOR (group 4) drops older pending ANCHORs. Item 2: a state signal (group 2) also drops a pending SIGNAL_ANCHOR, whose section belongs
                 // to the old state. One-directional: an ANCHOR supersedes nothing (a lost PLAYING must still
                 // be retried after the anchor that follows it).
                 const bool staleAnchor = group == 2 && it->second.msgType == MsgType::SIGNAL_ANCHOR;
