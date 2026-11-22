@@ -225,7 +225,7 @@ power policy and serves a status web page.
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
 | SYS-IDLE-01 | Remote powers off after 20 min without a key press ("Necinnost: vypnuti") | implemented, not bench-verified | timer never fired on the bench |
-| SYS-IDLE-02 | Remote idle clock suspended while playing, during OTA, on USB power | implemented, not bench-verified | remote; during OTA the idle clock is reset by every FW packet (link.cpp:167 `Power::touch()`), not suspended (P-TG-2). Pending (step 2, 74ed6d4, 83fb028): playing counts only while the PC is alive (link up and no PC-loss report), so after a drop without reconnect the auto-off still runs (RF-12, Q-D-16) |
+| SYS-IDLE-02 | Remote idle clock suspended while playing, during OTA; the idle auto-off is disabled on USB power (the 5 s hold still works, SYS-BAT-04) | implemented, not bench-verified | remote; during OTA the idle clock is reset by every FW packet (link.cpp:167 `Power::touch()`), not suspended (P-TG-2). Pending (step 2, 74ed6d4, 83fb028): playing counts only while the PC is alive (link up and no PC-loss report), so after a drop without reconnect the auto-off still runs (RF-12, Q-D-16) |
 | SYS-IDLE-03 | Remote power: easy wins only (OLED sleep, WFI, BLE module/peripheral sleep where trivial); no stop-mode redesign required (D17) | partial | OLED sleep + WFI done; BLE module / peripheral sleep not reviewed |
 | SYS-IDLE-04 | Base: OLED sleep after 30 s. Organ backstop: if the SSR is on and no valid packet has come from the PC for 2 h, the base sends All Notes Off and switches the SSR off; any received PC packet restarts the 2 h (Q1-1 c, 2026-11-14). Organ idle-off with a PC present is the PC's (SYS-ORG-05) | implemented, not bench-verified | OLED sleep: implemented. Backstop: base `routercore::SsrBackstop` (step 2, 976f788), tests Backstop.*. With the 2 s KEEPALIVE it acts only when the PC is absent. Pending: switching the SSR on also restarts the 2 h; hand playing with no PC is cut after 2 h (Q-D-3) |
 
@@ -235,8 +235,8 @@ power policy and serves a status web page.
 |---|---|---|---|
 | SYS-BAT-01 | 2P NCR18650B (~7 Ah); BQ24195 charge 2048 mA, term 256 mA, 12 h timer; input limit from Type-C Rp / D+D- | implemented, not bench-verified | confirmed by the owner (D28); the pack may change later |
 | SYS-BAT-02 | SOC: 47 ms samples, trimmed mean, EMA, hysteresis; 4180 mV = 100 %, 3300 mV = 0 % | implemented | remote logic/battery_soc |
-| SYS-BAT-03 | Critical: 5 consecutive 1 s means < 3300 mV -> "Slaba baterie", shutdown, diag slot saved | implemented, not bench-verified | remote battery.cpp |
-| SYS-BAT-04 | Remote cannot switch off or read its button while USB is plugged in | implemented | by hardware |
+| SYS-BAT-03 | Warning at 15 % (re-arms at 20 %, never on USB): 5 s "Slaba baterie" splash, Enter/Back dismiss it (D2). Critical: 5 consecutive 1 s means < 3300 mV -> "Slaba baterie", shutdown, diag slot saved. An invalid measurement (no ADC samples, ADC init failure, 3 s empty) shows "Chyba mereni" with no percentage and no critical shutdown (D1) | implemented, not bench-verified | remote battery.cpp, logic/low_warning, logic/battery_validity |
+| SYS-BAT-04 | On USB only the idle auto-off is disabled; the 5 s ON/OFF hold still powers the remote off (owner 2026-11-22, bench 7.6). The charger watchdog is kept off: a REG05 mismatch is rewritten and logged as CHARGER_FAULT arg 0x200\|REG05 (D4) | implemented | remote battery.cpp, bq24195.cpp |
 | SYS-BAT-05 | Battery % on the status page | implemented | PC status |
 
 ### 4.10 Firmware update
@@ -279,7 +279,7 @@ power policy and serves a status web page.
 
 | ID | Expected behaviour | Status vs code | Where / note |
 |---|---|---|---|
-| SYS-REC-01 | Recording is started and stopped **from the base only** (menu); the remote has no recording control. PC confirms with SIGNAL_RECORDING; base (and remote, display only) show "recording" (D29) | partial | base menu "Nahraj" exists; RECORD_SONG / SIGNAL_RECORDING "reserved" in PROTOCOL.md |
+| SYS-REC-01 | Recording is started and stopped **from the base only** (menu); the remote has no recording control and no record menu entry (D9). PC confirms with SIGNAL_RECORDING; base and remote show "recording" (remote: info screen "Nahravani", D10; unknown state "Stav neznamy", D7) | partial | base menu "Nahraj" exists; RECORD_SONG / SIGNAL_RECORDING "reserved" in PROTOCOL.md |
 | SYS-REC-02 | PC records the organ's MIDI from DIN (via base USB-MIDI in) into a new song file in the song store | partial | PC `record` spawns arecordmidi (comm.cpp:887); DIN-in path never verified |
 | SYS-REC-03 | Every indicator-bus frame seen during recording (from the base or any manual controller) is written into the file at its time position as the same embedded display SysEx the player parses today | NOT IMPLEMENTED (gap) | base echoes bus frames as SysEx to USB; PC does not merge them into the file |
 | SYS-REC-04 | A recorded file plays back like any other song: sections from the recorded anchors, songcheck-clean | NOT IMPLEMENTED (gap) | depends on SYS-REC-03 |
@@ -470,7 +470,7 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | Predehra | Prelude |
 | Sloka n / Sloka n +k | Verse n / verse n replayed k extra times (PC label; the OLEDs show "Sloka: n" / "Sloka: n (xk)", "Predehra (xk)") |
 | Necinnost: vypnuti | Inactivity: switching off |
-| Slaba baterie | Weak battery; on the remote OLED shown only at the 3300 mV cut-off under "Vypnuti" (the web says "slabá" for the 3450 mV warning, "vybitá" for cut-off; Q-TG-6) |
+| Slaba baterie | Weak battery; on the remote OLED shown as a 5 s warning splash at 15 % (D2) and at the 3300 mV cut-off under "Vypnuti" (the web says "slabá" for the 3450 mV warning, "vybitá" for cut-off; Q-TG-6) |
 | Instalace | Installing (OTA copy) |
 | Ano / Ne / Zpet | Yes / No / Back |
 | Prehled / Pokrocile | Overview / Advanced (web tabs; the page shows "Přehled" / "Pokročilé", web text uses diacritics) |
