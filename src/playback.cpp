@@ -245,8 +245,11 @@ PlaybackEngine::Result PlaybackEngine::run(Timebase& tb) {
         // Replay the current section from its anchor; the indicator is left as
         // it is, so the verse number stays the same.
         allNotesOff();
+        // Pass time of the section end that waitUntil just reached.
+        double passEnd = endTime - offset;
         if (_opts.gapSeconds > 0.0) {
-            tb.startPass();
+            tb.continuePass(passEnd);
+            passEnd = _opts.gapSeconds;
             if (!tb.waitUntil(_opts.gapSeconds) || _stop.load()) {
                 result = Result::Stopped;
                 break;
@@ -255,7 +258,7 @@ PlaybackEngine::Result PlaybackEngine::run(Timebase& tb) {
         announce();
         idx = _sections[sec].firstEvent;
         offset = _sections[sec].startSeconds;
-        tb.startPass();
+        tb.continuePass(passEnd);
     }
 
     allNotesOff();

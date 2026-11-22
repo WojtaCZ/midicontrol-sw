@@ -134,7 +134,7 @@ The play folder is scanned at start and rescanned every 60 s on the web thread, 
 | Problem text | Meaning |
 |---|---|
 | `cannot parse: <reason>` | the MIDI file reader rejected it |
-| `empty display anchor` | an empty SysEx (`F0 F7`), or one with the MIDIControl header that doesn't decode, before the first note (e.g. `523.mid`) |
+| `empty display anchor` | an empty SysEx (`F0 F7`), or one with the MIDIControl header that doesn't decode, before the first note (`523.mid` had one until 2026-11-22; the broken original is kept as the test fixture `tests/data/empty-anchor-523.mid`) |
 | `no display anchors` | no display SysEx with a verse field at all (not repeated when an empty anchor was already reported) |
 | `file name is not a valid song code` | the name without `.mid` is not a song code: 1-4 digits, value <= 1999, optional A-D (e.g. `072 - Lide muj.mid`, `2000.mid`, `rejstriky.mid`) |
 
@@ -150,8 +150,8 @@ The play folder is scanned at start and rescanned every 60 s on the web thread, 
                "events":[{"t":1792432422052,"level":"INFO","text":"Playing 406A: 3 sections"}]},
    "base":{"dot":"yellow","fields":{"connected":false},"counters":{"tx":51},"events":[]},
    "controller":{"dot":"grey","fields":{},"counters":{},"events":[]}},
- "problems":[{"t":1792432422052,"level":"WARN","node":"software","text":"song 523.mid: empty display anchor"}],
- "songs":[{"code":"401","problem":""},{"code":"523","problem":"empty display anchor"}]}
+ "problems":[{"t":1792432422052,"level":"WARN","node":"software","text":"song 999.mid: empty display anchor"}],
+ "songs":[{"code":"401","problem":""},{"code":"999","problem":"empty display anchor"}]}
 ```
 
 - Each node object also carries `last_fault` (the newest decoded fault of that node, `null` if none) and `unseen_faults` (count not yet acknowledged with **Mark seen**); both are written for every node. They drive the yellow dot and the home page notice.
@@ -436,7 +436,7 @@ The reviewer also flagged a few things it did not judge:
 ## Bench checklist (not run yet)
 
 1. Build on the church PC with RtMidi. Make sure the brainstorm companion server isn't running (port 50118).
-2. Run `midicontrol --headless`, or the service. Open `http://<pc>:50118/` and play a song from the remote. Watch the counters and events on each tab; Problems should show the `523` song warning.
+2. Run `midicontrol --headless`, or the service. Open `http://<pc>:50118/` and play a song from the remote. Watch the counters and events on each tab; Problems should show the song warnings of the shipped files (`512`/`513` shifted display digits, `rejstriky`); `523.mid` is fine since its anchor was repaired.
 3. Unplug the base: Base should go yellow "waiting" and Controller grey. Replug: Base goes green and `reconnects` goes up by 1.
 4. Under systemd, run `kill -STOP <pid>`. The service should restart within about 30 s (`journalctl --user -u midicontrol`), and the page should show "no connection" in the meantime.
 5. Hold the port before starting, e.g. `nc -l 50118`. Expect one ERROR, retries every 10 s, and normal playback. Stop `nc` and the page comes up.

@@ -8,6 +8,8 @@
 | bench | (scripts in `bench/`, not pytest) | base + remote on SWD (openocd, STLINK-V3 + ST-LINK/V2), base USB, PC build | `bench/latency.py`, `bench/scenarios.py`, see below |
 | burn-in | (script) | bench, 4-8 h | `bench/burnin.py`, then `bench/criteria.py <rundir>` |
 
+`test_virtual_timing.py` (virtual) measures WHEN notes leave the daemon (click-track song, error p50/p99/max, drift, chord spread, repeat seam; idle run with limits, plus a CPU-loaded measurement run). Run with `-s` to see the numbers; `SYSTEST_TIMING_OUT=<file>` appends them as JSON lines.
+
 Setup: `uv venv .venv && uv pip install pytest pyserial` (set `UV_CACHE_DIR` if the default cache is not writable).
 
 ## How the virtual tier works

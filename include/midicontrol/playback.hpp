@@ -60,6 +60,10 @@ class Timebase {
 public:
     virtual ~Timebase() = default;
     virtual void startPass() = 0;
+    // Start the next pass at the moment `seconds` after the current pass
+    // start (the time the engine last waited for), not at "now", so a late
+    // wake-up does not shift every later note. Default: startPass().
+    virtual void continuePass(double seconds) { (void)seconds; startPass(); }
     // Block until `seconds` after startPass(). Return false to abort playback.
     virtual bool waitUntil(double seconds) = 0;
 };

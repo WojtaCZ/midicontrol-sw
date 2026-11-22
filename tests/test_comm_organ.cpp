@@ -1673,9 +1673,13 @@ TEST(comm_a8_play_refused_busy_during_update) {
 
 // ---- A6: SIGNAL_INFO [flags], SONG_HAS_SECTIONS ----
 namespace {
+// song "empty-anchor-523.mid" is the old broken 523.mid (tests/data), installed as 523.mid.
 Config infoConfig(const char* song) {
     Config c = songConfig();
-    std::filesystem::copy_file(std::filesystem::path(MC_SONGS_DIR) / song, std::filesystem::path(c.playFolder) / song,
+    const bool fixture = std::string(song) == "empty-anchor-523.mid";
+    std::filesystem::copy_file(fixture ? std::filesystem::path(MC_TESTDATA_DIR) / song
+                                       : std::filesystem::path(MC_SONGS_DIR) / song,
+                               std::filesystem::path(c.playFolder) / (fixture ? "523.mid" : song),
                                std::filesystem::copy_options::overwrite_existing);
     return c;
 }
@@ -1722,7 +1726,7 @@ TEST(comm_a6_signal_info_sections_after_playing_before_anchor) {
 TEST(comm_a6_signal_info_no_sections_is_zero) {
     FakeBase base;
     status::StatusRegistry reg([] { return int64_t(0); });
-    Config cfg = infoConfig("523.mid");
+    Config cfg = infoConfig("empty-anchor-523.mid");
     CommHandler h(cfg, [] { return fakePorts(); }, reg);
     h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
     CHECK(h.connect(base.path()));
@@ -1744,7 +1748,7 @@ TEST(comm_a6_signal_info_no_sections_is_zero) {
 TEST(comm_a6_resync_resends_signal_info) {
     FakeBase base;
     status::StatusRegistry reg([] { return int64_t(0); });
-    Config cfg = infoConfig("523.mid");
+    Config cfg = infoConfig("empty-anchor-523.mid");
     CommHandler h(cfg, [] { return fakePorts(); }, reg);
     h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
     CHECK(h.connect(base.path()));

@@ -22,6 +22,16 @@ public:
 
     void startPass() override { _start = clock::now(); }
 
+    // Keep the time grid across a repeat. If the intended moment is already
+    // far behind (the thread was stalled), restart from now instead of
+    // rushing the next notes out to catch up.
+    void continuePass(double seconds) override {
+        const auto planned =
+            _start + std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(seconds));
+        const auto now = clock::now();
+        _start = (now - planned > std::chrono::milliseconds(20)) ? now : planned;
+    }
+
     bool waitUntil(double seconds) override {
         const auto target =
             _start + std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(seconds));

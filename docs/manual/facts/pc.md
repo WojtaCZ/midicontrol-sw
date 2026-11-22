@@ -29,7 +29,7 @@ Top to bottom: notices, panel "Systém", panel "Rejstříky písní" (`src/web_p
 | (base restarted itself after a firmware fault; text at `:801-803`, read it there before quoting) | base reports a fault restart | see code |
 | Baterie ovladače je vybitá. Nabijte ho. | controller battery critical (`:804`) | red |
 | Baterie ovladače je slabá. Nabijte ho. | battery low: at most 15 % and not charging (`:805`) | yellow |
-| Soubory písní 512, 513, 523, REJSTRIKY mají chybu a nemusí hrát správně. Dejte vědět správci. | song files with a problem; the list of names comes from the folder scan (`:808`) | yellow |
+| Soubory písní 512, 513, REJSTRIKY mají chybu a nemusí hrát správně. Dejte vědět správci. | song files with a problem; the list of names comes from the folder scan (`:808`) | yellow |
 
 **Panel "Systém"** (`src/web_page.cpp:820-900`): a picture of the chain: node "Počítač" -USB- node "Základna" -BLUETOOTH- node "Ovladač". Each node has a coloured dot with a health label (`:821`): "V pořádku" (green), "Vyžaduje pozornost" (yellow), "Chyba" (red), "Nedostupné" (grey). The USB and Bluetooth lines are solid when connected, dashed when not. Facts under the nodes:
 - PC: "Přehrávač běží"; chip "spuštěn N s · N písní" (uptime and song count; screenshot `prehled-1100.png`).

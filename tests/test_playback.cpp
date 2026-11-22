@@ -8,6 +8,9 @@
 #include "midicontrol/smf.hpp"
 #include "test_framework.hpp"
 
+#ifndef MC_TESTDATA_DIR
+#define MC_TESTDATA_DIR "tests/data"
+#endif
 #ifndef MC_SONGS_DIR
 #define MC_SONGS_DIR "songs"
 #endif
@@ -67,6 +70,7 @@ struct Capture {
     }
 };
 
+smf::MidiFile fixtureSong(const char* name) { return smf::load(std::string(MC_TESTDATA_DIR) + "/" + name); }
 smf::MidiFile song(const char* name) { return smf::load(std::string(MC_SONGS_DIR) + "/" + name); }
 
 int fileNoteOns(const smf::MidiFile& mf) {
@@ -135,8 +139,11 @@ TEST(scan_sections_real_files_hold_one_verse) {
     auto secs = scanSections(song("401.mid"));
     CHECK_EQ(secs.size(), 1u);
     CHECK_EQ(secs[0].verse, 1);
-    // 523.mid has an empty anchor: one section without a verse.
     secs = scanSections(song("523.mid"));
+    CHECK_EQ(secs.size(), 1u);
+    CHECK_EQ(secs[0].verse, 1);
+    // The original 523.mid (fixture) has an empty anchor: one section without a verse.
+    secs = scanSections(fixtureSong("empty-anchor-523.mid"));
     CHECK_EQ(secs.size(), 1u);
     CHECK_EQ(secs[0].verse, 0);
 }
@@ -283,7 +290,7 @@ TEST(engine_abort_from_timebase) {
 TEST(engine_shifted_digits_letter_and_523_fallback) {
     auto first = [](const char* file, const char* code) {
         Capture cap;
-        PlaybackEngine engine(song(file), code, PlaybackOptions{}, cap.callbacks());
+        PlaybackEngine engine(std::string(file).rfind("empty-anchor", 0) == 0 ? fixtureSong(file) : song(file), code, PlaybackOptions{}, cap.callbacks());
         FakeClock clock;
         engine.run(clock);
         return cap.display.at(0);
@@ -291,8 +298,8 @@ TEST(engine_shifted_digits_letter_and_523_fallback) {
     CHECK(first("512.mid", "512") == (Bytes{0xF5, 0x12, 0x1F, 0x0F, 0x0F}));   // verse "1 "
     CHECK(first("513.mid", "513") == (Bytes{0x51, 0x3F, 0xF1, 0x0F, 0x0F}));   // song "513 "
     CHECK(first("406A.mid", "406A") == (Bytes{0xF4, 0x06, 0xF1, 0x0A, 0x0F}));
-    // 523.mid's anchor is an empty F0 F7: the song number comes from the code.
-    CHECK(first("523.mid", "523") == (Bytes{0xF5, 0x23, 0xFE, 0x0F, 0x0F}));
+    // The old 523.mid's anchor is an empty F0 F7 (fixture): the song number comes from the code.
+    CHECK(first("empty-anchor-523.mid", "523") == (Bytes{0xF5, 0x23, 0xFE, 0x0F, 0x0F}));
 }
 
 TEST(engine_forwards_partial_sysex_and_waits_gap_before_repeat) {
@@ -324,6 +331,7 @@ TEST(engine_forwards_partial_sysex_and_waits_gap_before_repeat) {
 TEST(song_has_sections_a6) {
     CHECK(songHasSections(scanSections(multiVerse())));
     CHECK(songHasSections(scanSections(song("401.mid"))));    // one section, but it carries verse 1
-    CHECK(!songHasSections(scanSections(song("523.mid"))));   // empty anchor: no verse markers
+    CHECK(songHasSections(scanSections(song("523.mid"))));    // fixed anchor carries verse 1
+    CHECK(!songHasSections(scanSections(fixtureSong("empty-anchor-523.mid"))));  // empty anchor: no verse markers
     CHECK(!songHasSections({}));
 }

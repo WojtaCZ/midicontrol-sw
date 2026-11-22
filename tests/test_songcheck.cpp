@@ -10,6 +10,10 @@
 #include "midicontrol/songcheck.hpp"
 #include "test_framework.hpp"
 
+#ifndef MC_TESTDATA_DIR
+#define MC_TESTDATA_DIR "tests/data"
+#endif
+
 #ifndef MC_SONGS_DIR
 #define MC_SONGS_DIR "songs"
 #endif
@@ -44,10 +48,7 @@ TEST(songcheck_real_files) {
         ++files;
         auto c = checkFile(std::string(MC_SONGS_DIR) + "/" + name);
         CHECK_EQ(c.file, name);
-        if (name == "523.mid") {
-            if (!hasProblem(c, "empty display anchor")) FAIL_AT("523.mid: no empty-anchor problem");
-            CHECK_EQ(c.code, "523");
-        } else if (name == "rejstriky.mid") {
+        if (name == "rejstriky.mid") {
             // Organ stop-list reference file, not a song: its name is not a song code.
             if (!hasProblem(c, "file name is not a valid song code"))
                 FAIL_AT("rejstriky.mid: no bad-name problem");
@@ -61,6 +62,12 @@ TEST(songcheck_real_files) {
     }
     closedir(dir);
     CHECK(files >= 11);
+}
+
+TEST(songcheck_old_523_empty_anchor_fixture) {
+    auto c = checkFile(std::string(MC_TESTDATA_DIR) + "/empty-anchor-523.mid");
+    if (!hasProblem(c, "empty display anchor")) FAIL_AT("fixture: no empty-anchor problem");
+    CHECK(checkFile(std::string(MC_SONGS_DIR) + "/523.mid").problems.empty());
 }
 
 TEST(songcheck_bad_name_and_garbage) {

@@ -105,7 +105,8 @@ add_executable(midicontrol_tests
 target_link_libraries(midicontrol_tests PRIVATE midicontrol_core)
 target_include_directories(midicontrol_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_compile_definitions(midicontrol_tests
-    PRIVATE MC_SONGS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/songs")
+    PRIVATE MC_SONGS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/songs"
+            MC_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
 add_test(NAME unit COMMAND midicontrol_tests)
 # Dev-repo check (needs git and tools/); absent in the Docker build stage, which copies only the sources.
 find_program(MC_GIT git)
@@ -177,7 +178,8 @@ if(RTMIDI_FOUND)
     target_include_directories(midicontrol_comm_tests PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}/tests ${RTMIDI_INCLUDE_DIRS})
     target_compile_definitions(midicontrol_comm_tests
-        PRIVATE MC_SONGS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/songs")
+        PRIVATE MC_SONGS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/songs"
+                MC_TESTDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
     target_compile_options(midicontrol_comm_tests PRIVATE ${RTMIDI_CFLAGS_OTHER})
     if(RTMIDI_LIBRARY_DIRS)
         target_link_directories(midicontrol_comm_tests PRIVATE ${RTMIDI_LIBRARY_DIRS})

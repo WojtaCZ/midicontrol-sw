@@ -6,6 +6,7 @@ capabilities, so RtMidi (the PC) finds it both as an output and an input port wh
 import ctypes
 import ctypes.util
 import os
+import select
 import threading
 import time
 
@@ -25,6 +26,12 @@ _lib.snd_seq_event_input.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_vo
 _lib.snd_midi_event_decode.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_void_p]
 _lib.snd_midi_event_decode.restype = ctypes.c_long
 _lib.snd_seq_event_input_pending.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_lib.snd_seq_poll_descriptors_count.argtypes = [ctypes.c_void_p, ctypes.c_short]
+_lib.snd_seq_poll_descriptors.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_short]
+
+
+class _PollFd(ctypes.Structure):
+    _fields_ = [("fd", ctypes.c_int), ("events", ctypes.c_short), ("revents", ctypes.c_short)]
 
 
 class SeqClient:
@@ -44,6 +51,14 @@ class SeqClient:
         _lib.snd_midi_event_new(4096, ctypes.byref(self._dev))
         _lib.snd_midi_event_init(self._dev)
         _lib.snd_midi_event_no_status(self._dev, 1)
+        # Wake the reader through poll() instead of a sleep loop: a sleep would add up to its period of
+        # jitter to every timestamp, which the timing tests (test_virtual_timing.py) measure in tens of us.
+        n = _lib.snd_seq_poll_descriptors_count(self._seq, select.POLLIN)
+        pfds = (_PollFd * n)()
+        _lib.snd_seq_poll_descriptors(self._seq, pfds, n, select.POLLIN)
+        self._poll = select.poll()
+        for p in pfds:
+            self._poll.register(p.fd, select.POLLIN)
         self.events = []  # (monotonic time, bytes)
         self._lock = threading.Lock()
         self._run = True
@@ -58,7 +73,10 @@ class SeqClient:
             if rc < 0 or not ev.value:
                 if not self._run:
                     return
-                time.sleep(0.005)
+                try:
+                    self._poll.poll(50)
+                except (OSError, ValueError):
+                    time.sleep(0.005)
                 continue
             t = time.monotonic()
             etype = ctypes.c_ubyte.from_address(ev.value).value
