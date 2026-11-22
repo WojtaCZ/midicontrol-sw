@@ -198,3 +198,10 @@ TEST(config_organ_section) {
     CHECK_EQ(cfg.organ.channel, 5);
     CHECK_EQ(cfg.organ.stopCount(), 42);
 }
+
+TEST(config_song_code_normalise) {
+    CHECK(parseConfig("[FILES]\nPlayFolder = /a\nRecordFolder = /b\n").songCodeNormalise);
+    CHECK(!parseConfig("[FILES]\nPlayFolder = /a\nRecordFolder = /b\nSongCodeNormalise = false\n").songCodeNormalise);
+    CHECK(parseConfig("[FILES]\nPlayFolder = /a\nRecordFolder = /b\nSongCodeNormalise = true\n").songCodeNormalise);
+    CHECK_THROWS(parseConfig("[FILES]\nPlayFolder = /a\nRecordFolder = /b\nSongCodeNormalise = maybe\n"));
+}

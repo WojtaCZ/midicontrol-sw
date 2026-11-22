@@ -28,11 +28,11 @@ The menu item "LED" is the master switch (default on, src/settings.cpp:9-27).
 | USB | green = PC alive (any valid PC packet in the last 6 s); white blink 100 ms on USB-MIDI traffic or PC frames | src/led.cpp:268-275 | off |
 | Display | green = indicator connected (sense pin PC13 low); white blink 100 ms when a frame is sent | src/led.cpp:277-283, src/display.cpp:148 | off |
 | Current | green = organ power (SSR) on; white blink 100 ms on every switch | src/led.cpp:285-291, src/base.cpp:140-159 | off |
-| MIDI A (DIN in) | red constant if "Ident. MIDI" on; off if "Ident. MIDI" off; white blink 100 ms on each received DIN byte | src/led.cpp:293-297, src/midi.cpp:218 | no blink; still red if "Ident. MIDI" on |
-| MIDI B (DIN out) | green constant if "Ident. MIDI" on; off if off; white blink 100 ms on each USB-to-DIN packet | src/led.cpp:299-303, src/main.cpp:403-407 | no blink; still green if "Ident. MIDI" on |
+| MIDI A (DIN in) | red constant if "Ident. MIDI" on; off if "Ident. MIDI" off; white blink 100 ms on each received DIN byte | src/led.cpp:293-297, src/midi.cpp:218 | off (C2, 2026-11-22) |
+| MIDI B (DIN out) | green constant if "Ident. MIDI" on; off if off; white blink 100 ms on each USB-to-DIN packet | src/led.cpp:299-303, src/main.cpp:403-407 | off (C2, 2026-11-22) |
 | Bluetooth | green = BLE link connected; white blink 100 ms on data | src/led.cpp:310-316, src/bluetooth.cpp:783 | off |
 
-- "Ident. MIDI" (midiRoleIdentifier) only drives the colours of the two MIDI LEDs (grep: settings::midiRoleIdentifier used only in src/led.cpp:262 and src/menu.cpp:505,571). Master off dims only the MIDI LED blinks, not their steady colour (src/led.cpp:299-306).
+- "Ident. MIDI" (midiRoleIdentifier) only drives the colours of the two MIDI LEDs (grep: settings::midiRoleIdentifier used only in src/led.cpp:262 and src/menu.cpp:505,571). With "LED" unchecked every rear LED is dark, MIDI A/B included (C2, 2026-11-22; logic in src/logic/led_logic.hpp). The LED colours are also computed before the first strip update, so there is no colour flash at start. The front strip (error blink) ignores the setting.
 - Front strip (4 LEDs): all off in normal operation. Only use found: unrecoverable error, 3 blinks of all four LEDs red at 50 % brightness, 500 ms on / 500 ms off, then the unit resets (src/main.cpp:742-757). No other blink patterns exist for LEDs.
 - LED colour of the indicator (red/yellow/green/blue) is a different thing: the tabule's own LED, see section 12.
 
@@ -75,10 +75,10 @@ Info pages (any key goes back; src/menu.cpp:477-531, :206-218):
 
 ## 5. Organ power
 
-- SSR on PA4, off after every reset (also after watchdog/fault reset) (src/base.cpp:19-22, src/main.cpp:331,:354-357). Switched on/off by the menu checkbox "Napajeni varhan" or by the PC (SET_CURRENT, src/router.cpp:361-368). The Current LED follows.
+- SSR on PA4, off after every reset (also after watchdog/fault reset) (src/base.cpp:19-22). Switched on/off by the menu checkbox "Napajeni varhan" or by the PC (SET_CURRENT, src/router.cpp:361-368). The Current LED follows.
 - The PC normally switches it on at Play and runs the idle-off policy (PC side, see pc.md). Base backstop: SSR on and no valid PC packet for 2 hours = All Notes Off and SSR off; any PC packet restarts the 2 h; switching the SSR on restarts it too (src/router.cpp:532-537, src/logic/router_core.hpp:107-126).
 - PC lost (no valid PC packet for 6 s): SSR off, All Notes Off (CC120 and CC123), overlay "Odpojeno" (src/router.cpp:521-530; proto:inc/protocol/constants.hpp:42-43).
-- After a fault or watchdog reset the base sends All Notes Off at start (src/main.cpp:331,:354-357).
+- At every start (power-on and any reset) the base sends All Notes Off (CC123 and CC120, 16 channels) on DIN, about 32 ms, before the PC can send anything (src/main.cpp after `midi::init()`).
 - Power cut/power-up: SSR off, display splash, settings (LED, Ident. MIDI, remote address) kept; organ power state NOT kept (see above). Pending songs are not resumed.
 
 ## 6. Pairing the remote

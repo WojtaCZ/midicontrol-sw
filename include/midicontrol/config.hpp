@@ -24,6 +24,7 @@ namespace mc {
 struct Config {
     std::string playFolder;
     std::string recFolder;
+    bool songCodeNormalise = true;     // [FILES] SongCodeNormalise: "0406" = "406" (B4)
     std::map<std::string, std::string> bindings;  // e.g. "Bind0" -> "song name"
 
     // [PLAYBACK]

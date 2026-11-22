@@ -18,6 +18,14 @@ namespace mc::songs {
 // value <= 1999, optional single A-D suffix (either case). No trimming here.
 bool validCode(const std::string& code);
 
+// B4 (Q2-15): leading zeros do not name another song: "0406" = "406" = " 406 ". normalizeCode strips the leading
+// zeros of an already valid code (keeping one digit: "0000" -> "0", "0406b" -> "406b"); other input is returned as is.
+// With `strip` false it is the identity. Process-wide switch [FILES] SongCodeNormalise (default on), set at start-up;
+// sanitizeCode, findSongFile and listSongs follow it.
+std::string normalizeCode(const std::string& code, bool strip = true);
+void setNormalise(bool on);
+bool normalising();
+
 // Normalise a raw code (from the wire or the CLI): strips trailing NULs and
 // surrounding whitespace, upper-cases, then accepts only validCode().
 // nullopt for anything else, so a code can never name a path outside the

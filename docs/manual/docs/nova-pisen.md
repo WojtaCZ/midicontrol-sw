@@ -1,6 +1,6 @@
 # Nová píseň a rejstříky { #nova-pisen }
 
-Píseň je soubor `<kód>.mid` ve složce písní na počítači (`songs`), například `401.mid` nebo `406A.mid`. Kód má 1 až 4 číslice (nejvýše 1999) a případně písmeno A–D.
+Píseň je soubor `<kód>.mid` ve složce písní na počítači (`songs`), například `401.mid` nebo `406A.mid`. Kód má 1 až 4 číslice (nejvýše 1999) a případně písmeno A–D. Nuly na začátku se nepočítají: soubor `0406.mid` je píseň 406 a hraje se i po zadání `406`. Dva soubory se stejným kódem (`406.mid` a `0406.mid`) kontrola písní označí jako chybu názvu.
 
 ## Přidání písně
 

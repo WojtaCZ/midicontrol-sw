@@ -15,7 +15,7 @@ Nastavení otevřete z hlavního menu položkou `Nastaveni`. Položka `Zpet` se 
 
 | Položka | Význam |
 |---|---|
-| `LED` | Zapnutí a vypnutí kontrolek. |
+| `LED` | Zapnutí a vypnutí kontrolek. Po vypnutí nesvítí žádná zadní kontrolka, ani MIDI A a MIDI B. |
 | `Ident. MIDI` | Identifikace MIDI zařízení základny. |
 | `Napajeni varhan` | Ruční zapnutí napájení varhan. Po každém restartu je vypnuté. |
 | `Verze FW` | Verze firmwaru. |

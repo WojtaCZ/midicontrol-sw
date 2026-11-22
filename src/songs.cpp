@@ -1,6 +1,7 @@
 #include "midicontrol/songs.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <filesystem>
 
@@ -11,6 +12,8 @@ namespace fs = std::filesystem;
 namespace mc::songs {
 
 namespace {
+
+std::atomic<bool> g_normalise{true};
 
 std::string upper(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
@@ -37,6 +40,16 @@ bool validCode(const std::string& code) {
     return c >= 'A' && c <= 'D';
 }
 
+std::string normalizeCode(const std::string& code, bool strip) {
+    if (!strip || !validCode(code)) return code;
+    size_t z = 0;
+    while (z + 1 < code.size() && code[z] == '0' && std::isdigit(static_cast<unsigned char>(code[z + 1]))) ++z;
+    return code.substr(z);
+}
+
+void setNormalise(bool on) { g_normalise.store(on); }
+bool normalising() { return g_normalise.load(); }
+
 std::optional<std::string> sanitizeCode(const std::string& raw) {
     std::string s = raw;
     while (!s.empty() && (s.back() == '\0' || std::isspace(static_cast<unsigned char>(s.back())))) {
@@ -47,7 +60,7 @@ std::optional<std::string> sanitizeCode(const std::string& raw) {
     s = upper(s.substr(a));
 
     if (s.size() > mc::protocol::MAX_SONG_CODE_LEN || !validCode(s)) return std::nullopt;
-    return s;
+    return normalizeCode(s, normalising());
 }
 
 std::optional<std::string> sanitizeCode(const std::vector<uint8_t>& payload) {
@@ -68,7 +81,7 @@ std::optional<std::string> findSongFile(const std::string& folder, const std::st
         if (!entry.is_regular_file(ec2)) continue;
         const fs::path& p = entry.path();
         if (!hasMidExtension(p)) continue;
-        if (upper(p.stem().string()) == *clean) return p.string();
+        if (normalizeCode(upper(p.stem().string()), normalising()) == *clean) return p.string();
     }
     return std::nullopt;
 }
@@ -101,7 +114,7 @@ std::vector<std::string> listSongs(const std::string& folder) {
         // Q1-2a: the stem itself must be the code (as for play and songcheck); " 12.mid" is not offered.
         const std::string stem = p.stem().string();
         auto code = sanitizeCode(stem);
-        if (code && *code == upper(stem)) codes.push_back(*code);
+        if (code && *code == normalizeCode(upper(stem), normalising())) codes.push_back(*code);
     }
     std::sort(codes.begin(), codes.end(), naturalLess);
     codes.erase(std::unique(codes.begin(), codes.end()), codes.end());

@@ -95,6 +95,9 @@ Config parseConfig(const std::string& iniText) {
     if (recIt == files.end()) throw std::runtime_error("config: RecordFolder not specified");
     cfg.recFolder = recIt->second;
 
+    if (auto it = files.find("SongCodeNormalise"); it != files.end())
+        cfg.songCodeNormalise = parseBool("SongCodeNormalise", it->second);
+
     auto bindIt = sections.find("BINDINGS");
     if (bindIt != sections.end()) cfg.bindings = bindIt->second;
 

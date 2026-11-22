@@ -156,6 +156,7 @@ Search order: `--config PATH`, `$MIDICONTROL_CONFIG`, `$XDG_CONFIG_HOME/midicont
 | BINDINGS | (any) | unused | parsed, reserved | `include/midicontrol/config.hpp:18` |
 | PLAYBACK | WarmupMs | 3000 | wait after switching the organ on, integer >= 0 | `src/config.cpp:112` |
 | PLAYBACK | KeepPowerOn | false | leave the organ on after a song | `:113` |
+| FILES | SongCodeNormalise | true | leading zeros ignored: 0406 = 406 (B4) | `src/config.cpp` |
 | PLAYBACK | OrganIdleOffMs | 1800000 | idle power-off time, ms, integer >= 1000 | `src/config.cpp` |
 | PLAYBACK | VerseGapMs | 0 | pause before a repeated verse, >= 0 | `:114` |
 | WEB | Enabled | true | web server on/off | `:120` |

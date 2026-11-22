@@ -6,6 +6,8 @@
 #include <array>
 #include <cctype>
 #include <filesystem>
+#include <map>
+#include <vector>
 #include <stdexcept>
 
 #include "midicontrol/smf.hpp"
@@ -17,6 +19,9 @@ namespace fs = std::filesystem;
 namespace mc::songcheck {
 
 namespace {
+
+constexpr const char* kWarnLeadingZero = "file name has leading zeros (played as the code without them)";
+constexpr const char* kWarnDuplicateCode = "another file names the same song code";
 
 std::string upper(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
@@ -80,9 +85,15 @@ FileCheck checkFile(const std::string& path) {
     FileCheck c;
     c.file = p.filename().string();
     const std::string stem = p.stem().string();
-    c.code = upper(stem);
-    auto code = mc::songs::sanitizeCode(stem);
-    if (!code || *code != c.code) c.problems.push_back("file name is not a valid song code");
+    const std::string up = upper(stem);
+    if (!mc::songs::validCode(up)) {
+        c.code = up;
+        c.problems.push_back("file name is not a valid song code");
+    } else {
+        // B4 (Q2-15): "0406.mid" is song 406; warn, since the name is not canonical.
+        c.code = mc::songs::normalizeCode(up, true);
+        if (c.code != up) c.problems.push_back(kWarnLeadingZero);
+    }
     try {
         checkAnchors(mc::smf::load(path), c.problems);
     } catch (const std::exception& e) {
@@ -127,6 +138,18 @@ Scanner::Result Scanner::rescan(const std::string& folder) {
         it = _files.erase(it);
     }
     for (const auto& [name, e] : _files) r.all.push_back(e.check);
+    // B4: two files that name the same song once leading zeros are ignored (406.mid and 0406.mid).
+    std::map<std::string, std::vector<std::string>> byCode;
+    for (const auto& c : r.all) {
+        if (mc::songs::validCode(c.code)) byCode[c.code].push_back(c.file);
+    }
+    for (auto& c : r.all) {
+        auto g = byCode.find(c.code);
+        if (g == byCode.end() || g->second.size() < 2) continue;
+        const std::string problem = std::string(kWarnDuplicateCode) + " (" + c.code + ")";
+        c.problems.push_back(problem);
+        if (_reported.insert({c.file, problem}).second) r.newProblems.push_back({c.file, problem});
+    }
     std::sort(r.all.begin(), r.all.end(), [](const FileCheck& a, const FileCheck& b) {
         if (a.code != b.code) return mc::songs::naturalLess(a.code, b.code);
         return a.file < b.file;
