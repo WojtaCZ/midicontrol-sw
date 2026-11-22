@@ -35,6 +35,8 @@ WatchdogSec=30
 ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/midicontrol --headless
 Restart=always
 RestartSec=5
+# A stop waits for a running firmware update (remote measured 152 s, base 13 s; the manual says up to 5 minutes).
+TimeoutStopSec=300
 
 [Install]
 WantedBy=default.target

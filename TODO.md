@@ -43,6 +43,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: VERIFY: should a manual console `on` or an adopted base-menu "on" also arm (outside Q2-1; ask the owner, FAULTS question 12 is related). Recording warm-up cancel (Stop during warm-up) leaves the organ on with no timer; the same helper covers it.
 
 ### B2 TimeoutStopSec and shutdown waits for a running update (Q2-4)
+- DONE 2026-11-22: unit TimeoutStopSec=300 (compose already 300s); wait in main.cpp is unbounded (waitForUpload joins); check tests/service_unit_test.sh. Bench: stop during remote update pending.
 - Goal: a service stop or reboot never kills an update in progress (remote update measured 152 s, base 13 s, docs/FAULTS.md:82).
 - Current code: packaging/midicontrol.service.in has no TimeoutStopSec (systemd default 90 s). src/main.cpp ~276-281: `control.stop()`, `web->stop()`, `exec.waitForUpload()`, then `handler.shutdown()`; ControlServer::stop (src/control_socket.cpp:77-87) waits for client commands, so a running update finishes.
 - Change: add `TimeoutStopSec=180` to the [Service] section (>= 180 s as owner said; VERIFY: 180 s is 18% over the 152 s measured; 300 s matches the manual's "up to 5 minutes" and is safer). Keep the wait in main.cpp. Make sure the wait is not bounded by a shorter internal timeout (VERIFY in exec.waitForUpload). Update docs/status-web-and-service.md:404 (mentions 90 s).

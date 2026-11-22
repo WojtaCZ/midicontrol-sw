@@ -406,7 +406,7 @@ Each decision is listed with what it costs if it turns out wrong.
 | The socket smoke test ran the real binary rather than a fake executor | covers more | none |
 | Commands at the standalone prompt are page events but aren't echoed to stdout or the journal | avoids echoing what was just typed | they're missing from the journal |
 | A standalone `--cmd` (no service) starts no page and no socket | it's a one-shot process | none |
-| Stopping the service waits for a running firmware update | safer than abandoning a flash | a stop can take as long as an update (systemd's `TimeoutStopSec`, 90 s by default) |
+| Stopping the service waits for a running firmware update | safer than abandoning a flash | a stop can take as long as an update (the unit sets `TimeoutStopSec=300`, the Docker compose file `stop_grace_period: 300s`; SIGKILL after that) |
 | The review finding "page looks fine while frozen" was raised from Minor to Important | a health page must not look healthy while the service hangs | a few lines of JS |
 | The serial-handling fixes are proven by the pty harness, which isn't part of CI | `CommHandler` can't join the core tests without RtMidi | the harness can rot |
 | Version and build date come from configure time (`git rev-parse`, `string(TIMESTAMP)`) | simple and dependency-free | stale after a rebuild without reconfiguring |
