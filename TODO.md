@@ -33,6 +33,7 @@ Source: audit/OWNER-ANSWERS.md; plan: plans/2026-11-16-owner-answers-impl.md. Wo
 Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re-grep the symbol. Czech OLED strings have no diacritics.
 
 ### B1 Idle-off timer after fault give-up and after a KeepPowerOn song end (Q2-1)
+- DONE 2026-11-22: armIdleOffIfOn() after KeepPowerOn song end/Stop/failed start/record stop and after an off give-up with relay on; tests comm_b1_*, comm_pcc2_*. Manual console on still arms nothing (open question).
 - Goal: an organ the PC knows is on never stays on without an armed idle-off timer.
 - Current code: `armIdleOff()`/`disarmIdleOff()`/`doIdleOff()` at src/comm.cpp ~1457-1483. `armIdleOff` is called only by the startup reset (~1446) and by recordSong (~1213, only if already armed). `reconcileOrgan()` (~1130-1170) gives up with `_organFault` after kOrganReassertMax and does not arm. `finishPlayback()` (~1609), `doStop()` (~1620) and the doPlay fail lambda (~1544) only call `organOff()` when `!keepPowerOn`; with KeepPowerOn=true nothing arms. doPlay disarms at ~1517, `setOrganLocked()` (~1114) disarms.
 - Change: add helper `armIdleOffIfOn()` (arms when `_organOn` and not armed). Call it (a) in `reconcileOrgan()` on give-up when the base reports relay on, (b) in finishPlayback/doStop/doPlay-fail when keepPowerOn is true and the organ is on. Keep the keepalive check (~1011-1015) as is.

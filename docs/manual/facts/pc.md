@@ -131,7 +131,7 @@ The organist normally controls the player from the remote (separate facts file);
 - Remote: SIGNAL_PLAYING (payload = song code) before the first SIGNAL_ANCHOR; SIGNAL_ANCHOR payload = ASCII section label ("Predehra" for the intro, "Sloka N" for verse N, with " +k" for pending repeats); SIGNAL_STOPPED at the end (`src/comm.cpp:1515-1632`, `src/playback.cpp:57-61`).
 
 ### 2.6 Organ power
-- Switched on by play (and record); off at the end of the song unless `KeepPowerOn`. Idle power-off after **30 min**: hard-coded in `include/midicontrol/config.hpp:35` (not a config key; SYS-ORG-05 gap). Deferred while a song plays or a recording runs. Console `on` / `off` switch the organ manually.
+- Switched on by play (and record); off at the end of the song unless `KeepPowerOn`. Idle power-off after **30 min**: hard-coded in `include/midicontrol/config.hpp:35` (not a config key; SYS-ORG-05 gap). Deferred while a song plays or a recording runs. The timer is also armed after a song end, Stop or failed start with `KeepPowerOn = true`, and when an organ-off command gave up with the relay still on (B1), so an organ the PC knows is on never stays on without it. Console `on` / `off` switch the organ manually.
 - Start-up log lines: "Startup: organ power off", "Startup: MIDI output port not found; no All Notes Off.", "Startup: organ found switched on; left on, idle power-off in <time>.", "Organ idle for <time>: power off." (`src/comm.cpp:1441-1484`).
 
 ## 3. Administration
