@@ -1,5 +1,11 @@
 # TODO
 
+## No play/record API on the daemon (owner 2026-11-22) - holds, nothing to change
+Owner: "the daemon shall have no play/record api, we want playing and recording from the devices only", then
+"console should accept play". HTTP is clean (routes: /api/status, /api/diag, /api/firmware, /api/stops); never add
+play/record routes. The console (stdin, control socket `midicontrol.sock`, one-shot CLI) keeps `play <code>` and its
+other commands (`src/console.cpp`), as used by tools/systest/bench/scenarios.py.
+
 ## Organ stops: verify at the organ
 
 Per-song stops are implemented (stops editor on the home page, one `<CODE>.conf` per song, set at song start). Still to check on the Opus 910, see the spec's open items (`docs/superpowers/specs/2026-10-27-organ-stops-design.md`) and `docs/status-web-and-service.md`:
