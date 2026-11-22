@@ -112,6 +112,9 @@ Config parseConfig(const std::string& iniText) {
         getInt("WarmupMs", cfg.warmupMs, 0);
         getBool("KeepPowerOn", cfg.keepPowerOn);
         getInt("VerseGapMs", cfg.verseGapMs, 0);
+        // B3: idle limit in ms (>= 1000: 0 would switch the organ off at once, and no "never" setting exists).
+        if (auto it = pb.find("OrganIdleOffMs"); it != pb.end())
+            cfg.organIdleOffMs = parseInt("OrganIdleOffMs", it->second, 1000);
     }
 
     auto webIt = sections.find("WEB");

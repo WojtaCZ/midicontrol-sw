@@ -66,6 +66,23 @@ TEST(parse_config_playback) {
     CHECK_EQ(cfg.verseGapMs, 800);
 }
 
+// B3: [PLAYBACK] OrganIdleOffMs.
+TEST(config_organ_idle_off_ms) {
+    const std::string base = "[FILES]\nPlayFolder = p\nRecordFolder = r\n";
+    CHECK_EQ(parseConfig(base).organIdleOffMs, int64_t(30LL * 60 * 1000));
+    CHECK_EQ(parseConfig(base + "[PLAYBACK]\nOrganIdleOffMs = 120000\n").organIdleOffMs, int64_t(120000));
+    const char* bad[] = {"abc", "-5", "0", "999"};
+    for (auto* b : bad) {
+        bool threw = false;
+        try {
+            parseConfig(base + "[PLAYBACK]\nOrganIdleOffMs = " + b + "\n");
+        } catch (const std::exception&) {
+            threw = true;
+        }
+        CHECK(threw);
+    }
+}
+
 TEST(parse_config_defaults_and_invalid_values) {
     Config cfg = parseConfig("[FILES]\nPlayFolder = p\nRecordFolder = r\n");
     CHECK_EQ(cfg.warmupMs, 3000);

@@ -40,7 +40,7 @@ cmake --install build          # developer use: binary, share/midicontrol/config
 
 Device: USB serial VID:PID=ABCD:1234 (base bootloader: ABCD:1235) plus ALSA MIDI ports named "MIDIControl"; both are re-discovered after a USB reconnect. Uses `arecordmidi` for recording.
 
-Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME/midicontrol/config.conf` (`~/.config/...`), else `./config.conf`. Sections: `[FILES]` (PlayFolder/RecordFolder; `~/` and config-relative paths allowed), `[PLAYBACK]` (WarmupMs, KeepPowerOn, VerseGapMs), `[WEB]` (Enabled=true, Port=50118, Bind=0.0.0.0), `[DIAG]` (LogPort= override of the log CDC auto-detection, Dir= store directory, default `$XDG_STATE_HOME/midicontrol`, else `~/.local/state/midicontrol`, else `/tmp/midicontrol-<uid>/diag`, created recursively), `[ORGAN]` (stops layout, Opus 910 defaults), `[BINDINGS]` (parsed, reserved, unused: do not remove). See `config.conf`.
+Config file: `--config PATH`, else `$MIDICONTROL_CONFIG`, else `$XDG_CONFIG_HOME/midicontrol/config.conf` (`~/.config/...`), else `./config.conf`. Sections: `[FILES]` (PlayFolder/RecordFolder; `~/` and config-relative paths allowed), `[PLAYBACK]` (WarmupMs, KeepPowerOn, VerseGapMs, OrganIdleOffMs), `[WEB]` (Enabled=true, Port=50118, Bind=0.0.0.0), `[DIAG]` (LogPort= override of the log CDC auto-detection, Dir= store directory, default `$XDG_STATE_HOME/midicontrol`, else `~/.local/state/midicontrol`, else `/tmp/midicontrol-<uid>/diag`, created recursively), `[ORGAN]` (stops layout, Opus 910 defaults), `[BINDINGS]` (parsed, reserved, unused: do not remove). See `config.conf`.
 
 ## Service, status page, control socket
 

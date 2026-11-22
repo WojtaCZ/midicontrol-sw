@@ -114,3 +114,13 @@ TEST(web_page_home_last_end_is_czech) {
     CHECK(has(html, "spojení s přehrávačem selhalo"));
     CHECK(!has(html, "(await r.text()).trim()"));
 }
+
+// B3: the page shows the organ power fault and an armed idle-off timer.
+TEST(web_page_shows_organ_power_fault_and_idle_off) {
+    const std::string& html = mc::web::statusPageHtml();
+    CHECK(has(html, "organ_power_fault"));
+    CHECK(has(html, "organ_idle_off_armed"));
+    CHECK(has(html, "Idle-off armed"));
+    CHECK(has(html, "Organ power fault"));
+    CHECK(has(html, "časovač vypnutí"));
+}

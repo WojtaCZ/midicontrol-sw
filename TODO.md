@@ -53,6 +53,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 - Risk / open points: SIGKILL after the timeout still kills a hung update; the bootloader recovery stays the fallback.
 
 ### B3 `organIdleOffMs` config key; web shows organ_power_fault and idle-off armed (Q2-7)
+- DONE 2026-11-22: [PLAYBACK] OrganIdleOffMs (ms >= 1000; 0 rejected, no disable), chip + Czech notice + Advanced rows for idle-off armed / organ_power_fault; tests config_organ_idle_off_ms, web_page_shows_*.
 - Goal: the idle limit is configurable and the status page shows the organ power fault and an armed idle-off.
 - Current code: include/midicontrol/config.hpp:35 `int64_t organIdleOffMs = 30LL*60*1000;` ("not a config.conf key yet"). [PLAYBACK] keys parsed in src/config.cpp ~99-114 (WarmupMs, KeepPowerOn, VerseGapMs). Status registry sets `organ_power`, `organ_power_fault`, `organ_idle_off_armed` on Node::Base. The web page does not show the last two: src/web_page.cpp base() summary ~478-498, home-view `notices()` ~793-810, overview fields ~859.
 - Change: parse `[PLAYBACK] OrganIdleOffMs` (milliseconds, same style as WarmupMs; VERIFY: 0 = idle-off disabled, and reject negative values like the other keys). Add it to config.conf with a comment. Web: a chip "idle-off armed" and a Czech notice for `organ_power_fault` on the home view (text without diacritics only on OLEDs; the web page may use diacritics), plus both fields in the English Pokrocile overview.

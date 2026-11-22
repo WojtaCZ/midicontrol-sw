@@ -10,6 +10,7 @@ Nastavení v `config.conf`:
 | `[PLAYBACK]` `WarmupMs` | 3000 | čekání po zapnutí varhan, než píseň začne (ms) |
 | `[PLAYBACK]` `KeepPowerOn` | false | `true` nechá varhany zapnuté i po písni |
 | `[PLAYBACK]` `VerseGapMs` | 0 | pauza mezi slokami (ms) |
+| `[PLAYBACK]` `OrganIdleOffMs` | 1800000 | po jaké nečinnosti počítač vypne varhany (ms, nejméně 1000) |
 | `[WEB]` `Port` | 50118 | port webové stránky |
 
 ## Časovače
@@ -18,5 +19,5 @@ Nastavení v `config.conf`:
 |---|---|
 | Displej ovladače a základny zhasne | 30 s |
 | Ovladač se sám vypne (ne s USB kabelem) | 20 min bez stisku |
-| Počítač vypne varhany | 30 min nečinnosti (pevně dáno; jen pokud je sám zapnul) |
+| Počítač vypne varhany | 30 min nečinnosti (nastavitelné: `OrganIdleOffMs`); počítač čas měří, i když varhany po písni nechává zapnuté (`KeepPowerOn`) |
 | Základna vypne varhany, když počítač mlčí | 6 s, nebo 2 h bez zprávy od počítače |
