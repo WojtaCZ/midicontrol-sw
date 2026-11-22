@@ -58,7 +58,7 @@ std::string entryJson(const std::string& code, const std::optional<std::vector<i
 struct SongPlan {
     std::vector<MidiStep> preamble;  // empty unless the song is set and stops are enabled
     bool dropProgramChanges = false;
-    std::string text;                // "3 4 5" | "all off" | "not set" | "disabled"
+    std::string text;                // "3 4 5" | "all off" | "not set" | "disabled" | "default 3 4"
 };
 SongPlan planFor(const mc::organ::OrganConfig& organ, const Stops& stops);
 

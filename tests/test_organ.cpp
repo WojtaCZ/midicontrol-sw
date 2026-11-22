@@ -59,3 +59,12 @@ TEST(organ_preamble_bytes_and_delays) {
     CHECK(p[2].bytes == (std::vector<uint8_t>{0xCB, 11}));
     CHECK_EQ(mc::organ::buildPreamble(o, {}).size(), 1u);  // saved empty = all-off only
 }
+TEST(organ_b8_default_stops_validation) {
+    using mc::organ::parseOrgan;
+    CHECK_THROWS(parseOrgan({{"DefaultStops", "0"}}));
+    CHECK_THROWS(parseOrgan({{"DefaultStops", "43"}}));
+    CHECK_THROWS(parseOrgan({{"DefaultStops", "abc"}}));
+    CHECK_THROWS(parseOrgan({{"DefaultStops", "1,,x"}}));
+    CHECK(parseOrgan({{"DefaultStops", "7 7 3"}}).defaultStops == (std::vector<int>{3, 7}));
+    CHECK(parseOrgan({}).defaultStops.empty());
+}

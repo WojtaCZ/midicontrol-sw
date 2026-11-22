@@ -47,7 +47,7 @@ Top to bottom: notices, panel "Systém", panel "Rejstříky písní" (`src/web_p
 - Row right side: "nenastaveno" (no file), "vše vypnuto" (file with empty list), or "N rejstřík/rejstříky/rejstříků" and the numbers under the code (screenshot: 406B has "6 rejstříků", numbers 1 2 3 17 18 19).
 - Empty list: "Žádná píseň neodpovídá výběru." (filter) or "Ve složce nejsou žádné písně." (`:1031`). Footer: "Zobrazeno X z Y" or "N písní" plus " · nastaveno N" (`:1035`).
 - Editor heading "Píseň <code>" (`:972`) or "Ve složce nejsou žádné písně" / "Rejstříky nenačteny" / "Načítám rejstříky…". Stop buttons are grouped under the group names (defaults: "Spojky a pomocná zařízení" 1-7, "Pedál" 8-16, "I. manuál – hlavní stroj" 17-29, "II. manuál – žaluziový stroj" 30-42; `src/organ.cpp:140`). Each button shows the number and name; a click toggles it; counter "N z M zapnuto" (`:978`).
-- State badge: "neuložené změny", "nenastaveno: varhany zůstanou, jak jsou", "uloženo", "uloženo: vše vypnuto".
+- State badge: "neuložené změny", "nenastaveno: varhany zůstanou, jak jsou" (with `[ORGAN] DefaultStops` set: "nenastaveno: výchozí registrace (<seznam>)", list row "výchozí"), "uloženo", "uloženo: vše vypnuto".
 - Buttons: "Uložit" (after a save shows "Uloženo" for 1.2 s), "Vše vypnout", "Zrušit nastavení" (title "Smaže uložený výběr: při spuštění písně se rejstříky nemění", `:1107-1117`).
 - Messages: "Ukládám…" (`:1055`), "Neuloženo: <reason>" (`:1063`), load error "Rejstříky se nepodařilo načíst: <reason> " with button "Zkusit znovu" (`:948-949`).
 - Confirm dialogs: "Zahodit neuložené změny písně <code>?" when switching song with edits (`:1046`); "Zrušit nastavení rejstříků písně <code>?" plus " Neuložené změny se také zahodí." and " Při spuštění této písně pak varhany zůstanou, jak jsou." (`:1114`). Closing or reloading the tab with unsaved edits triggers the browser's own warning (`:1198`).
@@ -164,6 +164,7 @@ Search order: `--config PATH`, `$MIDICONTROL_CONFIG`, `$XDG_CONFIG_HOME/midicont
 | WEB | Bind | 0.0.0.0 | IPv4 address to listen on | `:129` |
 | DIAG | LogPort | empty = auto-detect the "MIDIControl log" USB port | serial device of the base log | `:138` |
 | DIAG | Dir | `$XDG_STATE_HOME/midicontrol`, else `~/.local/state/midicontrol`, else `/tmp/midicontrol-<uid>/diag` | diagnostics store | `:139,183-190` |
+| ORGAN | DefaultStops | empty | stop numbers sent at the start of a song that has no `<CODE>.conf` (a file, even empty, wins) | `src/organ.cpp` |
 | ORGAN | StopsEnabled | true | master switch for per-song stops | `src/organ.cpp:163` |
 | ORGAN | Channel | 12 | MIDI channel 1-16 for Program Changes | `:164` |
 | ORGAN | ProgramOffset | -1 | stop number to program number offset, -127..127 | `:165` |

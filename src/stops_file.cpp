@@ -281,7 +281,7 @@ std::string toJson(const mc::organ::OrganConfig& organ, const std::vector<std::s
         out += "{\"label\":" + mc::status::jsonEscape(g.label) + ",\"first\":" + std::to_string(g.first) +
                ",\"last\":" + std::to_string(g.last) + "}";
     }
-    out += "],\"names\":{";
+    out += "],\"default\":" + jsonNumbers(organ.defaultStops) + ",\"names\":{";
     for (size_t i = 0; i < organ.stops.size(); ++i) {
         if (i) out += ',';
         out += "\"" + std::to_string(organ.stops[i].number) + "\":" +
@@ -303,7 +303,13 @@ SongPlan planFor(const mc::organ::OrganConfig& organ, const Stops& stops) {
         return plan;
     }
     if (!stops) {
-        plan.text = "not set";
+        if (organ.defaultStops.empty()) {
+            plan.text = "not set";
+            return plan;
+        }
+        plan.preamble = mc::organ::buildPreamble(organ, organ.defaultStops);
+        plan.dropProgramChanges = organ.dropSongProgramChanges;
+        plan.text = "default " + numbersText(organ.defaultStops);
         return plan;
     }
     plan.preamble = mc::organ::buildPreamble(organ, *stops);

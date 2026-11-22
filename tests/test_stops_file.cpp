@@ -197,3 +197,34 @@ TEST(stops_put_handler_validates) {
         CHECK(!r.body.empty());
     }
 }
+TEST(stops_b8_default_registration_for_songs_without_a_file) {
+    auto o = mc::organ::parseOrgan({{"DefaultStops", "12, 1 5"}});
+    CHECK(o.defaultStops == (std::vector<int>{1, 5, 12}));
+    auto p = planFor(o, std::nullopt);
+    CHECK_EQ(p.preamble.size(), 4u);  // all-off + 3 stops
+    CHECK(p.dropProgramChanges);
+    CHECK_EQ(p.text, std::string("default 1 5 12"));
+    // A file wins, empty included.
+    p = planFor(o, std::vector<int>{});
+    CHECK_EQ(p.preamble.size(), 1u);
+    CHECK_EQ(p.text, std::string("all off"));
+    p = planFor(o, std::vector<int>{8});
+    CHECK_EQ(p.text, std::string("8"));
+    // StopsEnabled = false wins over the default.
+    o.stopsEnabled = false;
+    p = planFor(o, std::nullopt);
+    CHECK(p.preamble.empty());
+    CHECK_EQ(p.text, std::string("disabled"));
+    // Empty default = today's behaviour.
+    auto e = mc::organ::parseOrgan({{"DefaultStops", ""}});
+    CHECK(e.defaultStops.empty());
+    p = planFor(e, std::nullopt);
+    CHECK(p.preamble.empty());
+    CHECK_EQ(p.text, std::string("not set"));
+}
+TEST(stops_b8_default_is_in_the_stops_json) {
+    auto o = mc::organ::parseOrgan({{"DefaultStops", "3,4"}});
+    auto j = toJson(o, {"401"}, SongStops{});
+    CHECK(j.find("\"default\":[3,4]") != std::string::npos);
+    CHECK(toJson(mc::organ::defaultOrgan(), {"401"}, SongStops{}).find("\"default\":[]") != std::string::npos);
+}
