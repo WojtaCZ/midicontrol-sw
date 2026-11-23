@@ -26,6 +26,7 @@ TEST(diagcodes_text) {
     CHECK_EQ(diagCodeText(1, 0), std::string("boot"));
     CHECK_EQ(diagCodeText(0x7F, 0), std::string("code 0x7F"));
     CHECK_EQ(diagCodeText(16, 4), std::string("4 records lost"));
+    CHECK_EQ(diagCodeText(19, 1), std::string("update applied, staging flag not cleared"));
     CHECK_EQ(diagCodeText(17, 0), std::string("ble module reboot"));
     CHECK_EQ(diagCodeText(17, 5000), std::string("ble module reboot, 5000 ms since the last"));
     CHECK_EQ(diagCodeText(18, 0xC4), std::string("ble link lost (supervision timeout), rssi -60 dBm"));

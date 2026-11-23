@@ -76,6 +76,7 @@ std::string diagCodeText(uint8_t code, uint32_t arg) {
         case C::BLE_MODULE_REBOOT:
             return arg == 0 ? std::string("ble module reboot")
                             : "ble module reboot, " + std::to_string(arg) + " ms since the last";
+        case C::STAGE_CLEAR_FAILED: return "update applied, staging flag not cleared";
         case C::BLE_ERR_CONN: {
             const int8_t rssi = static_cast<int8_t>(arg & 0xFF);
             return rssi == -128 ? std::string("ble link lost (supervision timeout), rssi unknown")
