@@ -6,6 +6,8 @@ services:
   midicontrol:
     image: ${IMAGE:-ghcr.io/wojtacz/midicontrol-sw}:${IMAGE_TAG:-stable}
     container_name: midicontrol
+    # Host network: the container's gethostname() is the host PC's name, which the status page accepts as a
+    # Host (B7). Do not add `hostname:` here: Docker rejects it together with network_mode: host.
     network_mode: host
     restart: always
     # A remote update takes up to about 2.5 min (FAULTS.md); "docker stop" must not kill it (TODO B2, audit DK-1).

@@ -169,7 +169,7 @@ bool writeAllowed(const Request& req, const std::vector<std::string>& allowedHos
     if (req.host.empty()) return false;
     const std::string h = hostOnly(req.host);
     bool ok = isIpLiteral(h) || h == "localhost";
-    for (const auto& a : allowedHosts) ok = ok || h == a;
+    for (const auto& a : allowedHosts) ok = ok || h == a || a == "*";  // "*" = accept any Host (explicit opt-out)
     if (!ok) return false;
     if (!req.origin.empty()) {
         // "null" (sandboxed/opaque origins) and anything not http(s)://<Host> is refused.

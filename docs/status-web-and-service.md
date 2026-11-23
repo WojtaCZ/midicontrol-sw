@@ -278,7 +278,7 @@ A new optional section in `config.conf`:
 | `Enabled` | `true` | boolean (`true/false/yes/no/on/off/1/0`) |
 | `Port` | `50118` | 1–65535, else the config fails to load |
 | `Bind` | `0.0.0.0` | non-empty; must be an IPv4 address. This is checked only when binding: an invalid value logs an ERROR and keeps retrying. |
-| `AllowedHosts` | empty | comma/space separated host names (no port) accepted in the `Host` header of a write besides IP addresses and `localhost`, e.g. the PC's hostname. |
+| `AllowedHosts` | `midicontrol, midicontrol.local` | comma/space separated host names (no port) accepted in the `Host` header of a write besides IP addresses and `localhost`; they are added to the defaults. The machine's own `gethostname()` and `<hostname>.local` are always accepted too. `*` accepts any Host (explicit opt-out of the DNS-rebinding guard; the Origin rule stays). In the container (`network_mode: host`) `gethostname()` is the host PC's name; compose cannot set `hostname:` together with host networking. |
 
 Writes (`PUT /api/stops/<code>`, `POST /api/firmware/<target>`, `POST /api/diag/ack`) are refused with 403 unless the `Host` header is an IP address, `localhost` or listed in `AllowedHosts`, and a browser `Origin` header, if present, names the same host and port. This stops a web page on another site (including a DNS-rebinding one) from changing anything through the status server; `curl` and the updater scripts send no `Origin` and pass. Acknowledging a fault is `POST /api/diag/ack` (body `id=<n>`); the old `GET /api/diag?ack=` is a 400. The page has no play, stop or organ controls, and the daemon has no play/record HTTP route.
 

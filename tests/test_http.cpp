@@ -233,6 +233,10 @@ TEST(http_b7_write_host_and_origin_check) {
     CHECK(!writeAllowed(wr("POST", "/x", ""), none));                               // no Host
     CHECK(writeAllowed(wr("POST", "/x", "organ-pc:50118", "http://organ-pc:50118"), {"organ-pc"}));
     CHECK(!writeAllowed(wr("POST", "/x", "organ-pc:50118"), none));
+    // "*" accepts any Host but the Origin == Host rule stays.
+    CHECK(writeAllowed(wr("POST", "/x", "anything.example:1", "http://anything.example:1"), {"*"}));
+    CHECK(!writeAllowed(wr("POST", "/x", "anything.example:1", "http://evil.example"), {"*"}));
+    CHECK(!writeAllowed(wr("POST", "/x", ""), {"*"}));  // still needs a Host
 }
 
 TEST(http_b7_route_refuses_foreign_writes_and_acks_by_post) {
