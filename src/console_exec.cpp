@@ -72,7 +72,7 @@ ExecResult ConsoleExecutor::execute(const std::string& line, const console::Repl
             return ExecResult::Ok;
         }
         case Kind::On:
-            _handler.organOn();
+            _handler.organOnManual();
             return ExecResult::Ok;
         case Kind::Off:
             _handler.organOff();

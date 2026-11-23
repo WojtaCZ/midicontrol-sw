@@ -6,6 +6,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -72,6 +74,16 @@ WebServer::WebServer(mc::status::StatusRegistry& status, std::string bind, int p
       _diag(diag),
       _allowedHosts(std::move(allowedHosts)),
       _firmware(std::move(firmware)) {
+    // B7: the machine's own name (and <name>.local) is always a valid Host.
+    char hn[256] = {};
+    if (gethostname(hn, sizeof hn - 1) == 0 && hn[0]) {
+        std::string self;
+        for (const char* c = hn; *c; ++c) self += static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
+        const size_t dot = self.find('.');
+        if (dot != std::string::npos) self.resize(dot);  // FQDN: keep the short name
+        for (const std::string& n : {self, self + ".local"})
+            if (std::find(_allowedHosts.begin(), _allowedHosts.end(), n) == _allowedHosts.end()) _allowedHosts.push_back(n);
+    }
     std::error_code ec;
     if (std::filesystem::exists(_playFolder + "/" + mc::stops::kLegacyFileName, ec))
         mc::log::warn(Node::Software, std::string(mc::stops::kLegacyFileName) +
@@ -171,7 +183,9 @@ bool WebServer::readConn(Conn& c) {
                 mc::http::StopsApi api;
                 api.get = [this] {  // throws when a song's .conf is unreadable; caught below -> 500
                     auto codes = mc::songs::listSongs(_playFolder);
-                    return mc::stops::toJson(_organ, codes, _stops.get(codes));
+                    mc::organ::OrganConfig org = _organ;  // the default may have been edited on the page
+                    org.defaultStops = _stops.defaultStops(_organ.defaultStops);
+                    return mc::stops::toJson(org, codes, _stops.get(codes));
                 };
                 api.put = [this](const std::string& code, const std::string& body) {
                     return mc::stops::handlePut(_stops, _organ, mc::songs::listSongs(_playFolder), code, body);

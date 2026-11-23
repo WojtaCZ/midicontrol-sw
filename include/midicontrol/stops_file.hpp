@@ -22,6 +22,13 @@ namespace mc::stops {
 inline constexpr const char* kExtension = ".conf";
 inline constexpr const char* kLegacyFileName = "stops.conf";  // old single file, no longer read
 
+// The default registration for songs without a stop file (B8) is edited on the same page and kept in
+// <PlayFolder>/_default.conf (same format). Song codes start with a digit, so the name never clashes with a
+// song. config.conf is never written by the daemon, hence the file; `[ORGAN] DefaultStops` stays as the
+// initial value used while the file does not exist. An existing file wins, an empty one = no default (organ unchanged).
+inline constexpr const char* kDefaultCode = "_default";
+inline constexpr const char* kDefaultFileName = "_default.conf";
+
 using Stops = std::optional<std::vector<int>>;              // nullopt = not set; empty = all off
 using SongStops = std::map<std::string, std::vector<int>>;  // the set songs only
 
@@ -55,6 +62,13 @@ std::string toJson(const mc::organ::OrganConfig& organ, const std::vector<std::s
 // {"code":"401","stops":[..]|null}
 std::string entryJson(const std::string& code, const std::optional<std::vector<int>>& stops);
 
+// Effective default stops: _default.conf if present, else `configured`. An unreadable file falls back to
+// `configured` (a warning goes to `warnings`).
+std::vector<int> loadDefault(const std::string& playFolder, int stopCount, const std::vector<int>& configured,
+                             std::vector<std::string>* warnings);
+void saveDefault(const std::string& playFolder, const std::vector<int>& stops);  // throws like save
+void removeDefault(const std::string& playFolder);                                // back to the config value
+
 struct SongPlan {
     std::vector<MidiStep> preamble;  // empty unless the song is set and stops are enabled
     bool dropProgramChanges = false;
@@ -70,6 +84,9 @@ public:
     SongStops get(const std::vector<std::string>& codes) const;
     // Save (set) or delete (nullopt) one song's file. Throws on failure, file unchanged.
     void put(const std::string& code, const Stops& stops);
+    // The default registration (see kDefaultCode): effective value / save (set) / delete (nullopt).
+    std::vector<int> defaultStops(const std::vector<int>& configured) const;
+    void putDefault(const Stops& stops);
 
 private:
     std::string folder_;

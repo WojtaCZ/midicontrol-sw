@@ -89,7 +89,7 @@ Server-side checks and replies (`POST /api/firmware/<base|remote>`, `src/firmwar
 - The device checks the image again (bootloader). If the base update stops half way, the base stays in its USB bootloader (ABCD:1235); `status` then says "Base is in its USB bootloader (ABCD:1235): a firmware update did not finish; re-flash it with: update base <file>" (`src/console_exec.cpp:87`).
 
 ### 1.5 HTTP API (for the administrator)
-`GET /`, `GET /api/status`, `GET /api/diag?node=&level=&before=&limit=&kind=reset`, `GET /api/stops`, `PUT /api/stops/<code>` (JSON), `POST /api/firmware/<base|remote>`, `POST /api/diag/ack` (body `id=<n>`, "Mark seen") (`src/http.cpp`). Writes (PUT/POST) are refused with 403 unless the Host header is an IP address, `localhost` or in `[WEB] AllowedHosts`, and an Origin header, if sent, equals Host; there is no login. GET with `ack=` is 400. No play/stop/organ route exists. Other methods: 405 with `Allow`. Request limits 8 KiB headers, 4 KiB body (firmware 512 KiB), 3 s per request, 60 s for firmware (`src/http.cpp:96-104`). `PUT /api/stops` errors: 400 (invalid code, code not among the songs, bad body), 500 (cannot save, text of the error) (`src/stops_file.cpp:335-349`).
+`GET /`, `GET /api/status`, `GET /api/diag?node=&level=&before=&limit=&kind=reset`, `GET /api/stops`, `PUT /api/stops/<code>` (JSON), `POST /api/firmware/<base|remote>`, `POST /api/diag/ack` (body `id=<n>`, "Mark seen") (`src/http.cpp`). Writes (PUT/POST) are refused with 403 unless the Host header is an IP address, `localhost`, the PC's own hostname (or `<hostname>.local`), `midicontrol` / `midicontrol.local` or in `[WEB] AllowedHosts` (`*` = any Host), and an Origin header, if sent, equals Host; there is no login. GET with `ack=` is 400. No play/stop/organ route exists. Other methods: 405 with `Allow`. Request limits 8 KiB headers, 4 KiB body (firmware 512 KiB), 3 s per request, 60 s for firmware (`src/http.cpp:96-104`). `PUT /api/stops` errors: 400 (invalid code, code not among the songs, bad body), 500 (cannot save, text of the error) (`src/stops_file.cpp:335-349`).
 The song folder is rescanned every 60 s (`src/web_server.cpp:28`); problems are written to the log as "song <file>: <problem>" (`:208-224`). Problem texts: "empty display anchor", "no display anchors", "file name is not a valid song code", "cannot parse: <reason>" (`src/songcheck.cpp:67-89`).
 
 ## 2. Player behaviour visible to the organist
@@ -131,7 +131,7 @@ The organist normally controls the player from the remote (separate facts file);
 - Remote: SIGNAL_PLAYING (payload = song code) before the first SIGNAL_ANCHOR; SIGNAL_ANCHOR payload = ASCII section label ("Predehra" for the intro, "Sloka N" for verse N, with " +k" for pending repeats); SIGNAL_STOPPED at the end (`src/comm.cpp:1515-1632`, `src/playback.cpp:57-61`).
 
 ### 2.6 Organ power
-- Switched on by play (and record); off at the end of the song unless `KeepPowerOn`. Idle power-off after **30 min**, config key `[PLAYBACK] OrganIdleOffMs` (ms, integer >= 1000, B3; 0 is rejected: no 'never' setting). Deferred while a song plays or a recording runs. The timer is also armed after a song end, Stop or failed start with `KeepPowerOn = true`, and when an organ-off command gave up with the relay still on (B1), so an organ the PC knows is on never stays on without it. Console `on` / `off` switch the organ manually.
+- Switched on by play (and record); off at the end of the song unless `KeepPowerOn`. Idle power-off after **30 min**, config key `[PLAYBACK] OrganIdleOffMs` (ms, integer >= 1000, B3; `0` = never switch off, owner 2026-11-23). Deferred while a song plays or a recording runs. The timer is also armed after a song end, Stop or failed start with `KeepPowerOn = true`, and when an organ-off command gave up with the relay still on (B1), so an organ the PC knows is on never stays on without it. Console `on` / `off` switch the organ manually; a console `on` and an `on` adopted from the base menu also arm the idle timer (B1, 2026-11-23).
 - Start-up log lines: "Startup: organ power off", "Startup: MIDI output port not found; no All Notes Off.", "Startup: organ found switched on; left on, idle power-off in <time>.", "Organ idle for <time>: power off." (`src/comm.cpp:1441-1484`).
 
 ## 3. Administration
@@ -157,7 +157,7 @@ Search order: `--config PATH`, `$MIDICONTROL_CONFIG`, `$XDG_CONFIG_HOME/midicont
 | PLAYBACK | WarmupMs | 3000 | wait after switching the organ on, integer >= 0 | `src/config.cpp:112` |
 | PLAYBACK | KeepPowerOn | false | leave the organ on after a song | `:113` |
 | FILES | SongCodeNormalise | true | leading zeros ignored: 0406 = 406 (B4) | `src/config.cpp` |
-| PLAYBACK | OrganIdleOffMs | 1800000 | idle power-off time, ms, integer >= 1000 | `src/config.cpp` |
+| PLAYBACK | OrganIdleOffMs | 1800000 | idle power-off time, ms, integer >= 1000; 0 = never | `src/config.cpp` |
 | PLAYBACK | VerseGapMs | 0 | pause before a repeated verse, >= 0 | `:114` |
 | WEB | Enabled | true | web server on/off | `:120` |
 | WEB | Port | 50118 | 1-65535 | `:123` |

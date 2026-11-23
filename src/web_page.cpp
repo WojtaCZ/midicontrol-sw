@@ -918,6 +918,7 @@ function home(){
 
 // --- Stops: built once and cached (the 1 s status poll must not rebuild it or lose edits).
 // /api/stops is loaded when the page is first opened and after each save, never polled. ---
+const DEF="_default";  // pseudo song code of the default registration (PUT /api/stops/_default)
 const SP={sec:null,E:{},tabs:{},loaded:false,loadErr:false,layout:"",groups:[],names:{},codes:[],saved:{},total:0,
   cur:null,draft:new Set(),dirty:false,edits:0,busy:false,sortK:"code",filter:"all",query:"",revealed:false};
 function spSorted(set){return [...set].sort((a,b)=>a-b);}
@@ -942,11 +943,12 @@ async function spLoad(){
     const j=await spFetch("/api/stops");
     SP.groups=j.groups;SP.def=j.default||[];SP.names=j.names;SP.codes=j.songs.map(s=>s.code);SP.saved={};
     for(const s of j.songs)SP.saved[s.code]=s.stops;
+    SP.saved[DEF]=SP.def;  // the default registration is edited like a song (an array, empty = organ unchanged)
     SP.total=Math.max(0,...SP.groups.map(g=>g.last));
     SP.loaded=true;SP.loadErr=false;E.load.replaceChildren();
     const layout=JSON.stringify([j.groups,j.names]);
     if(layout!==SP.layout){SP.layout=layout;spBuildPanel();}  // keeps the tab buttons (and focus) across saves
-    if(!SP.codes.includes(SP.cur)){SP.cur=SP.codes.length?SP.codes[0]:null;SP.dirty=false;}
+    if(SP.cur!==DEF&&!SP.codes.includes(SP.cur)){SP.cur=SP.codes.length?SP.codes[0]:null;SP.dirty=false;}
     if(!SP.dirty)SP.draft=new Set(SP.cur!=null&&SP.saved[SP.cur]||[]);
   }catch(e){
     SP.loadErr=true;
@@ -972,22 +974,24 @@ function spBuildPanel(){
 }
 function spChanged(){SP.dirty=true;SP.edits++;spMsg("");spDraw();}
 function spDraw(){
-  const E=SP.E,cur=SP.cur,saved=cur!=null?SP.saved[cur]:undefined,has=cur!=null;
+  const E=SP.E,cur=SP.cur,saved=cur!=null?SP.saved[cur]:undefined,has=cur!=null,isDef=cur===DEF;
   E.panel.hidden=E.actions.hidden=!has;
-  E.cur.textContent=has?"Píseň "+cur:SP.loaded?"Ve složce nejsou žádné písně":SP.loadErr?"Rejstříky nenačteny":"Načítám rejstříky…";
+  E.cur.textContent=isDef?"Výchozí registrace":has?"Píseň "+cur:SP.loaded?"Ve složce nejsou žádné písně":SP.loadErr?"Rejstříky nenačteny":"Načítám rejstříky…";
   E.count.textContent="";E.state.hidden=!has;
   if(has){
     if(SP.dirty){E.state.textContent="neuložené změny";E.state.className="badge warn";}
+    else if(isDef){E.state.textContent=saved.length?"uloženo":"žádná: varhany zůstanou, jak jsou";E.state.className=saved.length?"badge ok":"badge";}
     else if(saved===null){E.state.textContent=(SP.def&&SP.def.length)?"nenastaveno: výchozí registrace ("+SP.def.join(" ")+")":"nenastaveno: varhany zůstanou, jak jsou";E.state.className="badge";}
     else{E.state.textContent=saved.length?"uloženo":"uloženo: vše vypnuto";E.state.className="badge ok";}
     if(SP.dirty||saved!==null)E.count.textContent=SP.draft.size+" z "+SP.total+" zapnuto";
   }
-  E.panel.classList.toggle("notset",saved===null&&!SP.dirty);
+  E.panel.classList.toggle("notset",(saved===null||isDef&&!saved.length)&&!SP.dirty);
   for(const [n,t] of Object.entries(SP.tabs))t.setAttribute("aria-pressed",SP.draft.has(Number(n))?"true":"false");
   E.actions.classList.toggle("dirty",SP.dirty);
   E.save.disabled=!SP.dirty||SP.busy;
   E.alloff.disabled=SP.busy;
   E.notset.disabled=(saved===null&&!SP.dirty)||SP.busy;
+  E.notset.textContent=isDef?"Obnovit z konfigurace":"Zrušit nastavení";
   spDrawSongs();
 }
 function spCmp(a,b){
@@ -1012,6 +1016,19 @@ function spDrawSongs(){
   const E=SP.E,a=document.activeElement,focus=E.list.contains(a)?a.dataset.code:null,top=E.list.scrollTop;
   const rows=spRows();
   E.list.replaceChildren();
+  if(SP.loaded){  // pinned first row: the default registration for songs without a stop file
+    const li=el("li","sp-row sp-def"+(SP.cur===DEF?" sel":""));
+    li.tabIndex=0;li.dataset.code=DEF;li.setAttribute("role","option");
+    li.setAttribute("aria-selected",SP.cur===DEF?"true":"false");
+    const d=SP.saved[DEF]||[];
+    li.append(el("span","code","Výchozí"),el("span","cnt",d.length?cz(d.length,"rejstřík","rejstříky","rejstříků"):"žádná"));
+    if(d.length)li.append(el("span","list",d.join(" ")));
+    li.onclick=()=>spPick(DEF);
+    li.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();spPick(DEF);}
+      else if(e.key==="ArrowDown"&&li.nextElementSibling){e.preventDefault();li.nextElementSibling.focus();}};
+    E.list.append(li);
+    if(focus===DEF)li.focus();
+  }
   for(const r of rows){
     const li=el("li","sp-row"+(r.code===SP.cur?" sel":""));
     li.tabIndex=0;li.dataset.code=r.code;li.setAttribute("role","option");
@@ -1116,12 +1133,16 @@ function stops(){
   };
   E.alloff.onclick=()=>{if(SP.draft.size||SP.saved[SP.cur]===null){SP.draft.clear();spChanged();}};
   E.notset.onclick=()=>{
+    if(SP.cur===DEF){
+      if(confirm("Obnovit výchozí registraci z konfigurace (config.conf)?"+(SP.dirty?" Neuložené změny se také zahodí.":"")))spPut(null);
+      return;
+    }
     if(confirm("Zrušit nastavení rejstříků písně "+SP.cur+"?"+(SP.dirty?" Neuložené změny se také zahodí.":"")+
                (SP.def&&SP.def.length?" Při spuštění této písně pak platí výchozí registrace.":" Při spuštění této písně pak varhany zůstanou, jak jsou.")))spPut(null);
   };
-  E.notset.title="Smaže uložený výběr: při spuštění písně se rejstříky nemění";
+  E.notset.title="Smaže uložený výběr (u výchozí registrace: vrátí hodnotu z konfigurace)";
   E.actions.append(E.save,E.alloff,E.msg,E.notset);
-  main.append(head,el("p","sp-hint","Na začátku písně přehrávač vypne všechny rejstříky a zapne vybrané. Píseň bez nastavení nechá varhany beze změny."),
+  main.append(head,el("p","sp-hint","Na začátku písně přehrávač vypne všechny rejstříky a zapne vybrané. Píseň bez nastavení dostane výchozí registraci (první řádek seznamu); je-li výchozí registrace prázdná, nechá varhany beze změny."),
               E.load,E.panel,E.actions);
   body.append(side,main);
   const s=panel("Rejstříky písní",body);s.id="stops";

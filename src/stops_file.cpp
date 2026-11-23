@@ -192,9 +192,8 @@ Stops load(const std::string& playFolder, const std::string& code, int stopCount
     return parse(ss.str(), stopCount, std::filesystem::path(*path).filename().string(), warnings);
 }
 
-void save(const std::string& playFolder, const std::string& code, const std::vector<int>& stops) {
-    const std::string path = filePath(playFolder, code);
-    const std::string text = serialize(code, stops);
+namespace {
+void writeAtomic(const std::string& playFolder, const std::string& path, const std::string& text) {
     const std::string tmp = path + ".tmp." + std::to_string(getpid());
     int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd < 0) failSave(tmp, "open");
@@ -228,6 +227,11 @@ void save(const std::string& playFolder, const std::string& code, const std::vec
         failSave(path, "rename");
     }
     syncDir(playFolder);
+}
+}  // namespace
+
+void save(const std::string& playFolder, const std::string& code, const std::vector<int>& stops) {
+    writeAtomic(playFolder, filePath(playFolder, code), serialize(code, stops));
 }
 
 void remove(const std::string& playFolder, const std::string& code) {
@@ -296,6 +300,36 @@ std::string toJson(const mc::organ::OrganConfig& organ, const std::vector<std::s
     return out + "]}";
 }
 
+namespace {
+std::string defaultPath(const std::string& playFolder) { return playFolder + "/" + kDefaultFileName; }
+}  // namespace
+
+std::vector<int> loadDefault(const std::string& playFolder, int stopCount, const std::vector<int>& configured,
+                             std::vector<std::string>* warnings) {
+    const std::string path = defaultPath(playFolder);
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) return configured;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        warn(warnings, path + ": cannot read, using the configured default");
+        return configured;
+    }
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    Stops s = parse(ss.str(), stopCount, path, warnings);
+    return s ? *s : configured;  // no usable Stops line = as if absent
+}
+
+void saveDefault(const std::string& playFolder, const std::vector<int>& stops) {
+    writeAtomic(playFolder, defaultPath(playFolder), serialize("(default for songs without a file)", stops));
+}
+
+void removeDefault(const std::string& playFolder) {
+    const std::string path = defaultPath(playFolder);
+    if (::unlink(path.c_str()) != 0 && errno != ENOENT) failSave(path, "delete");
+    syncDir(playFolder);
+}
+
 SongPlan planFor(const mc::organ::OrganConfig& organ, const Stops& stops) {
     SongPlan plan;
     if (!organ.stopsEnabled) {
@@ -338,9 +372,33 @@ void Store::put(const std::string& code, const Stops& stops) {
     else remove(folder_, code);
 }
 
+std::vector<int> Store::defaultStops(const std::vector<int>& configured) const {
+    std::lock_guard<std::mutex> lk(mu_);
+    std::vector<std::string> warnings;
+    auto d = loadDefault(folder_, stopCount_, configured, &warnings);
+    for (const auto& w : warnings) mc::log::warn(mc::status::Node::Software, w);
+    return d;
+}
+
+void Store::putDefault(const Stops& stops) {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (stops) saveDefault(folder_, *stops);
+    else removeDefault(folder_);
+}
+
 mc::http::Response handlePut(Store& store, const mc::organ::OrganConfig& organ,
                              const std::vector<std::string>& songCodes, const std::string& rawCode,
                              const std::string& body) {
+    if (rawCode == kDefaultCode) {  // the default registration, same body as a song
+        auto stops = parseBody(body, organ.stopCount());
+        if (!stops) return mc::http::errorResponse(400);
+        try {
+            store.putDefault(*stops);
+        } catch (const std::exception& e) {
+            return mc::http::Response{500, "text/plain; charset=utf-8", std::string(e.what()) + "\n"};
+        }
+        return mc::http::Response{200, "application/json", entryJson(kDefaultCode, *stops)};
+    }
     auto code = mc::songs::sanitizeCode(rawCode);
     if (!code || std::find(songCodes.begin(), songCodes.end(), *code) == songCodes.end())
         return mc::http::errorResponse(400);

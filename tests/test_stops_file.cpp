@@ -228,3 +228,35 @@ TEST(stops_b8_default_is_in_the_stops_json) {
     CHECK(j.find("\"default\":[3,4]") != std::string::npos);
     CHECK(toJson(mc::organ::defaultOrgan(), {"401"}, SongStops{}).find("\"default\":[]") != std::string::npos);
 }
+
+// Item 2 (owner 2026-11-23): the default registration is editable on the page and kept in _default.conf.
+TEST(stops_default_file_overrides_config_and_empty_file_is_no_default) {
+    std::string dir = makeTempDir();
+    const std::vector<int> cfg{9, 10};
+    CHECK(loadDefault(dir, 42, cfg, nullptr) == cfg);  // no file: config value
+    saveDefault(dir, {5, 3});
+    CHECK(has(readFile(dir + "/_default.conf"), "Stops = 5 3"));
+    CHECK(loadDefault(dir, 42, cfg, nullptr) == (std::vector<int>{3, 5}));
+    saveDefault(dir, {});  // existing empty file wins: no default (organ unchanged)
+    CHECK(loadDefault(dir, 42, cfg, nullptr).empty());
+    removeDefault(dir);
+    CHECK(loadDefault(dir, 42, cfg, nullptr) == cfg);
+    removeDefault(dir);  // nothing left: no error
+}
+TEST(stops_default_put_handler_and_plan) {
+    mc::organ::OrganConfig o = mc::organ::defaultOrgan();
+    std::string dir = makeTempDir();
+    Store st(dir, o.stopCount());
+    std::vector<std::string> songs = {"401"};
+    CHECK_EQ(handlePut(st, o, songs, "_default", "{\"stops\":[0]}").status, 400);
+    auto r = handlePut(st, o, songs, "_default", "{\"stops\":[4,2]}");
+    CHECK_EQ(r.status, 200);
+    CHECK_EQ(r.body, std::string("{\"code\":\"_default\",\"stops\":[2,4]}"));
+    CHECK(st.defaultStops({}) == (std::vector<int>{2, 4}));
+    CHECK_FALSE(findFile(dir, "401").has_value());  // never mistaken for a song file
+    o.defaultStops = st.defaultStops({});
+    CHECK_EQ(planFor(o, std::nullopt).text, std::string("default 2 4"));
+    CHECK_EQ(planFor(o, std::vector<int>{}).text, std::string("all off"));  // an existing empty song file stays all off
+    CHECK_EQ(handlePut(st, o, songs, "_default", "{\"stops\":null}").status, 200);
+    CHECK(st.defaultStops({7}) == (std::vector<int>{7}));
+}

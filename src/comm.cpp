@@ -884,6 +884,10 @@ void CommHandler::noteRx(const Packet& pkt) {
         if (_diagPoller) _diagPoller->setRemoteLink(st.ble, steadyMs(), _updating.load());  // remote reachable -> DIAG_GET
         _status.set(Node::Base, "status_relay", st.relay);
         const bool wasLink = _remoteLink.exchange(st.ble);
+        // D13 (owner 2026-11-23, option b): ask the remote for its details the moment the base reports the link up,
+        // not at the next 2 s keepalive tick. The poller sends once per up edge (its own state keeps the periodic GET).
+        if (st.ble && !wasLink && _connected.load() && !_updating.load() && !_remotePaused.load())
+            _infoPoller->tick(steadyMs(), true, true);
         if (st.ble) {
             // P1-9: a ble 0->1 edge makes the remote's state suspect; while dirty every ble=1 status tries once.
             bool dirty;
@@ -1149,7 +1153,7 @@ void CommHandler::keepaliveLoop() {
             }
             pollStatus();
             const int64_t idleArmed = _idleOffArmedMs.load();
-            if (idleArmed >= 0 && steadyMs() - idleArmed >= _config.organIdleOffMs &&
+            if (idleArmed >= 0 && _config.organIdleOffMs > 0 && steadyMs() - idleArmed >= _config.organIdleOffMs &&
                 !_idleOffQueued.exchange(true)) {
                 post({Command::Kind::IdleOff, {}, {}, 0});
             }
@@ -1329,6 +1333,11 @@ void CommHandler::organOn() {
     setOrganLocked(true);
 }
 
+void CommHandler::organOnManual() {
+    organOn();
+    armIdleOffIfOn();
+}
+
 void CommHandler::organOff() {
     std::lock_guard<std::mutex> lk(_organMutex);
     setOrganLocked(false);
@@ -1351,6 +1360,9 @@ void CommHandler::setOrganLocked(bool on) {
 // whatever the base reports is adopted (someone switched the organ at the base or the remote; never fought).
 // Does not decide anything about KeepPowerOn: it only repeats what the PC itself last commanded.
 void CommHandler::reconcileOrgan(bool relay, uint64_t statusGen) {
+    // B1 (owner 2026-11-23): an "on" adopted from the base (menu, remote) also arms the idle-off timer, unless a song or a
+    // recording owns the organ. Read before _organMutex (no player/recorder lock under it).
+    const bool idle = relay && !playOrRecordBusy();
     std::lock_guard<std::mutex> lk(_organMutex);
     if (statusGen != _setCurrentGen.load()) return;  // the answer may predate the last SET_CURRENT
     _ssrReported.store(relay ? 1 : 0);
@@ -1359,6 +1371,7 @@ void CommHandler::reconcileOrgan(bool relay, uint64_t statusGen) {
     // whether a song needs the warm-up.
     _organOn.store(relay);
     _status.set(Node::Base, "organ_power", relay);
+    if (idle && _organIntent != 1) armIdleOffIfOn();  // no pending PC "on" (that one is a song's or the console's)
     if (_organFault >= 0 && (relay ? 1 : 0) != _organFault) {
         _organFault = -1;
         _status.set(Node::Base, "organ_power_fault", std::monostate{});
@@ -1731,7 +1744,8 @@ void CommHandler::doStartupReset() {
         _status.set(Node::Base, "organ_start_source", std::string(srcName));
         mc::log::info(Node::Software, std::string("Startup: organ found switched on ") +
                                           (organSrc == 1 ? "by the PC (previous session)" : "(by hand or unknown)") +
-                                          "; left on, idle power-off in " + idleText(_config.organIdleOffMs) + ".");
+                                          (_config.organIdleOffMs > 0 ? "; left on, idle power-off in " + idleText(_config.organIdleOffMs) + "."
+                                                                  : std::string("; left on (idle power-off disabled)")));
         performed.armIdleOff = true;
     }
     _startupReset.done(performed);
@@ -1739,6 +1753,7 @@ void CommHandler::doStartupReset() {
 }
 
 void CommHandler::armIdleOff() {
+    if (_config.organIdleOffMs <= 0) return;  // B3 (owner 2026-11-23): OrganIdleOffMs = 0 means never switch off
     _idleOffArmedMs.store(steadyMs());
     _status.set(Node::Base, "organ_idle_off_armed", true);
 }
@@ -1752,9 +1767,20 @@ void CommHandler::disarmIdleOff() {
     if (_idleOffArmedMs.exchange(-1) >= 0) _status.set(Node::Base, "organ_idle_off_armed", false);
 }
 
+// True while a song plays or a recording runs (a dead recorder does not count).
+bool CommHandler::playOrRecordBusy() {
+    bool busy = false;
+    {
+        std::lock_guard<std::mutex> lk(_playerMutex);
+        busy = _player != nullptr;
+    }
+    std::lock_guard<std::mutex> lk(_recorderMutex);
+    return busy || recorderAliveLocked();
+}
+
 void CommHandler::doIdleOff() {
     const int64_t armed = _idleOffArmedMs.load();
-    if (armed < 0 || steadyMs() - armed < _config.organIdleOffMs) return;  // disarmed or restarted meanwhile
+    if (armed < 0 || _config.organIdleOffMs <= 0 || steadyMs() - armed < _config.organIdleOffMs) return;  // disarmed or restarted meanwhile
     bool busy = false;
     {
         std::lock_guard<std::mutex> lk(_playerMutex);
@@ -1845,7 +1871,15 @@ void CommHandler::doPlay(const Command& cmd) {
     } catch (const std::exception& e) {
         mc::log::warn(Node::Software, std::string("Stops not read, treating ") + cmd.code + " as not set: " + e.what());
     }
-    mc::stops::SongPlan plan = mc::stops::planFor(_config.organ, songStops);
+    // The default registration (songs without a file) may be edited on the web page: _default.conf wins over config.
+    mc::organ::OrganConfig organNow = _config.organ;
+    try {
+        std::vector<std::string> warnings;
+        organNow.defaultStops = mc::stops::loadDefault(_config.playFolder, _config.organ.stopCount(),
+                                                       _config.organ.defaultStops, &warnings);
+        for (const auto& w : warnings) mc::log::warn(Node::Software, w);
+    } catch (const std::exception&) {}
+    mc::stops::SongPlan plan = mc::stops::planFor(organNow, songStops);
     opts.preamble = std::move(plan.preamble);
     opts.dropProgramChanges = plan.dropProgramChanges;
     mc::log::info(Node::Software, "Stops for " + cmd.code + ": " + plan.text);
@@ -1897,6 +1931,7 @@ void CommHandler::doPlay(const Command& cmd) {
     {
         std::lock_guard<std::mutex> lk(_playerMutex);
         _player = std::move(player);
+        disarmIdleOff();  // a status poll during the warm-up may have armed an adopted "on"
     }
     _status.set(Node::Software, "playback", std::string("playing"));
     mc::log::info(Node::Software, "Playing " + cmd.code + ": " + std::to_string(sections) +

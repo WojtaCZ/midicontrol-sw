@@ -548,6 +548,63 @@ TEST(comm_q11b_pc_command_disarms_the_idle_timer) {
     CHECK(countSetV(log, 0) == 0);
 }
 
+// B1 (owner 2026-11-23): the console "on" arms the idle-off timer, and the timer then switches the organ off.
+TEST(comm_b1_console_on_arms_the_idle_timer) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.organIdleOffMs = 4000;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(3000ms);  // startup reset done (organ off)
+    h.organOnManual();
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    std::this_thread::sleep_for(9000ms);
+    const bool ssr = base.ssr.load();
+    h.shutdown();
+    CHECK(armed);
+    CHECK(!ssr);  // idle-off fired
+}
+
+// B1: an "on" adopted from the base (menu/remote) arms the timer at the next status answer.
+TEST(comm_b1_adopted_base_on_arms_the_idle_timer) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.organIdleOffMs = 600000;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(3000ms);
+    const bool before = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    base.ssr = true;  // switched on at the base menu
+    std::this_thread::sleep_for(8000ms);
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    h.shutdown();
+    CHECK(!before);
+    CHECK(armed);
+}
+
+// B3 (owner 2026-11-23): OrganIdleOffMs = 0 never arms and never switches off.
+TEST(comm_b3_idle_off_zero_means_never) {
+    FakeBase base;
+    base.ssr = true;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    cfg.organIdleOffMs = 0;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(3000ms);
+    h.organOnManual();
+    std::this_thread::sleep_for(7000ms);
+    const bool armed = fieldBool(reg, status::Node::Base, "organ_idle_off_armed");
+    const bool ssr = base.ssr.load();
+    auto log = base.log();
+    h.shutdown();
+    CHECK(!armed);
+    CHECK(ssr);
+    CHECK_EQ(countSetV(log, 0), size_t(0));
+}
+
 // PCC-3: after the base link was lost and is back, the startup reset runs again: notes off, then the SSR rule
 // (here: the organ is on at the new link -> left on, idle timer armed). A symlink stands for the device node
 // so the pty behind it can disappear and come back.
@@ -918,6 +975,7 @@ TEST(comm_signal_nak_busy_is_retried_with_the_same_id) {
     status::StatusRegistry reg([] { return int64_t(0); });
     Config cfg = testConfig();
     CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    base.remoteProtoVer = 2;                          // D13: the immediate GET_INFO is answered, so it does not eat the BUSY
     base.busyRemote = 1;                              // the PC start resync (SIGNAL_STOPPED) gets NAK BUSY once
     const size_t m = 0;
     CHECK(h.connect(base.path()));
@@ -1921,6 +1979,7 @@ struct RecRig {
         cfg = infoConfig("401.mid");
         cfg.recFolder = fr.recDir.string();
         base.protoVer = baseVer;
+        base.remoteProtoVer = remoteVer;  // D13: GET_INFO to the remote goes out on the first link-up status
         base.ble = true;
         h = std::make_unique<CommHandler>(cfg, [] { return recPorts(); }, reg);
         h->setMidiSinkForTest([](const std::vector<uint8_t>&) {});
@@ -2185,4 +2244,22 @@ TEST(comm_b10_shutdown_while_recording_ends_the_recorder) {
         if (!gone) std::this_thread::sleep_for(100ms);
     }
     CHECK(gone);
+}
+
+// D13 (owner 2026-11-23, option b): GET_INFO goes to the remote as soon as the base reports the link up, within the
+// answer to that status (the status request plus 400 ms), not at the next 2 s keepalive tick.
+TEST(comm_d13_get_info_to_remote_on_the_link_up_status) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(2500ms);  // past a keepalive tick: nothing was asked of the absent remote
+    const size_t m = base.log().size();
+    CHECK_EQ(countType(base.log(), m, MsgType::GET_INFO), size_t(0));
+    base.ble = true;
+    CHECK(h.requestStatus().has_value());
+    const bool got = waitFor([&] { return countType(base.log(), m, MsgType::GET_INFO) >= 1; }, 450);
+    h.shutdown();
+    CHECK(got);
 }

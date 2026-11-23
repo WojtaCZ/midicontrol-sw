@@ -115,9 +115,12 @@ Config parseConfig(const std::string& iniText) {
         getInt("WarmupMs", cfg.warmupMs, 0);
         getBool("KeepPowerOn", cfg.keepPowerOn);
         getInt("VerseGapMs", cfg.verseGapMs, 0);
-        // B3: idle limit in ms (>= 1000: 0 would switch the organ off at once, and no "never" setting exists).
-        if (auto it = pb.find("OrganIdleOffMs"); it != pb.end())
-            cfg.organIdleOffMs = parseInt("OrganIdleOffMs", it->second, 1000);
+        // B3: idle limit in ms: 0 = never switch off (owner 2026-11-23), else >= 1000.
+        if (auto it = pb.find("OrganIdleOffMs"); it != pb.end()) {
+            cfg.organIdleOffMs = parseInt("OrganIdleOffMs", it->second, 0);
+            if (cfg.organIdleOffMs != 0 && cfg.organIdleOffMs < 1000)
+                throw std::runtime_error("config: invalid value for OrganIdleOffMs: '" + it->second + "'");
+        }
     }
 
     auto webIt = sections.find("WEB");
@@ -138,6 +141,7 @@ Config parseConfig(const std::string& iniText) {
         }
         if (auto it = web.find("AllowedHosts"); it != web.end()) {
             std::string cur;
+            // Defaults stay; the listed names are added to them.
             for (size_t i = 0; i <= it->second.size(); ++i) {
                 const char ch = i < it->second.size() ? it->second[i] : ',';
                 if (ch == ',' || ch == ' ') {

@@ -71,7 +71,8 @@ TEST(config_organ_idle_off_ms) {
     const std::string base = "[FILES]\nPlayFolder = p\nRecordFolder = r\n";
     CHECK_EQ(parseConfig(base).organIdleOffMs, int64_t(30LL * 60 * 1000));
     CHECK_EQ(parseConfig(base + "[PLAYBACK]\nOrganIdleOffMs = 120000\n").organIdleOffMs, int64_t(120000));
-    const char* bad[] = {"abc", "-5", "0", "999"};
+    CHECK_EQ(parseConfig(base + "[PLAYBACK]\nOrganIdleOffMs = 0\n").organIdleOffMs, int64_t(0));  // never off
+    const char* bad[] = {"abc", "-5", "1", "999"};
     for (auto* b : bad) {
         bool threw = false;
         try {
@@ -208,9 +209,12 @@ TEST(config_song_code_normalise) {
 
 // B7: [WEB] AllowedHosts.
 TEST(config_b7_web_allowed_hosts) {
-    CHECK(parseConfig("[FILES]\nPlayFolder=/tmp/p\nRecordFolder=/tmp/r\n").webAllowedHosts.empty());
+    Config d = parseConfig("[FILES]\nPlayFolder=/tmp/p\nRecordFolder=/tmp/r\n");
+    CHECK_EQ(d.webAllowedHosts.size(), size_t(2));
+    CHECK_EQ(d.webAllowedHosts[0], "midicontrol");
+    CHECK_EQ(d.webAllowedHosts[1], "midicontrol.local");
     Config c = parseConfig("[FILES]\nPlayFolder=/tmp/p\nRecordFolder=/tmp/r\n[WEB]\nAllowedHosts = Organ-PC, organ.local\n");
-    CHECK_EQ(c.webAllowedHosts.size(), size_t(2));
-    CHECK_EQ(c.webAllowedHosts[0], "organ-pc");
-    CHECK_EQ(c.webAllowedHosts[1], "organ.local");
+    CHECK_EQ(c.webAllowedHosts.size(), size_t(4));
+    CHECK_EQ(c.webAllowedHosts[2], "organ-pc");
+    CHECK_EQ(c.webAllowedHosts[3], "organ.local");
 }

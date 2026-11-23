@@ -107,6 +107,8 @@ public:
     // false: not started (already recording, no MIDI input port, no file, spawn failed, or cancelled).
     bool recordSong();
     void organOn();
+    // Console "on": organOn() plus the idle-off timer (B1, owner 2026-11-23), so a manual on never stays on forever.
+    void organOnManual();
     void organOff();
     std::vector<std::string> songList() const;
 
@@ -422,6 +424,7 @@ private:
     void armIdleOff();
     void disarmIdleOff();
     void armIdleOffIfOn();  // B1
+    bool playOrRecordBusy();
     void doIdleOff();
     std::atomic<int64_t> _idleOffArmedMs{-1};  // steady ms when armed, -1 = not armed
     std::atomic<bool> _idleOffQueued{false};

@@ -32,7 +32,7 @@ struct Config {
     bool keepPowerOn = false;          // leave organ power on between songs
     int verseGapMs = 0;                // silence before a section repeated with add-verse
     // SYS-ORG-05: an organ the PC knows is on is switched off after this idle time (SYSTEM.md D27 default 30 min).
-    // [PLAYBACK] OrganIdleOffMs, ms, >= 1000.
+    // [PLAYBACK] OrganIdleOffMs, ms, >= 1000; 0 = never switch off.
     int64_t organIdleOffMs = 30LL * 60 * 1000;
 
     // [WEB] status page + Stops editor (writes <CODE>.conf per song; 0.0.0.0 exposes that to the LAN)
@@ -41,7 +41,9 @@ struct Config {
     std::string webBind = "0.0.0.0";   // IPv4 address to listen on
     // B7: host names (lower-case, no port) a write request (stop edit, firmware upload, fault ack) may name in its
     // Host header besides IP literals and "localhost"; empty = IP/localhost only
-    std::vector<std::string> webAllowedHosts;
+    // B7: Host names accepted on writes besides IPs/localhost. Defaults stay, [WEB] AllowedHosts adds to them;
+    // the machine's own gethostname() and "<it>.local" are added by WebServer; "*" accepts any Host.
+    std::vector<std::string> webAllowedHosts = {"midicontrol", "midicontrol.local"};
 
     // [DIAG] base log + remote diagnostics
     std::string diagLogPort;           // e.g. "/dev/ttyACM1"; empty = auto-detect "MIDIControl log"
