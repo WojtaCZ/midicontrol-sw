@@ -44,8 +44,7 @@ Source: audit/OWNER-ANSWERS.md, plans/2026-11-16-owner-answers-impl.md, plans/20
 ### Open
 - Bench (owner): B2 stop during a remote update; B13 freeze test below; B7 in the real Docker deployment (hostname accepted).
 - B5: wait for the owner's OK on the explanation (no code).
-- B7 doc drift (found 2026-11-23): docs/status-web-and-service.md:219 still says Mark seen calls `?ack=<id>`, and :283 says only IP/localhost/`AllowedHosts` (default list and own hostname missing). Fix the wording.
-- docs/manual/facts/pc.md:117 still says SIGNAL_RECORDING is not implemented (A7 did it, 6e6b42d); verify and fix.
+- B7 doc drift and facts/pc.md SIGNAL_RECORDING: checked 2026-11-23, both docs already correct.
 
 ### B12 Cleanup leftovers (Q2-32)
 - Owner 2026-11-23 approved: delete wt-*, fault, outIndex, MIDICONTROL/ at the workspace root; the owner runs it (classifier blocked it): `rm -rf wt-ctl-d2 wt-fw-c2 wt-sw-b2 MIDICONTROL && rm -f fault outIndex`. Keep reference/ and graft/ and backups/. songs/406B.conf is already gone (not tracked).
