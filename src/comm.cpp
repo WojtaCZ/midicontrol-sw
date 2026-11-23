@@ -1019,7 +1019,12 @@ void CommHandler::onInfoResp(const Packet& pkt) {
             std::lock_guard<std::mutex> lk(_resyncMutex);
             need = (_lastSignalInfo.has_value() && !_signalInfoSent) ||
                    (_recordingSignalled.load() && !_recordingRemoteSent);
-            if (need) _remoteDirty = true;
+            if (need) {
+                _remoteDirty = true;
+                // A resync attempt still awaiting its ACKs went out without this flag (version unknown then): its late
+                // ACKs must not clear the dirty state again before the queued resync has run.
+                _resyncAwait.clear();
+            }
         }
         if (need && !_resyncQueued.exchange(true)) post({Command::Kind::RemoteResync, {}, {}, 0});
     }
