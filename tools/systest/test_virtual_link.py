@@ -20,6 +20,9 @@ def test_keepalive_cadence_loss_and_recovery(make_rig):
     assert wait_connected(rig)
     time.sleep(7)
     ts = [t for t, _ in rig.base.received(MT.KEEPALIVE)]
+    # The connect hello (session nonce, A1) goes out just before the loop's first KEEPALIVE: drop it.
+    if len(ts) >= 2 and ts[1] - ts[0] < 0.1:
+        ts = ts[1:]
     gaps = [b - a for a, b in zip(ts, ts[1:])]
     assert len(gaps) >= 2 and all(1.7 <= g <= 2.4 for g in gaps), gaps
     assert _base_fields(rig)["alive"] is True
