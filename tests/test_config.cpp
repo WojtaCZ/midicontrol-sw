@@ -66,6 +66,14 @@ TEST(parse_config_playback) {
     CHECK_EQ(cfg.verseGapMs, 800);
 }
 
+// D2/D5: the organ stays on between songs by default; KeepPowerOn = false is the old "off after each song".
+TEST(config_keep_power_on_default_true_and_opt_out) {
+    Config def = parseConfig("[FILES]\nPlayFolder = p\nRecordFolder = r\n");
+    CHECK(def.keepPowerOn);
+    Config off = parseConfig("[FILES]\nPlayFolder = p\nRecordFolder = r\n[PLAYBACK]\nKeepPowerOn = false\n");
+    CHECK_FALSE(off.keepPowerOn);
+}
+
 // B3: [PLAYBACK] OrganIdleOffMs.
 TEST(config_organ_idle_off_ms) {
     const std::string base = "[FILES]\nPlayFolder = p\nRecordFolder = r\n";
@@ -87,7 +95,7 @@ TEST(config_organ_idle_off_ms) {
 TEST(parse_config_defaults_and_invalid_values) {
     Config cfg = parseConfig("[FILES]\nPlayFolder = p\nRecordFolder = r\n");
     CHECK_EQ(cfg.warmupMs, 3000);
-    CHECK_FALSE(cfg.keepPowerOn);
+    CHECK(cfg.keepPowerOn);
     CHECK_EQ(cfg.verseGapMs, 0);
 
     const char* bad[] = {"[PLAYBACK]\nWarmupMs = abc\n", "[PLAYBACK]\nWarmupMs = -1\n",

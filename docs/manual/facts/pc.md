@@ -106,7 +106,7 @@ The organist normally controls the player from the remote (separate facts file);
 - Play (PLAY_SONG): if the organ is off the PC switches it on and waits `WarmupMs` (default 3000 ms); status "warming up", log "Organ power on, warming up N ms..." (`src/comm.cpp:1530`). A second play during warm-up supersedes the first.
 - Add verse (REPLAY_ANCHOR from the remote, console `verse`): the current section is repeated once more after it ends; counted in the label as " +k" (`src/playback.cpp:57-61`). Refused when nothing is playing (NAK NOT_PLAYING; console "Nothing is playing", `src/console_exec.cpp:60`). The stops are not re-sent on a repeat. Optional gap `VerseGapMs` between repeats (default 0).
 - Stop (STOP_SONG): payload 0x00 stops; payload 0x01 (pause) is **treated as stop**; other payloads: NAK INVALID_PAYLOAD (`src/dispatch.cpp:100`). There is **no resume** (SYS-USE-09/21 not met; see Possible bugs).
-- When the song ends or is stopped: indicator cleared, SIGNAL_STOPPED sent, organ switched off unless `KeepPowerOn = true` (log "Playback finished" plus ", organ power off." `src/comm.cpp:1610-1632`). The organ is also switched off after 30 min idle (see 2.6).
+- When the song ends or is stopped: indicator cleared, SIGNAL_STOPPED sent, organ stays on (default `KeepPowerOn = true`) and the idle-off timer starts; with `KeepPowerOn = false` it is switched off at once (log "Playback finished" plus ", organ power off." `src/comm.cpp:1610-1632`). The organ is also switched off after 30 min idle (see 2.6).
 - Status fields (web, console): `playback` (idle/warming up/playing), `song`, `section`, `stops`, `last_song`, `last_sections`, `last_end` ("ended normally", "stopped", "failed: <why>").
 
 ### 2.3 Recording a new song
@@ -114,7 +114,7 @@ The organist normally controls the player from the remote (separate facts file);
 - Behaviour (`src/comm.cpp:1192-1276`): second `record` logs "Already recording; Stop first."; no MIDI input logs "MIDIControl MIDI input port not found; cannot record."; if the organ is off it is switched on first (warm-up). It runs `arecordmidi -p <alsa port> <file>`; log "Recording to <path>"; failure "Failed to start arecordmidi (rc=N)". `stop` ends it (SIGTERM, else kill). Console reply on failure: "Recording not started (see the log)".
 - File: `<RecordFolder>/YYYY-MM-DDTHH:MM:SS.mid`; on a name clash `-2` to `-99` is appended; "Cannot create a recording file in <folder>" if impossible (`:1235`).
 - To play it back: it is **not** in the play folder. The owner has to copy/rename it to a valid code in PlayFolder (e.g. `408.mid`); presumably so, not documented (open question).
-- Still not implemented compared with SYSTEM.md SYS-REC-*/D29: name `REC_YYYY-MM-DD_HHMM.mid` (the file keeps the timestamp name above), cutting the leading silence, writing `<name>.conf` from the stops at the first note, SIGNAL_RECORDING (`.trail/learnings/2026-11-12-recordings-take-their-stops-from-the*.md`).
+- Still not implemented compared with SYSTEM.md SYS-REC-*/D29: name `REC_YYYY-MM-DD_HHMM.mid` (the file keeps the timestamp name above), cutting the leading silence, writing `<name>.conf` from the stops at the first note (SIGNAL_RECORDING itself is implemented since A7, 6e6b42d: the remote shows a recording, `src/comm.cpp:497,586`; a v1 remote gets nothing) (`.trail/learnings/2026-11-12-recordings-take-their-stops-from-the*.md`).
 
 ### 2.4 Organ stops per song
 - File `<PlayFolder>/<CODE>.conf` next to `<CODE>.mid` (e.g. `406B.conf`). Written by the web page or by hand (`src/stops_file.cpp:118-177`).
@@ -131,7 +131,7 @@ The organist normally controls the player from the remote (separate facts file);
 - Remote: SIGNAL_PLAYING (payload = song code) before the first SIGNAL_ANCHOR; SIGNAL_ANCHOR payload = ASCII section label ("Predehra" for the intro, "Sloka N" for verse N, with " +k" for pending repeats); SIGNAL_STOPPED at the end (`src/comm.cpp:1515-1632`, `src/playback.cpp:57-61`).
 
 ### 2.6 Organ power
-- Switched on by play (and record); off at the end of the song unless `KeepPowerOn`. Idle power-off after **30 min**, config key `[PLAYBACK] OrganIdleOffMs` (ms, integer >= 1000, B3; `0` = never switch off, owner 2026-11-23). Deferred while a song plays or a recording runs. The timer is also armed after a song end, Stop or failed start with `KeepPowerOn = true`, and when an organ-off command gave up with the relay still on (B1), so an organ the PC knows is on never stays on without it. Console `on` / `off` switch the organ manually; a console `on` and an `on` adopted from the base menu also arm the idle timer (B1, 2026-11-23).
+- Switched on by play (and record); stays on at the end of the song (default `KeepPowerOn = true`; `false` = off after each song, the old behaviour). Idle power-off after **30 min**, config key `[PLAYBACK] OrganIdleOffMs` (ms, integer >= 1000, B3; `0` = never switch off, owner 2026-11-23). Deferred while a song plays or a recording runs. The timer is armed after a song end, Stop or failed start (default `KeepPowerOn = true`), and when an organ-off command gave up with the relay still on (B1), so an organ the PC knows is on never stays on without it. Console `on` / `off` switch the organ manually; a console `on` and an `on` adopted from the base menu also arm the idle timer (B1, 2026-11-23).
 - Start-up log lines: "Startup: organ power off", "Startup: MIDI output port not found; no All Notes Off.", "Startup: organ found switched on; left on, idle power-off in <time>.", "Organ idle for <time>: power off." (`src/comm.cpp:1441-1484`).
 
 ## 3. Administration
@@ -155,7 +155,7 @@ Search order: `--config PATH`, `$MIDICONTROL_CONFIG`, `$XDG_CONFIG_HOME/midicont
 | FILES | RecordFolder | required | folder for recordings; must exist | same |
 | BINDINGS | (any) | unused | parsed, reserved | `include/midicontrol/config.hpp:18` |
 | PLAYBACK | WarmupMs | 3000 | wait after switching the organ on, integer >= 0 | `src/config.cpp:112` |
-| PLAYBACK | KeepPowerOn | false | leave the organ on after a song | `:113` |
+| PLAYBACK | KeepPowerOn | true | leave the organ on after a song (idle-off timer switches it off); false = off after each song | `:113` |
 | FILES | SongCodeNormalise | true | leading zeros ignored: 0406 = 406 (B4) | `src/config.cpp` |
 | PLAYBACK | OrganIdleOffMs | 1800000 | idle power-off time, ms, integer >= 1000; 0 = never | `src/config.cpp` |
 | PLAYBACK | VerseGapMs | 0 | pause before a repeated verse, >= 0 | `:114` |

@@ -1829,7 +1829,7 @@ void CommHandler::playbackEnded(const std::string& how, const char* counter) {
 
 void CommHandler::doPlay(const Command& cmd) {
     _organClaimed.store(true);  // a song owns the organ now: no startup power off
-    disarmIdleOff();            // after the song KeepPowerOn decides (2026-10-26, unchanged)
+    disarmIdleOff();            // after the song KeepPowerOn decides (default true since D2/D5: stays on, idle-off timer)
     if (releasePlayer()) playbackEnded("stopped", "songs_stopped");  // a new song replaces it
     {
         std::lock_guard<std::mutex> lk(_songMutex);
