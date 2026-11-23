@@ -47,7 +47,7 @@ Top to bottom: notices, panel "Systém", panel "Rejstříky písní" (`src/web_p
 - Row right side: "nenastaveno" (no file), "vše vypnuto" (file with empty list), or "N rejstřík/rejstříky/rejstříků" and the numbers under the code (screenshot: 406B has "6 rejstříků", numbers 1 2 3 17 18 19).
 - Empty list: "Žádná píseň neodpovídá výběru." (filter) or "Ve složce nejsou žádné písně." (`:1031`). Footer: "Zobrazeno X z Y" or "N písní" plus " · nastaveno N" (`:1035`).
 - Editor heading "Píseň <code>" (`:972`) or "Ve složce nejsou žádné písně" / "Rejstříky nenačteny" / "Načítám rejstříky…". Stop buttons are grouped under the group names (defaults: "Spojky a pomocná zařízení" 1-7, "Pedál" 8-16, "I. manuál – hlavní stroj" 17-29, "II. manuál – žaluziový stroj" 30-42; `src/organ.cpp:140`). Each button shows the number and name; a click toggles it; counter "N z M zapnuto" (`:978`).
-- State badge: "neuložené změny", "nenastaveno: varhany zůstanou, jak jsou" (with `[ORGAN] DefaultStops` set: "nenastaveno: výchozí registrace (<seznam>)", list row "výchozí"), "uloženo", "uloženo: vše vypnuto".
+- State badge: "neuložené změny", "nenastaveno: varhany zůstanou, jak jsou" (default registration set: "nenastaveno: výchozí registrace (<seznam>)", or "(vše vypnuto)" when the default is empty; list row "výchozí"; the pinned row "Výchozí" shows "žádná", "N rejstříků" or "vše vypnuto", badge "žádná: varhany zůstanou, jak jsou" / "uloženo" / "uloženo: vše vypnuto"), "uloženo", "uloženo: vše vypnuto".
 - Buttons: "Uložit" (after a save shows "Uloženo" for 1.2 s), "Vše vypnout", "Zrušit nastavení" (title "Smaže uložený výběr: při spuštění písně se rejstříky nemění", `:1107-1117`).
 - Messages: "Ukládám…" (`:1055`), "Neuloženo: <reason>" (`:1063`), load error "Rejstříky se nepodařilo načíst: <reason> " with button "Zkusit znovu" (`:948-949`).
 - Confirm dialogs: "Zahodit neuložené změny písně <code>?" when switching song with edits (`:1046`); "Zrušit nastavení rejstříků písně <code>?" plus " Neuložené změny se také zahodí." and " Při spuštění této písně pak varhany zůstanou, jak jsou." (`:1114`). Closing or reloading the tab with unsaved edits triggers the browser's own warning (`:1198`).
@@ -164,7 +164,7 @@ Search order: `--config PATH`, `$MIDICONTROL_CONFIG`, `$XDG_CONFIG_HOME/midicont
 | WEB | Bind | 0.0.0.0 | IPv4 address to listen on | `:129` |
 | DIAG | LogPort | empty = auto-detect the "MIDIControl log" USB port | serial device of the base log | `:138` |
 | DIAG | Dir | `$XDG_STATE_HOME/midicontrol`, else `~/.local/state/midicontrol`, else `/tmp/midicontrol-<uid>/diag` | diagnostics store | `:139,183-190` |
-| ORGAN | DefaultStops | empty | stop numbers sent at the start of a song that has no `<CODE>.conf` (a file, even empty, wins) | `src/organ.cpp` |
+| ORGAN | DefaultStops | key absent = songs without a file leave the organ alone; key present but empty = all stops off | stop numbers sent at the start of a song that has no `<CODE>.conf` (a file, even empty, wins; `<PlayFolder>/_default.conf` written by the web page wins over this key, an empty one = all off) | `src/organ.cpp` |
 | ORGAN | StopsEnabled | true | master switch for per-song stops | `src/organ.cpp:163` |
 | ORGAN | Channel | 12 | MIDI channel 1-16 for Program Changes | `:164` |
 | ORGAN | ProgramOffset | -1 | stop number to program number offset, -127..127 | `:165` |
@@ -229,7 +229,7 @@ Caveats: the controller is "Nepřipojen" (fake base has no remote), firmware "no
 1. How is a recording turned into a playable song (copy to PlayFolder, rename to a code)? Is that the intended workflow until SYS-REC-* is done? Who may do it (organist or admin)?
 2. Recording starts from the base menu `Nahraj` (A7); the manual describes this. The base shows no recording state yet (TODO C3), so the manual says so.
 3. Pause/resume (SYS-USE-09/21): pause behaves as stop and resume does not exist. What should the manual say?
-4. Default registration for songs without a `.conf` (SYS-USE-20): not implemented; confirm "organ stays as it is" is the text for the manual.
+4. ANSWERED (owner 2026-11-23): default registration for songs without a `.conf` (SYS-USE-20) is implemented; not set = organ stays as it is, set but empty (empty `_default.conf` or empty `DefaultStops`) = all stops off, like an empty song file.
 5. Idle power-off is 30 min by default, `OrganIdleOffMs` (B3). Status page: chip "Idle-off armed", Czech notice for `organ_power_fault`.
 6. SYSTEM.md lines 360-520 were not re-read in this pass; status of remaining PC-side requirements there is unverified.
 7. Backups: does the owner want a recommended procedure or a script?

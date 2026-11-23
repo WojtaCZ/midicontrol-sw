@@ -20,10 +20,19 @@ Rejstříky, které se mají zapnout na začátku písně, nastavíte na webové
 ![Editor rejstříků](img/web/rejstriky-1100.png){ width="90%" }
 
 - **Vše vypnout** vypne všechna tlačítka; po **Uložit** se na začátku písně varhany vypnou a nezapne se nic.
-- **Zrušit nastavení** smaže uložený výběr; píseň pak nechá varhany, jak jsou.
+- **Zrušit nastavení** smaže uložený výběr; píseň pak dostane výchozí registraci (viz níže), a není-li žádná nastavena, nechá varhany, jak jsou.
 - Změna platí od příštího spuštění písně.
 
 Nastavení se ukládá vedle písně do souboru `<kód>.conf`.
+
+## Výchozí registrace { #vychozi-registrace }
+
+Píseň bez vlastního nastavení rejstříků dostane **výchozí registraci**. Upravíte ji na stejné stránce v prvním řádku seznamu, **Výchozí**; ukládá se stejně jako rejstříky písně.
+
+- **Vybrané rejstříky:** na začátku písně se varhany vypnou a zapnou se vybrané rejstříky.
+- **Vše vypnuto** (uloženo s prázdným výběrem): na začátku písně se varhany vypnou a nezapne se nic, stejně jako u písně s prázdným nastavením.
+- **Žádná** (výchozí stav, nic neuloženo): varhany zůstanou, jak jsou.
+- **Zrušit nastavení** (v řádku Výchozí: obnovit z konfigurace) smaže uloženou výchozí registraci a vrátí hodnotu z konfigurace počítače.
 
 !!! warning
     Webová stránka nemá přihlášení. Kdokoli v místní síti může změnit rejstříky nebo nahrát firmware. Používejte ji jen v důvěryhodné síti.

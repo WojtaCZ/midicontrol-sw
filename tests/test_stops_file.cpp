@@ -199,7 +199,7 @@ TEST(stops_put_handler_validates) {
 }
 TEST(stops_b8_default_registration_for_songs_without_a_file) {
     auto o = mc::organ::parseOrgan({{"DefaultStops", "12, 1 5"}});
-    CHECK(o.defaultStops == (std::vector<int>{1, 5, 12}));
+    CHECK(o.defaultStops == std::optional<std::vector<int>>(std::vector<int>{1, 5, 12}));
     auto p = planFor(o, std::nullopt);
     CHECK_EQ(p.preamble.size(), 4u);  // all-off + 3 stops
     CHECK(p.dropProgramChanges);
@@ -215,10 +215,16 @@ TEST(stops_b8_default_registration_for_songs_without_a_file) {
     p = planFor(o, std::nullopt);
     CHECK(p.preamble.empty());
     CHECK_EQ(p.text, std::string("disabled"));
-    // Empty default = today's behaviour.
+    // Present but empty default = all off (owner 2026-11-23), like an empty song file.
     auto e = mc::organ::parseOrgan({{"DefaultStops", ""}});
-    CHECK(e.defaultStops.empty());
+    CHECK(e.defaultStops.has_value() && e.defaultStops->empty());
     p = planFor(e, std::nullopt);
+    CHECK_EQ(p.preamble.size(), 1u);  // all-off step only
+    CHECK(p.dropProgramChanges);
+    CHECK_EQ(p.text, std::string("default all off"));
+    // No key at all = not set: the organ is left alone.
+    auto n = mc::organ::parseOrgan({});
+    p = planFor(n, std::nullopt);
     CHECK(p.preamble.empty());
     CHECK_EQ(p.text, std::string("not set"));
 }
@@ -226,21 +232,26 @@ TEST(stops_b8_default_is_in_the_stops_json) {
     auto o = mc::organ::parseOrgan({{"DefaultStops", "3,4"}});
     auto j = toJson(o, {"401"}, SongStops{});
     CHECK(j.find("\"default\":[3,4]") != std::string::npos);
-    CHECK(toJson(mc::organ::defaultOrgan(), {"401"}, SongStops{}).find("\"default\":[]") != std::string::npos);
+    CHECK(toJson(mc::organ::defaultOrgan(), {"401"}, SongStops{}).find("\"default\":null") != std::string::npos);
+    auto e = mc::organ::parseOrgan({{"DefaultStops", ""}});
+    CHECK(toJson(e, {"401"}, SongStops{}).find("\"default\":[]") != std::string::npos);
 }
 
 // Item 2 (owner 2026-11-23): the default registration is editable on the page and kept in _default.conf.
 TEST(stops_default_file_overrides_config_and_empty_file_is_no_default) {
     std::string dir = makeTempDir();
-    const std::vector<int> cfg{9, 10};
+    const Stops cfg = std::vector<int>{9, 10};
     CHECK(loadDefault(dir, 42, cfg, nullptr) == cfg);  // no file: config value
     saveDefault(dir, {5, 3});
     CHECK(has(readFile(dir + "/_default.conf"), "Stops = 5 3"));
-    CHECK(loadDefault(dir, 42, cfg, nullptr) == (std::vector<int>{3, 5}));
-    saveDefault(dir, {});  // existing empty file wins: no default (organ unchanged)
-    CHECK(loadDefault(dir, 42, cfg, nullptr).empty());
+    CHECK(loadDefault(dir, 42, cfg, nullptr) == Stops(std::vector<int>{3, 5}));
+    saveDefault(dir, {});  // existing empty file wins: all off
+    auto z = loadDefault(dir, 42, cfg, nullptr);
+    CHECK(z.has_value() && z->empty());
+    CHECK(loadDefault(dir, 42, std::nullopt, nullptr).has_value());  // also with nothing configured
     removeDefault(dir);
     CHECK(loadDefault(dir, 42, cfg, nullptr) == cfg);
+    CHECK(!loadDefault(dir, 42, std::nullopt, nullptr).has_value());  // no file, nothing configured: not set
     removeDefault(dir);  // nothing left: no error
 }
 TEST(stops_default_put_handler_and_plan) {
@@ -252,11 +263,17 @@ TEST(stops_default_put_handler_and_plan) {
     auto r = handlePut(st, o, songs, "_default", "{\"stops\":[4,2]}");
     CHECK_EQ(r.status, 200);
     CHECK_EQ(r.body, std::string("{\"code\":\"_default\",\"stops\":[2,4]}"));
-    CHECK(st.defaultStops({}) == (std::vector<int>{2, 4}));
+    CHECK(st.defaultStops({}) == Stops(std::vector<int>{2, 4}));
     CHECK_FALSE(findFile(dir, "401").has_value());  // never mistaken for a song file
     o.defaultStops = st.defaultStops({});
     CHECK_EQ(planFor(o, std::nullopt).text, std::string("default 2 4"));
     CHECK_EQ(planFor(o, std::vector<int>{}).text, std::string("all off"));  // an existing empty song file stays all off
     CHECK_EQ(handlePut(st, o, songs, "_default", "{\"stops\":null}").status, 200);
-    CHECK(st.defaultStops({7}) == (std::vector<int>{7}));
+    CHECK(st.defaultStops(Stops(std::vector<int>{7})) == Stops(std::vector<int>{7}));
+    CHECK(!st.defaultStops(std::nullopt).has_value());
+    CHECK_EQ(handlePut(st, o, songs, "_default", "{\"stops\":[]}").status, 200);
+    auto z = st.defaultStops(std::nullopt);
+    CHECK(z.has_value() && z->empty());
+    o.defaultStops = z;
+    CHECK_EQ(planFor(o, std::nullopt).text, std::string("default all off"));
 }

@@ -37,7 +37,9 @@ struct OrganConfig {
     int allOffDelayMs = 100;
     int stopDelayMs = 20;
     bool dropSongProgramChanges = true;
-    std::vector<int> defaultStops;     // ascending, unique, 1..stopCount; empty = songs without a file leave the organ alone (B8)
+    // Default registration for songs without a file (B8): nullopt = not set, such songs leave the organ alone;
+    // set = ascending, unique, 1..stopCount; set but empty = all stops off (owner 2026-11-23).
+    std::optional<std::vector<int>> defaultStops;
     std::vector<StopGroup> groups;     // ranges contiguous from 1, no overlap
     std::vector<Stop> stops;           // stops[i].number == i + 1
     int stopCount() const { return static_cast<int>(stops.size()); }

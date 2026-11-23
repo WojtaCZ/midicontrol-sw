@@ -199,7 +199,7 @@ Stops = 3 4 5 14
 
 **Stop names** default to Czech organ terminology as used in Czech parish dispositions (divisions "Pedál", "I. manuál – hlavní stroj", "II. manuál – žaluziový stroj"; stops noun first, e.g. "Flétna trubicová 8'", mixtures by ranks, e.g. "Mixtura 3řadá"), mapped from the Opus 910 console's Dutch labels (the mapping is commented in `src/organ.cpp`). `NameN` and `Groups` override them.
 
-**`[ORGAN]` keys** (all optional, defaults are the Johannus Opus 910; see `config.conf`): `StopsEnabled`, `Channel`, `ProgramOffset` (program = octal ST number + offset), `ST1`..`ST42`, `Program1`..`Program42` (override), `DropSongProgramChanges`, `DefaultStops` (stop numbers for songs without a file, e.g. `1,5,12`; empty = such songs leave the organ alone; a file, even an empty one, wins; the log shows `default 1 5 12`), `AllOffSysex`, `AllOffDelayMs`, `StopDelayMs`, `Groups`, `Name1`..`Name42`.
+**`[ORGAN]` keys** (all optional, defaults are the Johannus Opus 910; see `config.conf`): `StopsEnabled`, `Channel`, `ProgramOffset` (program = octal ST number + offset), `ST1`..`ST42`, `Program1`..`Program42` (override), `DropSongProgramChanges`, `DefaultStops` (stop numbers for songs without a file, e.g. `1,5,12`; key absent = such songs leave the organ alone, key present but empty = all stops off; a file, even an empty one, wins; the log shows `default 1 5 12`), `AllOffSysex`, `AllOffDelayMs`, `StopDelayMs`, `Groups`, `Name1`..`Name42`.
 
 **API** (`Content-Type: application/json` required on PUT, else 415, so a plain cross-site form cannot post):
 

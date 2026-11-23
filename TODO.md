@@ -17,8 +17,8 @@ Per-song stops are implemented (stops editor on the home page, one `<CODE>.conf`
 ## Organ power behaviour between songs
 
 - Already decided in `docs/SYSTEM.md` (D2, D5, D27; section 6 gaps 3 and 4): the organ stays on between songs and
-  switches off after 30 minutes idle. The code still defaults to `KeepPowerOn=false` (power off after each song):
-  this is a spec gap to close in code, not an open decision. Do not change the requirement.
+  switches off after 30 minutes idle. `KeepPowerOn` now defaults to true (435e1e6; power stays on between songs, `false` is the opt-out):
+  the requirement is met in code. Do not change the requirement.
 - Power-cycling to reset the stops remains a separate question, see "Organ stops" above.
 
 ## Web: Host header not checked (accepted, SYS-WEB-05 / D4)
@@ -107,6 +107,7 @@ Line numbers are from branch audit/step4-manual on 2026-11-16 and will drift; re
 ### B8 Configurable default registration for songs without a stop file (SYS-USE-20, M-default-registration)
 - DONE 2026-11-22: `[ORGAN] DefaultStops` (organ.cpp parse+validate 1..stopCount, sorted/unique), `planFor` (stops_file.cpp), `"default":[..]` in /api/stops, editor badge/row "výchozí". Existing empty file = all off (default does not apply). Not done: comm-level preamble test (no existing harness for the stops preamble; planFor is the unit used by doPlay); user manual sprava.md lives in another repo (E2). Run tools/sync-system-doc.sh. Owner: which stops go in the default list (O-14).
 - DONE 2026-11-23: the default is editable from the stops editor (pinned first row "Vychozi"/`_default`). Stored as `<PlayFolder>/_default.conf` (same format as a song file, `PUT /api/stops/_default`), not in config.conf: the daemon never rewrites the hand-edited config, the file sits with the song stop files, is written atomically like them and survives a container update. File present = it wins over `[ORGAN] DefaultStops`, an existing EMPTY file = all off / no default; no file = the config value; the editor's "Obnovit z konfigurace" deletes the file. Tests stops_default_*.
+- DONE 2026-11-23 (owner): an EMPTY default registration means ALL OFF, like an empty song file. `OrganConfig::defaultStops` is now optional: not set (no `_default.conf`, no `DefaultStops` key) = organ left alone; `_default.conf` existing but empty, or `DefaultStops` key present with empty value = all off (plan text "default all off"). `/api/stops` `"default"` is `null` (not set) or an array; the page shows "žádná" vs "vše vypnuto" like a song. "Obnovit z konfigurace" still deletes the file. Tests stops_b8_*, stops_default_*, organ_b8_*.
 - Goal: a song with no `<CODE>.conf` gets a configured default set of stops instead of "not set" (organ unchanged).
 - Current code: src/stops_file.cpp `planFor()` (~299-313) returns text "not set" and no preamble when `!stops`; used at comm.cpp:1559. Organ config parsing in src/organ.cpp (~163-170: StopsEnabled, DropSongProgramChanges); OrganConfig in include/midicontrol/organ.hpp:33-39.
 - Change: new organ key (proposed `[ORGAN] DefaultStops=1,5,12` using the same stop-number list syntax as the .conf files; empty = today's behaviour). `planFor` builds the preamble from the default set when there is no file; plan text "default <list>". The stops editor on the home page shows "default" for a song without a file. Validate against the stop count in config load.

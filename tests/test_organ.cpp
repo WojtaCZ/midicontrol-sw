@@ -66,5 +66,6 @@ TEST(organ_b8_default_stops_validation) {
     CHECK_THROWS(parseOrgan({{"DefaultStops", "abc"}}));
     CHECK_THROWS(parseOrgan({{"DefaultStops", "1,,x"}}));
     CHECK(parseOrgan({{"DefaultStops", "7 7 3"}}).defaultStops == (std::vector<int>{3, 7}));
-    CHECK(parseOrgan({}).defaultStops.empty());
+    CHECK(!parseOrgan({}).defaultStops.has_value());  // not set
+    CHECK(parseOrgan({{"DefaultStops", ""}}).defaultStops.has_value());  // present but empty = all off
 }
