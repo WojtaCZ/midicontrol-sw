@@ -38,6 +38,7 @@ def prepare(rundir, src):
     if not os.path.isdir(play):
         shutil.copytree(os.path.join(src, "play"), play)
     cfg = os.path.join(rundir, "config.conf")
+    # KeepPowerOn = false below: the bench tests the opt-out path (organ off at stop); the default is true.
     with open(cfg, "w") as f:
         f.write(f"[FILES]\nPlayFolder = {play}\nRecordFolder = {rundir}/record\n[PLAYBACK]\nWarmupMs = 3000\n"
                 f"KeepPowerOn = false\nVerseGapMs = 0\n[WEB]\nEnabled = true\nPort = 28120\nBind = 0.0.0.0\n"
@@ -208,7 +209,7 @@ def stop(ctx, rec, twice=False):
         chk(rec, "no_second_play", r.wait_for(pc("Playing "), 0.1, t) is None)
     ctx.playing = None
     chk(rec, "api_idle", r.wait_api("software.playback", "idle", 3))
-    chk(rec, "organ_off", r.wait_api("base.organ_power", False, 7))  # KeepPowerOn=false: off at stop (gap 3)
+    chk(rec, "organ_off", r.wait_api("base.organ_power", False, 7))  # tests the KeepPowerOn=false opt-out path: off at stop (default is true)
     notes_after(ctx, rec)
 
 

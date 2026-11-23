@@ -38,6 +38,7 @@ class PcInstance:
                 f.write(src)
         self.port = free_port()
         self.config = os.path.join(self.tmp, "cfg", "config.conf")
+        # KeepPowerOn = false: these tests exercise the opt-out path (power off at song end); the default is true.
         with open(self.config, "w") as f:
             f.write(f"[FILES]\nPlayFolder = {self.play}\nRecordFolder = {self.rec}\n"
                     f"[PLAYBACK]\nWarmupMs = {warmup_ms}\nKeepPowerOn = false\n"
