@@ -123,7 +123,9 @@ The organist normally controls the player from the remote (separate facts file);
 - A line with tokens but no valid stop is ignored (treated as "not set", not "all off", fail-safe). A read error logs "Stops not read, treating <code> as not set: <what>".
 - Program Changes already inside the MIDI file are dropped when `DropSongProgramChanges = true` (default) (`src/playback.cpp:209`).
 - The web page rewrites the file on every save (comments not kept): atomic write via a temp file and rename; header text "# Organ stops for song <CODE>. This file is rewritten by the web page on every save: / comments are not kept. Edit by hand only while the player is stopped. / Stops = stop numbers (empty = all stops off). Delete the file to leave the organ as it is." (`src/stops_file.cpp:171-177`). "Zrušit nastavení" deletes the file. Save error log: "stops: cannot save <path>: <what>: <strerror>".
-- **Default registration (SYS-USE-20) is not implemented**: a song without a file does not set any stops.
+- Default registration (SYS-USE-20, 2026-11-23): editable in the web (pinned row "Výchozí"), stored in `<PlayFolder>/_default.conf` (same format). A song without its own `.conf` uses it. Code behaviour: an empty saved default shows the badge "žádná: varhany zůstanou, jak jsou" (organ unchanged); the task text said "empty = all off", which conflicts with the code (not verified on hardware). "Obnovit z konfigurace" deletes the file.
+- Web access: accepted Host names are IP, localhost, the machine's own host name (and `.local`), `midicontrol[.local]` and `[WEB] AllowedHosts`; `*` accepts any; otherwise 403.
+- `FAULT_LAST` is not used by the PC web; the web shows only its existing last-fault panels and `unseen_faults` notices.
 - Stop numbering and names for the default organ (Johannus Opus 910): 42 stops in four groups, Czech names, `src/organ.cpp:20-142`. The name list is for display only; the number is what matters (`.trail/learnings/2026-10-27-organ-stop-names-czech-parish-disposition-dev.md`).
 
 ### 2.5 Indicator and display messages the PC sends
@@ -131,7 +133,7 @@ The organist normally controls the player from the remote (separate facts file);
 - Remote: SIGNAL_PLAYING (payload = song code) before the first SIGNAL_ANCHOR; SIGNAL_ANCHOR payload = ASCII section label ("Predehra" for the intro, "Sloka N" for verse N, with " +k" for pending repeats); SIGNAL_STOPPED at the end (`src/comm.cpp:1515-1632`, `src/playback.cpp:57-61`).
 
 ### 2.6 Organ power
-- Switched on by play (and record); off at the end of the song unless `KeepPowerOn`. Idle power-off after **30 min**, config key `[PLAYBACK] OrganIdleOffMs` (ms, integer >= 1000, B3; `0` = never switch off, owner 2026-11-23). Deferred while a song plays or a recording runs. The timer is also armed after a song end, Stop or failed start with `KeepPowerOn = true`, and when an organ-off command gave up with the relay still on (B1), so an organ the PC knows is on never stays on without it. Console `on` / `off` switch the organ manually; a console `on` and an `on` adopted from the base menu also arm the idle timer (B1, 2026-11-23).
+- Switched on by play (and record); off at the end of the song unless `KeepPowerOn`. Idle power-off after **30 min**, config key `[PLAYBACK] OrganIdleOffMs` (ms, integer >= 1000, B3; `0` = never switch off, owner 2026-11-23; a manual organ on from the console or the base menu also arms the idle timer). Deferred while a song plays or a recording runs. The timer is also armed after a song end, Stop or failed start with `KeepPowerOn = true`, and when an organ-off command gave up with the relay still on (B1), so an organ the PC knows is on never stays on without it. Console `on` / `off` switch the organ manually; a console `on` and an `on` adopted from the base menu also arm the idle timer (B1, 2026-11-23).
 - Start-up log lines: "Startup: organ power off", "Startup: MIDI output port not found; no All Notes Off.", "Startup: organ found switched on; left on, idle power-off in <time>.", "Organ idle for <time>: power off." (`src/comm.cpp:1441-1484`).
 
 ## 3. Administration
@@ -227,9 +229,9 @@ Caveats: the controller is "Nepřipojen" (fake base has no remote), firmware "no
 
 ## Open questions
 1. How is a recording turned into a playable song (copy to PlayFolder, rename to a code)? Is that the intended workflow until SYS-REC-* is done? Who may do it (organist or admin)?
-2. Recording starts from the base menu `Nahraj` (A7); the manual describes this. The base shows no recording state yet (TODO C3), so the manual says so.
+2. Recording starts from the base menu `Nahraj` (A7); the manual describes this. The base shows the recording state since C3.
 3. Pause/resume (SYS-USE-09/21): pause behaves as stop and resume does not exist. What should the manual say?
-4. Default registration for songs without a `.conf` (SYS-USE-20): not implemented; confirm "organ stays as it is" is the text for the manual.
+4. Default registration (SYS-USE-20): implemented via `_default.conf`; confirm the meaning of an empty default (code: organ unchanged; task text: all off).
 5. Idle power-off is 30 min by default, `OrganIdleOffMs` (B3). Status page: chip "Idle-off armed", Czech notice for `organ_power_fault`.
 6. SYSTEM.md lines 360-520 were not re-read in this pass; status of remaining PC-side requirements there is unverified.
 7. Backups: does the owner want a recommended procedure or a script?

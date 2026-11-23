@@ -25,5 +25,12 @@ Rejstříky, které se mají zapnout na začátku písně, nastavíte na webové
 
 Nastavení se ukládá vedle písně do souboru `<kód>.conf`.
 
+## Výchozí registrace { #vychozi }
+
+Píseň bez vlastního nastavení nechá varhany, jak jsou. Chcete-li pro takové písně výchozí rejstříky, vyberte v seznamu první řádek **Výchozí** a nastavte je stejně jako rejstříky písně. Výchozí registrace se použije jen u písní bez souboru `<kód>.conf`; píseň s vlastním souborem (i prázdným) ji ignoruje.
+
+- Uloží se do souboru `_default.conf` ve složce písní. Prázdný soubor (nic nezapnuto) znamená „žádná výchozí registrace“: písně bez vlastního nastavení nechají varhany, jak jsou, i kdyby `DefaultStops` v `config.conf` něco obsahoval.
+- **Obnovit z konfigurace** soubor `_default.conf` smaže; pak platí `DefaultStops` ze sekce `[ORGAN]` v `config.conf` (a není-li nastaveno, varhany se nemění).
+
 !!! warning
     Webová stránka nemá přihlášení. Kdokoli v místní síti může změnit rejstříky nebo nahrát firmware. Používejte ji jen v důvěryhodné síti.

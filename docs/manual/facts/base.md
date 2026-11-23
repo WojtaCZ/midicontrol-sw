@@ -9,7 +9,7 @@ Nothing was run on hardware. The bench has no church indicator (the SSR is only 
 
 - Rotary encoder with push button. Pins: A PB0, B PB2, button PB1, organ SSR PA4 (src/base.cpp:19-22). Keys are scanned every 10 ms (src/base.cpp:15).
 - Turn one way = Up, other way = Down (quadrature, src/base.cpp:211-217). Press = Enter, fired on RELEASE of the button (src/base.cpp:189-191).
-- There is no long-press handling on the base encoder (grep of src/base.cpp, src/menu.cpp: no timing on the button). A "hold" is only used at reset (see 9).
+- Long press (2026-11-23): Enter long press leaves the song list (`buttonLong()`, src/menu.cpp). Organ off in Nastaveni while a song or recording runs shows the hold screen "Vypnuti varhan" / "Drzte 3 s" (`powerCallback`, GUI::showHold). Otherwise no long-press handling; a "hold" is also used at reset (see 9). The song list ends with the item "Zpet".
 - No other buttons. Hold PB1 while resetting/powering up = USB bootloader (boot:src/main.cpp:168-181, debounced about 20 ms); see section 9.
 - Menus: Up/Down move the selection, Enter activates the item. Item types: submenu, checkbox, action, "Zpet" (Back = pop one screen) (src/menu.cpp:94-115, :639-698).
 - Any key while the display sleeps only wakes the display and is not executed (src/menu.cpp:653-657).
@@ -51,7 +51,7 @@ Main menu title "Hlavni menu"; title is "Sparuj ovladac" while no remote is stor
 | Item | Action | Note |
 |---|---|---|
 | Prehraj | Requests the song list from the PC and opens "Pisne" | Does nothing if the PC is not alive (src/menu.cpp:449) |
-| Nahraj | Starts a recording on the PC, or stops a running one (recording::Machine, src/menu.cpp:464-468); no state is shown yet (TODO C3) | Q2 |
+| Nahraj | Starts a recording on the PC, or stops a running one (recording::Machine, src/menu.cpp:464-468); state shown on the Nahraj screen (C3) | Q2 |
 | Nastaveni | Opens the settings menu | |
 
 Settings menu "Nastaveni" (src/menu.cpp:94-103). Long labels are cut by the screen width (e.g. "Ident. MI", "Napajeni", "Sparovat ovladac" shows as "at ovladac" when scrolled; see PNGs 06-13):
@@ -59,7 +59,7 @@ Settings menu "Nastaveni" (src/menu.cpp:94-103). Long labels are cut by the scre
 | Item | Type | Range / default | Stored | Behaviour |
 |---|---|---|---|---|
 | LED | checkbox | on/off, default on (src/settings.cpp:9-27) | flash, saved at once (src/menu.cpp:497-501) | Master switch for rear LEDs (section 2) |
-| Ident. MIDI | checkbox | on/off, default on | flash, saved at once (src/menu.cpp:503-507) | MIDI A red / MIDI B green steady colours |
+| Ident. MIDI (now inside the submenu Servis, C7) | checkbox | on/off, default on | flash, saved at once (src/menu.cpp:503-507) | MIDI A red / MIDI B green steady colours |
 | Napajeni varhan | checkbox | on/off, default off, NOT stored | not stored; SSR is off after every reset (src/base.cpp:19-22; settings hold only LED, midiRole, remoteAddr, src/settings.cpp:85-112) | Toggles the organ power SSR immediately (src/menu.cpp:465-472) |
 | Verze FW | page | - | - | 4 lines (below) |
 | Displej | page | - | - | 5 lines (below) |
@@ -92,7 +92,7 @@ Info pages (any key goes back; src/menu.cpp:477-531, :206-218):
 
 ## 7. Recording
 
-- "Nahraj" sends RECORD_SONG start/stop to the PC (A7, src/menu.cpp:464-468, src/logic/recording.cpp). The state machine tracks Starting/Recording/Stopping/Busy/NoSupport/Failed, but no screen shows it yet (TODO C3). The PC console `record` also works.
+- "Nahraj" sends RECORD_SONG start/stop to the PC (A7, src/menu.cpp:464-468, src/logic/recording.cpp). The state machine tracks Starting/Recording/Stopping/Busy/NoSupport/Failed, and since C3 the screen "Nahraj" shows it: title Priprava (Starting) / Nahravam (Recording, big REC, Stop icon like the player) / Zastavuji (Stopping); refusals "Nelze: hraje pisen", "Zaneprazdneno", "PC nema nahravani", "Nahravani selhalo" (`RecordScreen`, `syncRecordScreen`, src/menu.cpp). The old "Enter = Stop" text is gone. The PC console `record` also works.
 - DIN-in to USB-MIDI forwarding exists (section 8), which is what a PC recording would read.
 
 ## 8. DIN and USB MIDI
@@ -108,6 +108,7 @@ Info pages (any key goes back; src/menu.cpp:477-531, :206-218):
 - Base update comes from the PC (web page firmware drop zone or `update base <file>` in the CLI). The PC sends ENTER_BOOTLOADER; the base stores a magic in TAMP BKP0R and resets (src/router.cpp:272-278, :601-604). The USB device then re-enumerates as PID 0x1235.
 - Forced entry: hold the encoder button (PB1) while powering up or resetting, about 20 ms debounce (boot:src/main.cpp:168-181). base::dfuCheck() in the app has no callers (src/base.cpp:110; dead code).
 - Bootloader OLED (title "Aktualizace", progress bar, hint line): `Cekam na PC` at start (boot:src/main.cpp:123), `Nevypinejte` while receiving and after 100 % (boot:src/main.cpp:162-164), `Chyba, opakujte` on a failed transfer or when the PC is silent for 20 s (boot:src/main.cpp:160,:264-266; 20 s = kStallCycles line 118 area). After a complete valid image the bootloader resets into the new firmware (boot:src/main.cpp:268-273).
+- Bootloader without app (BP-12): OLED "Chybi firmware" / "Pripojte PC" (boot:src/main.cpp:126). After 3 failed ECC repairs (`kMaxRepairs = 3`, lib/bootloader/inc/boot/persist.hpp) the bootloader stays in update mode instead of starting the app.
 - Image check: a stale trailer makes the bootloader refuse the app; flash the `-update.hex`/`-full.hex` only (docs/HARDWARE.md:21).
 - Remote firmware update relayed through the base: base OLED shows a progress screen "Aktualizace" with a bar and the text `Prenos do ovladace`, then `Instalace ovladace`, or `Chyba aktualizace` (src/router.cpp:564-566, src/menu.cpp:442, :753). The screen wakes the display.
 
@@ -131,7 +132,7 @@ Source file src/menu.cpp unless noted. Count: 63 distinct strings.
 | 3 | Hlavni menu | main menu title (:115, :591) | normal |
 | 4 | Sparuj ovladac | main title (:591) / overlay hint (:138) | no remote stored |
 | 5 | Prehraj | main item (:110) | open song list |
-| 6 | Nahraj | main item (:111) | start/stop recording, no on-screen state |
+| 6 | Nahraj | main item (:111) | start/stop recording; screen Priprava / Nahravam / Zastavuji (C3) |
 | 7 | Nastaveni | main item / settings title (:112, :105) | settings |
 | 8 | LED | settings item (:95) | master LED switch |
 | 9 | Ident. MIDI | settings item (:96) | MIDI A/B colours |
@@ -204,7 +205,7 @@ Not user-visible: log lines on the log CDC (say RN4870 although the module is RN
 
 ## 13. Screen pictures
 
-Folder: `midicontrol-sw/docs/manual/docs/img/screens/base/` (40 PNG, 128x64 scaled, plus `sheet.png` contact sheet and `index.html`), generated by `tools/screens/export.sh` from the real menu code on the host (stubs for hardware; scenarios in tools/screens/main.cpp). The splash shows placeholder revision `a1b2c3d` and branch `main`, the Verze FW page a placeholder date.
+Folder: `midicontrol-sw/docs/manual/docs/img/screens/base/` (47 PNG, 128x64 scaled, plus `sheet.png` contact sheet and `index.html`), generated by `tools/screens/export.sh` from the real menu code on the host (stubs for hardware; scenarios in tools/screens/main.cpp). The splash shows placeholder revision `a1b2c3d` and branch `main`, the Verze FW page a placeholder date.
 
 | PNG | Screen |
 |---|---|
@@ -239,23 +240,30 @@ Folder: `midicontrol-sw/docs/manual/docs/img/screens/base/` (40 PNG, 128x64 scal
 | 29_now_playing_repeats | Prehravam, Sloka: 2 (x2) |
 | 30_now_playing_stopping | Zastavuji |
 | 31_now_playing_stopped | Zastaveno |
-| 32_fw_remote_update | Aktualizace, Prenos do ovladace, bar |
-| 33_no_pc | Odpojeno overlay |
-| 34_no_pc_settings | Nastaveni opened from the overlay (no PC icon) |
-| 35_no_pc_pairing | Parovani from the overlay |
-| 36_no_pc_back | Odpojeno again after leaving Nastaveni |
-| 37_pc_back | Hlavni menu with PC icon after the PC returns |
-| 38_status_no_remote | Hlavni menu, no BLE icon |
-| 39_main_unpaired | Hlavni menu titled Sparuj ovladac |
-| 40_no_pc_unpaired | Odpojeno with hint Sparuj ovladac |
+| 32_record_starting | Nahraj, Priprava |
+| 33_record_recording | Nahraj, Nahravam (big REC, Stop icon) |
+| 34_record_stopping | Nahraj, Zastavuji |
+| 35_record_idle | Nahraj, idle |
+| 36_record_busy | Zaneprazdneno |
+| 37_record_nosupport | PC nema nahravani |
+| 38_organ_off_hold | Vypnuti varhan, Drzte 3 s |
+| 39_fw_remote_update | Aktualizace, Prenos do ovladace, bar |
+| 40_no_pc | Odpojeno overlay (with status icons) |
+| 41_no_pc_settings | Nastaveni opened from the overlay |
+| 42_no_pc_pairing | Parovani from the overlay |
+| 43_no_pc_back | Odpojeno again after leaving Nastaveni |
+| 44_pc_back | Hlavni menu with PC icon after the PC returns |
+| 45_status_no_remote | Hlavni menu, no BLE icon |
+| 46_main_unpaired | Hlavni menu titled Sparuj ovladac |
+| 47_no_pc_unpaired | Odpojeno with hint Sparuj ovladac |
 
 Captions are matched to the contact sheet by eye; scenario names in tools/screens/main.cpp were not re-checked line by line.
-Not covered by a picture: the bootloader screen (boot:), the stop-failed info line on Prehravam, the failure texts other than "PC neodpovida", the animated BLE icon.
+Not covered by a picture: the bootloader screens (boot:, incl. Chybi firmware), the stop-failed info line on Prehravam, the failure texts other than "PC neodpovida", the animated BLE icon.
 
 ## Open questions
 
 - Q1. Front and rear panel labels, connector types, power input and other physical details are not in firmware: the owner must give them (or photos).
-- Q2. Resolved by A7: "Nahraj" starts/stops recording. Open: the screens for the state (C3).
+- Q2. Resolved by A7: "Nahraj" starts/stops recording. The state screens exist since C3.
 - Q3. docs/SYSTEM.md SYS-USE-24 wants an encoder turn on the now-playing screen to choose Stop or "Pridat sloku" (add verse). Code: only Enter = stop, a turn does nothing. Manual follows the code unless the owner says otherwise.
 - Q4. Foreign indicator-bus numbers: the base copies them into its state, the Displej page and USB echo; docs say the base OLED and the remote mirror them. No code found that mirrors them on Prehravam/main screens. Confirm what the user should expect.
 - Q5. The 2 h organ backstop: SYSTEM.md says the PC owns idle-off (30 min). What to tell the organist when no PC runs? The manual states 2 h from the code.
@@ -268,7 +276,7 @@ Not covered by a picture: the bootloader screen (boot:), the stop-failed info li
 
 ## Possible bugs
 
-- B1. "Nahraj" gives no on-screen feedback (TODO C3).
+- B1. (closed 2026-11-23) "Nahraj" now shows Priprava / Nahravam / Zastavuji (C3).
 - B2. src/base.cpp:110 `dfuCheck()` has no callers (dead code); harmless because the bootloader handles PB1.
 - B3. Master LED off still keeps the MIDI A/B steady colours (red/green) on, because only the blink is gated by `master` (src/led.cpp:299-306). The user may expect all LEDs off.
 - B4. Song limit: `setSong` caps at 1999 but the live path applyNowPlaying (src/display.cpp:211) passes any thousands digit; the NPI payload can carry e.g. 2406 (gap 32, SYS-USE-17).

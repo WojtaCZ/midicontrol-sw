@@ -53,7 +53,8 @@ Sources: `src/menu.cpp:456-470, 469`; `src/player_screen.cpp` (keypress, addDigi
 ## 3. Power on / off
 
 - On: ON/OFF switch (SW1) or VBUS raises 3V3_ON; firmware holds it with PA1 (`docs/HARDWARE.md` sec. 4.4).
-- Off by hand: hold ON/OFF 5 s (`HOLD_MS = 5000`, `src/base.cpp:259`). After 20 ms of holding the screen "Vypnuti" / "Drzte 5 s" with a progress bar appears (percent = held ms * 100 / 5000). Releasing early cancels. At 5 s the unit powers off immediately with no message (`:302, 338`).
+- MF key (D14): held 3 s = emergency organ off. After the debounce the screen "Vypnout organ" / "Drzte 3 s" with a progress bar appears; at 3 s the remote sends EMERGENCY_OFF (0x15) to the base, which switches the organ relay off and sends All Notes Off itself, without the PC (`src/base.cpp` emergencyTick, `src/menu.cpp` emergencyHoldScreen). A tap (screen not shown) is still Left. An older base NAKs the command.
+- Off by hand: hold ON/OFF 3 s (`HOLD_MS = 3000`, `src/base.cpp`; 5 s until 2026-11-23, item 12). After 20 ms of holding the screen "Vypnuti" / "Drzte 3 s" with a progress bar appears (percent = held ms * 100 / 3000). Releasing early cancels. At 3 s the unit powers off immediately with no message (`:302, 338`).
 - A press counts only after the ON/OFF button has been released once since boot (`armed`, `:267`).
 - Off automatically (idle): message "Vypnuti" / "Necinnost: vypnuti", shown 1 s (`src/base.cpp:329, 332-366`).
 - Off for low battery: message "Vypnuti" / "Slaba baterie" (`src/main.cpp:467-470`).
@@ -115,7 +116,7 @@ Player "Prehravac" (`src/player_screen.cpp`):
 
 Song list "Pisne" (`src/song_list_screen.cpp`): loading "Nacitani..." / "Cekam na PC"; timeout 3 s (`inc/song_list_screen.hpp:36`); pages up to 32 (`:35`); last row "Zpet"; empty "Zadne pisne"; errors Zaneprazdneno / Nepripojeno / PC nedostupne / Odmitnuto / Bez odpovedi. No retry, leave and open again.
 
-Overlay "Odpojeno": pushed only over the main menu when the base is not alive ("Cekam na zakladnu") or the PC is not alive ("Cekam na PC"); second line "Stisk: Nastaveni". Disappears by itself when both are back. Only OK works (opens Nastaveni) (`src/menu.cpp:120-143, 380, 469`).
+Overlay "Odpojeno" (since 2026-11-23 it also shows the status icons, as the main menu does): pushed only over the main menu when the base is not alive ("Cekam na zakladnu") or the PC is not alive ("Cekam na PC"); second line "Stisk: Nastaveni". Disappears by itself when both are back. Only OK works (opens Nastaveni) (`src/menu.cpp:120-143, 380, 469`).
 
 FW update (remote receives an image): title "Aktualizace", hint "Prijem dat" (receiving), "Instalace" (installing), "Chyba aktualizace" (failed), with a percent bar (`src/fwupdate.cpp:140-142`; `src/menu.cpp:328, 559`). Keys ignored. SYSTEM.md: stall 20 s, result 10 s; duration about 75 s (1M PHY) / 2 min 32 s (Coded S8).
 
@@ -144,7 +145,7 @@ FW update (remote receives an image): title "Aktualizace", hint "Prijem dat" (re
 |---|---|---|
 | Key debounce (release) | 20 ms | `src/base.cpp:149` |
 | ON/OFF press recognised | 20 ms | `src/base.cpp:258` |
-| ON/OFF hold to power off | 5 s | `src/base.cpp:259` |
+| ON/OFF hold to power off | 3 s | `src/base.cpp:259` |
 | Splash auto-dismiss | 3 s | `main.cpp:206` |
 | Player message | 2.5 s | `src/player_screen.cpp` MESSAGE_MS |
 | Message before shutdown | 1 s | `src/base.cpp:332-366` |
@@ -193,7 +194,7 @@ FW update (remote receives an image): title "Aktualizace", hint "Prijem dat" (re
 | Cekam na PC | Overlay, Song list | PC not alive | `:125`; `song_list_screen.cpp:38` |
 | Stisk: Nastaveni | Overlay | hint: press OK | `:380` |
 | Vypnuti | Message, power-hold | shutdown title | `:320, 324` |
-| Drzte 5 s | Power-hold | hold 5 s | `:324` |
+| Drzte 3 s | Power-hold / emergency hold | hold 3 s | `:324` |
 | Slaba baterie | Shutdown message / 5 s splash | critical battery, 15 % warning (D2) | `main.cpp:467-470` |
 | Chyba mereni | Battery screens | invalid battery measurement (D1) | `battery.cpp` |
 | Necinnost: vypnuti | Shutdown message | idle auto-off | `base.cpp:329` |
@@ -221,9 +222,9 @@ About 52 distinct strings (Czech, no diacritics).
 
 ## 12. Screen pictures
 
-Path: `midicontrol-sw/docs/manual/docs/img/screens/remote/` (48 PNG + `sheet.png` + `index.html`, exported with `tools/screens/export.sh`, scale 4). Captions 01-38 are inferred from file names, 39-48 from the export output; verify against `tools/screens/main.cpp`.
+Path: `midicontrol-sw/docs/manual/docs/img/screens/remote/` (50 PNG + `sheet.png` + `index.html`, exported with `tools/screens/export.sh`, scale 4). Captions 01-38 are inferred from file names, 39-50 from the export output (39_emergency_hold added 2026-11-23); verify against `tools/screens/main.cpp`.
 
-01_splash Splash | 02_main_player Main, Prehravac selected | 03_main_settings Main, Nastaveni selected | 04_settings_battery / 05_settings_bluetooth / 06_settings_firmware / 07_settings_pair_base / 08_settings_back Settings with the item selected | 09_info_firmware Verze FW | 10_info_battery Baterie | 11_info_battery_charging Baterie charging | 12_info_bluetooth Bluetooth | 13_pair_base_waiting, 14_pair_base_countdown, 15_pair_base_paired, 16_pair_base_expired pairing window states | 17_player_idle | 18_player_entry | 19_player_entry_letter | 20_player_starting | 21_player_playing | 22_player_anchor (section label) | 23_player_repeat_selected | 24_player_add_verse, 25_player_add_verse_2 | 26_player_stopping | 27_player_stopped | 28_player_unknown | 29_songs_loading | 30_songs_first | 31_songs_middle | 32_songs_last | 33_songs_page_more | 34_songs_page_two | 35_songs_error | 36_songs_empty | 37_pairing passkey dialog | 38_power_hold | 39_fw_update | 40_fw_update_failed | 41_no_base | 42_no_base_back_ignored | 43_no_base_settings | 44_no_base_back | 45_no_base_pairing | 46_no_pc | 47_base_back | 48_message_low_battery.
+01_splash Splash | 02_main_player Main, Prehravac selected | 03_main_settings Main, Nastaveni selected | 04_settings_battery / 05_settings_bluetooth / 06_settings_firmware / 07_settings_pair_base / 08_settings_back Settings with the item selected | 09_info_firmware Verze FW | 10_info_battery Baterie | 11_info_battery_charging Baterie charging | 12_info_bluetooth Bluetooth | 13_pair_base_waiting, 14_pair_base_countdown, 15_pair_base_paired, 16_pair_base_expired pairing window states | 17_player_idle | 18_player_entry | 19_player_entry_letter | 20_player_starting | 21_player_playing | 22_player_anchor (section label) | 23_player_repeat_selected | 24_player_add_verse, 25_player_add_verse_2 | 26_player_stopping | 27_player_stopped | 28_player_unknown | 29_songs_loading | 30_songs_first | 31_songs_middle | 32_songs_last | 33_songs_page_more | 34_songs_page_two | 35_songs_error | 36_songs_empty | 37_pairing passkey dialog | 38_power_hold | 39_emergency_hold MF held 3 s, "Vypnout organ" / "Drzte 3 s" | 40_fw_update | 41_fw_update_failed | 42_no_base | 43_no_base_back_ignored | 44_no_base_charging | 45_no_base_settings | 46_no_base_back | 47_no_base_pairing | 48_no_pc | 49_base_back | 50_message_low_battery.
 
 Flows (`tools/screens/flows/01..29_*.sim`) run with `tools/screens/run-sim.sh` (not re-run in this phase).
 

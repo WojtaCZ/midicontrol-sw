@@ -24,9 +24,15 @@ Dokud některá část chybí, přes menu se ukáže hlášení **Odpojeno**:
 | `Cekam na PC` (ovladač i základna) | Základna nevidí počítač. | Zapněte počítač a zkontrolujte USB kabel k základně. |
 | `Sparuj ovladac` (základna) | Základna nemá spárovaný ovladač. | Spárujte ho, viz [Nastavení](nastaveni.md#parovani). |
 
-![Ovladač čeká na základnu](img/screens/remote/41_no_base.png)
-![Ovladač čeká na PC](img/screens/remote/46_no_pc.png)
+![Ovladač čeká na základnu](img/screens/remote/42_no_base.png)
+![Ovladač čeká na PC](img/screens/remote/48_no_pc.png)
 
-Hlášení samo zmizí, jakmile je spojení v pořádku. Pak je ovladač připraven. Napájení varhan zapíná základna sama při první písni, varhany zapínat nemusíte.
+Hlášení **Odpojeno** ukazuje i ikony stavu (spojení a na ovladači baterie nebo nabíjení), takže stav zařízení vidíte i bez menu. Hlášení samo zmizí, jakmile je spojení v pořádku. Pak je ovladač připraven. Napájení varhan zapíná základna sama při první písni, varhany zapínat nemusíte.
 
-Displeje po 30 s zhasnou. První stisk tlačítka jen probudí displej. Ovladač se po 20 minutách bez stisku vypne; ručně ho vypnete podržením ON/OFF na 5 s.
+Displeje po 30 s zhasnou. První stisk tlačítka jen probudí displej. Ovladač se po 20 minutách bez stisku vypne; ručně ho vypnete podržením ON/OFF na 3 s.
+
+## Vypnutí ovladače { #vypnuti }
+
+Podržte tlačítko ON/OFF. Ovladač ukáže `Vypnuti` / `Drzte 3 s` s ukazatelem postupu; po 3 s se vypne. Pustíte-li tlačítko dřív, nic se nestane. Platí to i při napájení z USB.
+
+![Podržení ON/OFF](img/screens/remote/38_power_hold.png)

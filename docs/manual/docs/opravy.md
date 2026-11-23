@@ -14,6 +14,9 @@ Nepomohlo-li nic z tabulky, zapište přesný text z displeje a dejte vědět sp
 | `Chyba mereni` | Baterii se nepodařilo změřit; nezobrazuje se procento. Ovladač vypněte a zapněte, nepomůže-li to, dejte vědět správci. |
 | `Nahradit zakl.?` | Ovladač je spárován s jinou základnou. Potvrďte jen při výměně základny. |
 | `Stav neznamy` | Ovladač neví, zda se hraje nebo nahrává (po zapnutí nebo ztrátě spojení). Počkejte na PC nebo stiskněte OK. |
+| `Nelze: hraje pisen` | Základna odmítla nahrávání, protože hraje píseň. Počkejte na konec písně. |
+| `Zaneprazdneno`, `PC nema nahravani`, `Nahravani selhalo` | Nahrávání se nespustilo, viz [Nahrávání](nahravani.md). Potvrďte stiskem enkodéru. |
+| `Chybi firmware` / `Pripojte PC` | Základna nemá použitelný firmware. Připojte ji USB kabelem k počítači a nahrajte firmware, viz níže. |
 | `Nahravani` | Probíhá nahrávání z základny; ovladač jen zobrazuje stav, nahrávání se z něj nespouští. |
 | Displej zhasl | Stiskněte libovolné tlačítko. Nepomůže-li, zapněte ovladač ON/OFF. |
 | Po výpadku proudu | Napájení varhan je vypnuté; zapne se samo při další písni. |
@@ -32,3 +35,7 @@ Firmware se nahrává na webové stránce: záložka **Pokročilé**, **Firmware
 ## Základna po neúspěšné aktualizaci
 
 Zůstane-li základna v zavaděči USB (ABCD:1235), v konzoli počítače spusťte `update base <soubor>`. Případně podržte enkodér při zapnutí základny a nahrajte firmware znovu.
+
+Základna, která nemá firmware (nová, poškozená), zůstane v zavaděči a ukáže `Chybi firmware` / `Pripojte PC`. Čeká bez časového limitu, dokud počítač nenahraje firmware.
+
+Zavaděč umí opravit poškozenou stránku paměti po výpadku proudu při aktualizaci. Po třetí neúspěšné opravě to přestane zkoušet a základna zůstane v režimu aktualizace (`Chybi firmware`), aby se nezacyklila. Nahrajte pak firmware znovu; úspěšná aktualizace počítadlo oprav vynuluje.
