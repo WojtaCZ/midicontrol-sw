@@ -172,7 +172,7 @@ OrganConfig parseOrgan(const std::map<std::string, std::string>& section) {
     }
 
     std::vector<int> defaultStops;
-    bool haveDefault = false;
+    bool haveDefault = false;  // the key is present, an empty value included = all off
     if (auto v = get("DefaultStops")) {
         haveDefault = true;
         std::string t = *v;

@@ -285,7 +285,7 @@ std::string toJson(const mc::organ::OrganConfig& organ, const std::vector<std::s
         out += "{\"label\":" + mc::status::jsonEscape(g.label) + ",\"first\":" + std::to_string(g.first) +
                ",\"last\":" + std::to_string(g.last) + "}";
     }
-    out += "],\"default\":" + jsonNumbers(organ.defaultStops) + ",\"names\":{";
+    out += "],\"default\":" + (organ.defaultStops ? jsonNumbers(*organ.defaultStops) : std::string("null")) + ",\"names\":{";
     for (size_t i = 0; i < organ.stops.size(); ++i) {
         if (i) out += ',';
         out += "\"" + std::to_string(organ.stops[i].number) + "\":" +
@@ -304,8 +304,8 @@ namespace {
 std::string defaultPath(const std::string& playFolder) { return playFolder + "/" + kDefaultFileName; }
 }  // namespace
 
-std::vector<int> loadDefault(const std::string& playFolder, int stopCount, const std::vector<int>& configured,
-                             std::vector<std::string>* warnings) {
+Stops loadDefault(const std::string& playFolder, int stopCount, const Stops& configured,
+                  std::vector<std::string>* warnings) {
     const std::string path = defaultPath(playFolder);
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) return configured;
@@ -317,7 +317,7 @@ std::vector<int> loadDefault(const std::string& playFolder, int stopCount, const
     std::ostringstream ss;
     ss << f.rdbuf();
     Stops s = parse(ss.str(), stopCount, path, warnings);
-    return s ? *s : configured;  // no usable Stops line = as if absent
+    return s ? s : configured;  // no usable Stops line = as if absent
 }
 
 void saveDefault(const std::string& playFolder, const std::vector<int>& stops) {
@@ -337,13 +337,13 @@ SongPlan planFor(const mc::organ::OrganConfig& organ, const Stops& stops) {
         return plan;
     }
     if (!stops) {
-        if (organ.defaultStops.empty()) {
+        if (!organ.defaultStops) {
             plan.text = "not set";
             return plan;
         }
-        plan.preamble = mc::organ::buildPreamble(organ, organ.defaultStops);
+        plan.preamble = mc::organ::buildPreamble(organ, *organ.defaultStops);
         plan.dropProgramChanges = organ.dropSongProgramChanges;
-        plan.text = "default " + numbersText(organ.defaultStops);
+        plan.text = organ.defaultStops->empty() ? "default all off" : "default " + numbersText(*organ.defaultStops);
         return plan;
     }
     plan.preamble = mc::organ::buildPreamble(organ, *stops);
@@ -372,7 +372,7 @@ void Store::put(const std::string& code, const Stops& stops) {
     else remove(folder_, code);
 }
 
-std::vector<int> Store::defaultStops(const std::vector<int>& configured) const {
+Stops Store::defaultStops(const Stops& configured) const {
     std::lock_guard<std::mutex> lk(mu_);
     std::vector<std::string> warnings;
     auto d = loadDefault(folder_, stopCount_, configured, &warnings);

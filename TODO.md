@@ -17,8 +17,8 @@ Per-song stops are implemented (stops editor on the home page, one `<CODE>.conf`
 ## Organ power behaviour between songs
 
 - Already decided in `docs/SYSTEM.md` (D2, D5, D27; section 6 gaps 3 and 4): the organ stays on between songs and
-  switches off after 30 minutes idle. The code still defaults to `KeepPowerOn=false` (power off after each song):
-  this is a spec gap to close in code, not an open decision. Do not change the requirement.
+  switches off after 30 minutes idle. `KeepPowerOn` now defaults to true (435e1e6; power stays on between songs, `false` is the opt-out):
+  the requirement is met in code. Do not change the requirement.
 - Power-cycling to reset the stops remains a separate question, see "Organ stops" above.
 
 ## Owner answers 2026-11-16: implementation backlog (PC, web, manual, spec)
@@ -33,7 +33,7 @@ Source: audit/OWNER-ANSWERS.md, plans/2026-11-16-owner-answers-impl.md, plans/20
 - B5 DONE 2026-11-22: a newer SIGNAL_ANCHOR supersedes older pending anchors, supersede group 4 (3f76531). Owner 2026-11-23: did not follow the question; explained in chat (a newer anchor cancels retries of the older one so the remote never jumps back), awaiting owner OK (no code).
 - B6 DONE 2026-11-22: SIGHUP/SIGINT/interactive quit/EOF run the SIGTERM shutdown (aa866bc).
 - B7 DONE 2026-11-22/23: `POST /api/diag/ack`, Host/Origin check on writes, `[WEB] AllowedHosts` (default `midicontrol, midicontrol.local`, own `gethostname()` auto-accepted, `*` = any) (664ff50, b504bec). Docker rejects `hostname:` with `network_mode: host`, so compose carries only a comment; the host's name is auto-accepted.
-- B8 DONE 2026-11-22/23: `[ORGAN] DefaultStops` plus a default editable in the stops editor (`<PlayFolder>/_default.conf`); an existing empty song file = all off (c8abd5d, d3dbf3a).
+- B8 DONE 2026-11-22/23: `[ORGAN] DefaultStops` plus a default editable in the stops editor (`<PlayFolder>/_default.conf`); an existing empty song file = all off (c8abd5d, d3dbf3a). Owner 2026-11-23: an EMPTY default (empty `_default.conf` or empty `DefaultStops` key) = all off too; not set = organ left alone; `/api/stops` `"default"` is null or an array (d58494d).
 - B9 DONE 2026-11-22: rejstriky.mid moved to docs/examples, `songcheck_real_files` strict (927cf7d).
 - B10 DONE 2026-11-22 (partly): shutdown tests at CommHandler level and process level (9054591, B6 systest). Not done: an automated test that shutdown waits for a running update (covered by service_unit_test.sh + bench only).
 - B11 DONE 2026-11-21: PC side of the base-initiated recording (dispatch RECORD_SONG start/stop, NAK BUSY on a second request, console `record` stays admin) (6e6b42d).
@@ -56,7 +56,8 @@ Source: audit/OWNER-ANSWERS.md, plans/2026-11-16-owner-answers-impl.md, plans/20
 - Done: `mc-play` heartbeat, watchdog polls every 0.5 s, heartbeat older than 2 s -> emergency All Notes Off / All Sound Off on a fresh RtMidiOut, exit 70 with `--exit-on-stall`; measured on the virtual rig: notes-off 2.2 s after the freeze. Tests: tests/test_playback_guard.cpp, tools/systest/test_virtual_stall.py. Decisions: comm-thread limits stay 10 s / 30 s; the watchdog does not switch the organ off itself (the startup reset after restart does).
 - Not covered: a hang in the control thread while a song plays, a whole-process freeze (external supervisor, open idea).
 - Bench (owner): redo 10.7 freezing `mc-play` mid-song (.claude-notes/frz/freeze), expect ~2.5 s to silence and a container restart.
-- Open: tools/systest/test_virtual_link.py::test_keepalive_cadence_loss_and_recovery fails on main (first two KEEPALIVEs 0.15 ms apart at connect): decide harmless double send (fix the test) or a keepalive-loop bug.
+- DONE 2026-11-23 (cfc2cf7): test_keepalive_cadence_loss_and_recovery: the first two frames at connect are the session-nonce hello (A1) and the first KEEPALIVE, intended; the test drops the hello.
+- DONE 2026-11-23 (b933a9a): comm race since D13 GET_INFO: an INFO_RESP before the link-edge resync ACKs clears `_resyncAwait`, so stale ACKs no longer clear `_remoteDirty`.
 - Second layer is in midicontrol-fw (base silences the organ when the PC goes quiet during a song); remote emergency off is D14 in midicontroller-fw/TODO.md.
 
 ### E2 docs/SYSTEM.md edits (main copy; owner-controlled, not edited by this cleanup)

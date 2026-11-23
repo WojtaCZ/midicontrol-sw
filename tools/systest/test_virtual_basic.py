@@ -61,7 +61,7 @@ def test_playback_structure_and_end(make_rig):
     assert [n for _, n in notes] == [60, 62, 64]
     t_play = [t for t, p in base.rx if p.mtype == MT.SIGNAL_PLAYING][0]
     assert notes[0][0] >= t_play
-    # song end: All Notes Off on all 16 channels after the last note, SIGNAL_STOPPED, organ off (KeepPowerOn=false)
+    # song end: All Notes Off on all 16 channels after the last note, SIGNAL_STOPPED, organ off (tests the KeepPowerOn=false opt-out path; the default is true)
     groups = all_notes_off_groups(rig.seq.snapshot())
     assert groups[-1] == set(range(16))
     assert wait_until(lambda: base.received(MT.SET_CURRENT)[-1][1].payload == b"\x00", 3)

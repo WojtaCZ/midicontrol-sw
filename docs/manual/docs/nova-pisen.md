@@ -20,17 +20,19 @@ Rejstříky, které se mají zapnout na začátku písně, nastavíte na webové
 ![Editor rejstříků](img/web/rejstriky-1100.png){ width="90%" }
 
 - **Vše vypnout** vypne všechna tlačítka; po **Uložit** se na začátku písně varhany vypnou a nezapne se nic.
-- **Zrušit nastavení** smaže uložený výběr; píseň pak nechá varhany, jak jsou.
+- **Zrušit nastavení** smaže uložený výběr; píseň pak dostane výchozí registraci (viz níže), a není-li žádná nastavena, nechá varhany, jak jsou.
 - Změna platí od příštího spuštění písně.
 
 Nastavení se ukládá vedle písně do souboru `<kód>.conf`.
 
 ## Výchozí registrace { #vychozi }
 
-Píseň bez vlastního nastavení nechá varhany, jak jsou. Chcete-li pro takové písně výchozí rejstříky, vyberte v seznamu první řádek **Výchozí** a nastavte je stejně jako rejstříky písně. Výchozí registrace se použije jen u písní bez souboru `<kód>.conf`; píseň s vlastním souborem (i prázdným) ji ignoruje.
+Píseň bez vlastního nastavení rejstříků (bez souboru `<kód>.conf`) dostane **výchozí registraci**. Upravíte ji na stejné stránce v prvním řádku seznamu, **Výchozí**, stejně jako rejstříky písně. Píseň s vlastním souborem (i prázdným) výchozí registraci ignoruje.
 
-- Uloží se do souboru `_default.conf` ve složce písní. Prázdný soubor (nic nezapnuto) znamená „žádná výchozí registrace“: písně bez vlastního nastavení nechají varhany, jak jsou, i kdyby `DefaultStops` v `config.conf` něco obsahoval.
-- **Obnovit z konfigurace** soubor `_default.conf` smaže; pak platí `DefaultStops` ze sekce `[ORGAN]` v `config.conf` (a není-li nastaveno, varhany se nemění).
+- **Vybrané rejstříky:** na začátku písně se varhany vypnou a zapnou se vybrané rejstříky.
+- **Vše vypnuto** (uloženo s prázdným výběrem): na začátku písně se varhany vypnou a nezapne se nic, stejně jako u písně s prázdným nastavením.
+- **Žádná** (výchozí stav, nic neuloženo): varhany zůstanou, jak jsou.
+- Uloží se do souboru `_default.conf` ve složce písní. **Obnovit z konfigurace** (v řádku Výchozí) soubor smaže; pak platí `DefaultStops` ze sekce `[ORGAN]` v `config.conf` (a není-li nastaveno, varhany se nemění).
 
 !!! warning
     Webová stránka nemá přihlášení. Kdokoli v místní síti může změnit rejstříky nebo nahrát firmware. Používejte ji jen v důvěryhodné síti.

@@ -29,7 +29,7 @@ struct Config {
 
     // [PLAYBACK]
     int warmupMs = 3000;               // organ warm-up after power-on, before the first note
-    bool keepPowerOn = false;          // leave organ power on between songs
+    bool keepPowerOn = true;           // organ stays on between songs, the idle-off timer switches it off (D2, D5); false = off after each song
     int verseGapMs = 0;                // silence before a section repeated with add-verse
     // SYS-ORG-05: an organ the PC knows is on is switched off after this idle time (SYSTEM.md D27 default 30 min).
     // [PLAYBACK] OrganIdleOffMs, ms, >= 1000; 0 = never switch off.

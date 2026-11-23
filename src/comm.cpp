@@ -1019,7 +1019,12 @@ void CommHandler::onInfoResp(const Packet& pkt) {
             std::lock_guard<std::mutex> lk(_resyncMutex);
             need = (_lastSignalInfo.has_value() && !_signalInfoSent) ||
                    (_recordingSignalled.load() && !_recordingRemoteSent);
-            if (need) _remoteDirty = true;
+            if (need) {
+                _remoteDirty = true;
+                // A resync attempt still awaiting its ACKs went out without this flag (version unknown then): its late
+                // ACKs must not clear the dirty state again before the queued resync has run.
+                _resyncAwait.clear();
+            }
         }
         if (need && !_resyncQueued.exchange(true)) post({Command::Kind::RemoteResync, {}, {}, 0});
     }
@@ -1829,7 +1834,7 @@ void CommHandler::playbackEnded(const std::string& how, const char* counter) {
 
 void CommHandler::doPlay(const Command& cmd) {
     _organClaimed.store(true);  // a song owns the organ now: no startup power off
-    disarmIdleOff();            // after the song KeepPowerOn decides (2026-10-26, unchanged)
+    disarmIdleOff();            // after the song KeepPowerOn decides (default true since D2/D5: stays on, idle-off timer)
     if (releasePlayer()) playbackEnded("stopped", "songs_stopped");  // a new song replaces it
     {
         std::lock_guard<std::mutex> lk(_songMutex);

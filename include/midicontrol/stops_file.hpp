@@ -62,10 +62,10 @@ std::string toJson(const mc::organ::OrganConfig& organ, const std::vector<std::s
 // {"code":"401","stops":[..]|null}
 std::string entryJson(const std::string& code, const std::optional<std::vector<int>>& stops);
 
-// Effective default stops: _default.conf if present, else `configured`. An unreadable file falls back to
-// `configured` (a warning goes to `warnings`).
-std::vector<int> loadDefault(const std::string& playFolder, int stopCount, const std::vector<int>& configured,
-                             std::vector<std::string>* warnings);
+// Effective default stops: _default.conf if present, else `configured`. nullopt = not set (leave the organ
+// alone); an empty list = all off. An unreadable file falls back to `configured` (a warning goes to `warnings`).
+Stops loadDefault(const std::string& playFolder, int stopCount, const Stops& configured,
+                  std::vector<std::string>* warnings);
 void saveDefault(const std::string& playFolder, const std::vector<int>& stops);  // throws like save
 void removeDefault(const std::string& playFolder);                                // back to the config value
 
@@ -85,7 +85,7 @@ public:
     // Save (set) or delete (nullopt) one song's file. Throws on failure, file unchanged.
     void put(const std::string& code, const Stops& stops);
     // The default registration (see kDefaultCode): effective value / save (set) / delete (nullopt).
-    std::vector<int> defaultStops(const std::vector<int>& configured) const;
+    Stops defaultStops(const Stops& configured) const;
     void putDefault(const Stops& stops);
 
 private:

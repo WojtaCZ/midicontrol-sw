@@ -18,8 +18,8 @@ BLOCKED = {
         "system power-up / remote power-on: the rig starts with both units powered (USB); covered by remote reset and "
         "PC restart actions instead",
         "prelude + two verses: the bench songs have ONE section each (no blank-verse prelude); add verse replays it",
-        "organ idle-off after the last song: the PC switches the organ off at every song end/stop (KeepPowerOn=false, "
-        "gap 3) and the 30 min idle timer (not a config key, gap 4) is armed only when the organ was switched on "
+        "organ idle-off after the last song: the bench config sets the KeepPowerOn=false opt-out, so the PC switches the organ off at every song end/stop (default is true); "
+        "the 30 min idle timer (OrganIdleOffMs) is armed only when the organ was switched on "
         "manually; checked instead: organ off after the song end",
     ],
     "recording": [
