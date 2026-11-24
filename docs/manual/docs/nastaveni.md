@@ -35,6 +35,11 @@ Základna si pamatuje jeden ovladač; nový nahradí předchozí.
 
 1. Na ovladači: `Nastaveni`, `Sparovat zakl.`, OK. Máte 60 s.
 2. Na základně: `Nastaveni`, `Sparovat ovladac`, stiskněte enkodér.
-3. Obě zařízení ukážou `Sparovano`. Zavřete obrazovky (OK na ovladači, enkodér na základně).
+3. Obě zařízení ukážou `Sparovat? Kod nnnnnn` (šest číslic). Zkontrolujte, že je kód na obou stejný. Párování potvrďte volbou `Ano` na **obou** zařízeních do 30 s. Nabídka začíná na `Ne`, takže nechtěné kliknutí nespáruje.
+4. Obě zařízení ukážou `Sparovano`. Zavřete obrazovky (OK na ovladači, enkodér na základně).
+
+Odpovíte-li `Ne` na kterémkoli zařízení, nestihnete-li to do 30 s, nebo druhé zařízení neodpovídá, spojení se přeruší a nic se neuloží. Zařízení, které spárování odmítlo, ukáže `Zamitnuto`. Zkuste to znovu od kroku 1.
+
+Už spárované zařízení se po zapnutí připojí samo, bez dotazu. Telefon ani jiné zařízení se základnou nebo ovladačem spárovat nelze; spárovat je může jen dvojice základna a ovladač, a jen když to potvrdíte na obou.
 
 ![Základna hledá ovladač](img/screens/base/18_pairing_search.png)

@@ -87,7 +87,7 @@ Info pages (any key goes back; src/menu.cpp:477-531, :206-218):
 - Timeout 15 s (PAIRING_TIMEOUT, inc/bluetooth.hpp:28). Results: "Sparovano" (src/main.cpp:78), "Ovladac nenalezen" if nothing was found while scanning, "Parovani selhalo" if it failed later (src/main.cpp:83). A key press dismisses the result screen.
 - Success stores the remote's address (shown as MAC on the Bluetooth page) in flash. Only one remote can be stored; pairing again replaces it.
 - With a stored remote the base reconnects by itself, retry every 5000 ms (src/main.cpp:42, :444); BLE module restart retry 60000 ms (src/main.cpp:110); a stale link is dropped by a watchdog (10 s / 5 s, src/main.cpp:167-204).
-- The remote shows its own "Sparovat?" prompt during security setup; the base sends the pairing confirmation only after the data stream is open, one retry (src/main.cpp:558; trail learning "pairing B only after STREAM_OPEN").
+- D3 (2026-11-24): after the link is secured the remote is only pending; only PAIR_REQ/RSP/CONFIRM (0x90-0x92) pass. Both devices show "Sparovat? Kod nnnnnn" (same 6 digits; base: src/menu.cpp:455-464, :999; popup starts on Ne). The remote is stored only after Ano on both devices (30 s decision, 5 s peer reply). Ne, timeout or silent peer: K,1 + U,Z, nothing stored; the rejecting side shows "Zamitnuto" (src/main.cpp:149). A bonded reconnect never prompts. A phone cannot pair or connect. The base sends B (security) only after the data stream is open, one retry (trail learning "pairing B only after STREAM_OPEN").
 - Without a stored remote: main menu title "Sparuj ovladac"; the "Odpojeno" overlay (no PC) shows "Sparuj ovladac" as its hint instead of "Cekam na PC" (src/menu.cpp:138).
 
 ## 7. Recording
@@ -163,6 +163,8 @@ Source file src/menu.cpp unless noted. Count: 63 distinct strings.
 | 34 | Sparovano | pairing result (main.cpp:78) | success |
 | 35 | Ovladac nenalezen | pairing result (main.cpp:83) | not found in 15 s |
 | 36 | Parovani selhalo | pairing result (main.cpp:83) | failed after finding it |
+| 36a | Sparovat? Kod nnnnnn | confirm popup (menu.cpp:999) | D3 code check, Ano/Ne, starts on Ne |
+| 36b | Zamitnuto | pairing result (main.cpp:149) | D3 rejected / peer rejected |
 | 37 | Pisne | song list title (:422-428) | song list |
 | 38 | Nacitani... | song list loading (:423, :922) | waiting for PC |
 | 39 | Cekam na PC | loading comment (:423) / overlay (:131) | waiting for PC |

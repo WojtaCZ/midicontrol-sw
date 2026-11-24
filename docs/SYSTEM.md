@@ -99,7 +99,7 @@ power policy and serves a status web page.
 |---|---|
 | Roles | Base = central, remote = peripheral, Transparent UART, RNBD350 on both (D10) |
 | Security | `SA,2` Just Works on both ends; Just Works accepted by the owner (D21) together with the bonded-base whitelist (D3) |
-| Pairing | Base menu "Nastaveni > Sparovat ovladac" plus an explicit pairing action on the remote (D3) |
+| Pairing | Base menu "Nastaveni > Sparovat ovladac" plus an explicit pairing action on the remote (D3); both devices show the same 6-digit code and the user presses Ano on both (SYS-PAIR-08) |
 | Peer filter | Both ends accept frames only from the bonded peer after %SECURED% (base and remote: implemented, SYS-PAIR-04) |
 | Reconnect | Base retries every 5 s with bare `C` (module bond) (proposed default, P12); remote re-advertises (30 s retry) |
 | PHY / params | TX max (SGA/SGC 0F); 20 ms interval, latency 0, supervision 2.5 s; Coded S8; remote advertises extended on Coded only |
@@ -115,6 +115,7 @@ power policy and serves a status web page.
 | NOW_PLAYING_INFO | PC -> base | Base drives the indicator bus, no ACK |
 | SET_CURRENT `[on]` | PC -> base | SSR |
 | FW_UPDATE_* | PC -> base, or PC -> remote via base | chunks <= 120 B; base chunks multiple of 8 B |
+| PAIR_REQ 0x90 / PAIR_RSP 0x91 / PAIR_CONFIRM 0x92 | base <-> remote only | Pairing confirmation (SYS-PAIR-08); not ACKed, never forwarded to the PC |
 
 ---
 
@@ -143,6 +144,9 @@ power policy and serves a status web page.
 | SYS-PAIR-05 | New bond over Coded may go silent after ~4 s; base drops it once (K,1) and reconnects ~5 s later. Workaround accepted (proposed default, P2) | implemented | cause unknown |
 | SYS-PAIR-06 | Pairing the remote to a new base is an explicit action on the remote (menu item); without it the remote keeps its current bond (D3) | implemented 2026-11-12 | Nastaveni -> "Sparovat zakl.": 60 s window, accept list cleared, the first central that connects and secures becomes the bond (settings v2 `baseMac`). No trust on first use: a remote upgraded from an older release has no bond and must be paired once from this menu (and from the base menu). Any base in range during the window can take it: switch an old base off first |
 | SYS-PAIR-07 | Base reconnect uses the module's last bond (bare `C`); acceptable because both ends whitelist the peer (proposed default, P12) | differs from code (gap) | base bluetooth.cpp `reconnect()` (~:552-561) sends `Z` then `CE,0,<stored addr>` on both PHYs, not bare `C` (SA-7, gap 33) |
+| SYS-PAIR-08 | Pairing a new base/remote pair needs the user's confirmation on BOTH devices (D3, owner 2026-11-24). A newly secured peer stays *pending*: only PAIR_REQ 0x90, PAIR_RSP 0x91 and PAIR_CONFIRM 0x92 pass (not ACKed, never forwarded to the PC). The base sends PAIR_REQ, the remote answers within 5 s; both show "Sparovat? Kod nnnnnn" (the same 6 digits) with a popup that starts on Ne. The bond (base: remote MAC; remote: base MAC) is stored only if the peer speaks our protocol AND the user presses Ano on both devices within 30 s | implemented 2026-11-24 (firmware merged to local main; docs only here); not bench-verified | `protocol/pairing.hpp` (`PairSession.*`), PROTOCOL.md PAIR section, base main.cpp/menu.cpp, remote main.cpp/menu.cpp |
+| SYS-PAIR-09 | Ne on either side, the 30 s decision timeout, a code mismatch, a link drop or a silent peer (5 s reply timeout): the link is dropped (K,1), the module bond removed (U,Z), nothing is stored. The rejecting side shows "Zamitnuto" (base) / "Zamitnuto, znovu" (remote pairing window, which stays open). A bonded reconnect never prompts | implemented 2026-11-24 | base main.cpp `pairStep`, remote menu.cpp |
+| SYS-PAIR-10 | A phone (any other central) cannot pair or connect to the base or the remote: module accept list plus the firmware guard (SYS-PAIR-04), and advertising stops once connected. The confirmation proves user intent and protocol, not MITM protection: `SA,2` Just Works stays | implemented 2026-11-24 | peerguard, bluetooth.cpp |
 
 ### 4.3 Normal use (playback)
 
@@ -419,7 +423,7 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | BLE supervision | 2.5 s, interval 20 ms, latency 0 |
 | Base BLE reconnect / remote advertise retry | 5 s / 30 s |
 | Unsecured-link watchdog | B after 3 s, K,1 after +3 s |
-| Pairing timeout | base search 15 s; remote "Sparovat zakl." window 60 s, refused-peer retry 3 s |
+| Pairing timeout | base search 15 s; remote "Sparovat zakl." window 60 s, refused-peer retry 3 s; confirmation: peer reply 5 s, user decision 30 s |
 | Base BLE init retry | 60 s |
 | RSSI poll | base 7 s, remote 11 s (not 10: avoids beating with the PC DIAG poll); a reading older than 25 s counts as stale (both) |
 | Max payload / frame | 128 B / 270 B |
@@ -489,7 +493,7 @@ nothing. Schematics showing an RN4870 are pre-adapter (D10).
 | Pisne / Nacitani... | Song list / loading |
 | Parovani / Hledam ovladac... / Sparovano / Nesparovano / Parovani selhalo / Cas vyprsel / Zbyva n s | Pairing screens |
 | Sparovat zakl. | Pair a new base (remote menu, opens the 60 s pairing window, SYS-PAIR-06; abbreviated, Q-TG-2) |
-| Sparovat? (Kod nnnnnn) | Confirm pairing (passkey, information only) |
+| Sparovat? Kod nnnnnn / Zamitnuto / Zamitnuto, znovu | Confirm pairing: the same 6-digit code on both devices, Ano/Ne popup starting on Ne (SYS-PAIR-08); rejected (base / remote window, SYS-PAIR-09) |
 | Vypnuti / Drzte 3 s | Switching off / hold 3 s (remote power button; same hold screen: "Vypnout organ" on the remote MF key, "Vypnuti varhan" on the base) |
 | Aktualizace / Prijem dat / Prenos do ovladace / Instalace ovladace / Chyba aktualizace / Chyba, opakujte / Nevypinejte | Firmware update screens (the last two from the base bootloader) |
 | Baterie: Napeti / Uroven / Nabiji / Nabito / Nenabiji / Vybiji | Battery page (remote) |

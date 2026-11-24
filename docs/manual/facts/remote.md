@@ -41,7 +41,7 @@ Key meaning per screen:
 | Settings (Nastaveni) | previous | next | open item / Zpet leaves | back | - | - | - |
 | Info screens (Baterie, Bluetooth, Verze FW) | - | - | dismiss | back | - | - | - |
 | Pairing window (Parovani) | - | - | leave (closes the window if still waiting) | leave | - | - | - |
-| Pairing dialog (Sparovat?) | informational only (ruling R34), no accept/reject needed; see Open questions | | | | | | |
+| Pairing dialog (Sparovat? Kod nnnnnn) | Ano/Ne popup, starts on Ne; Ano on both devices stores the base (D3, 2026-11-24) | | | | | | |
 | Player (Prehravac) | no digits: open song list; digits: cycle letter forward | no digits: open song list; digits: cycle letter backward | digits: play; none while playing: stop (or repeat anchor if Repeat selected) | delete letter, then last digit; Idle+empty: leave; playing+empty: select Stop | select Repeat (only when playing and an anchor was received) | enter code | unused |
 | Song list (Pisne) | previous row / previous page | next row / next page | play selected; leaves on "Zpet", error or empty list | leave | - | - | - |
 | Overlay Odpojeno | - | - | opens Nastaveni | ignored | ignored | ignored | ignored |
@@ -106,7 +106,7 @@ Pairing a new base (Nastaveni > Sparovat zakl.; `src/menu.cpp:247-309`):
 2. On success: "Sparovano" + the bonded address.
 3. On timeout: "Cas vyprsel" / "Nesparovano".
 4. OK or Back leaves (closes the window if still waiting). The base side also opens the window via `Bluetooth::pairRequest`.
-- The remote is bonded to a single base. Passkey dialog "Sparovat?" or "Sparovat? Kod %06lu" is informational (R34), never shown with SA,2 (`:230-240, 514-530`).
+- The remote is bonded to a single base. D3 (2026-11-24): the confirm dialog "Sparovat? Kod %06lu" (same code as on the base) is shown during the pairing handshake, starts on Ne (`showPairingConfirm`, `src/menu.cpp:590-615`); the base is stored only after Ano on both devices (30 s decision, 5 s peer reply). Ne, timeout, silent peer: link dropped, nothing stored, window stays open and says "Zamitnuto, znovu" (`notifyPairRejected`). A bonded reconnect shows no prompt (R34). A phone cannot pair or connect. User intent only, not MITM protection (`SA,2`).
 
 Player "Prehravac" (`src/player_screen.cpp`):
 - Title shows the state: "Zastaveno" (idle), "Spoustim" (starting), "Prehravam" (playing), "Zastavuji" (stopping) (`:306-309`).
@@ -188,7 +188,8 @@ FW update (remote receives an image): title "Aktualizace", hint "Prijem dat" (re
 | Zbyva %lu s | Pairing | seconds left | `:271, 296` |
 | Sparovano | Pairing | paired OK | `:278` |
 | Cas vyprsel / Nesparovano | Pairing | window expired | `:282-283` |
-| Sparovat? / Sparovat? Kod %06lu | Passkey dialog | informational | `:230, 516-518` |
+| Sparovat? Kod %06lu | Pairing confirm dialog | Ano/Ne, starts on Ne, same code as the base | `menu.cpp:253, 590-615` |
+| Zamitnuto, znovu | Pairing window | rejected, window still open | `menu.cpp:334` |
 | Ano / Ne | Dialog buttons | yes / no | `lib/ui/src/confirm_screen.cpp:114-115` |
 | Odpojeno | Overlay | title | `:121` |
 | Cekam na PC | Overlay, Song list | PC not alive | `:125`; `song_list_screen.cpp:38` |
@@ -233,7 +234,6 @@ Flows (`tools/screens/flows/01..29_*.sim`) run with `tools/screens/run-sim.sh` (
 1. Physical key legends on the case (arrows, MF, OK, ON/OFF labels): not in code. Owner to confirm.
 2. Low-battery warning below 3450 mV: SYSTEM.md lists a warning, code only records a diag entry; user sees nothing until the 3300 mV shutdown. Intended?
 3. Pause/resume (SYS-USE-09/21): remote has none. Doc gap or planned?
-4. Pairing dialog "Sparovat?": what does the user do (accept/reject)? Code says informational (R34).
 5. Is the Number screen hint "[cislice] OK/Zpet" used on the remote at all?
 6. PNG captions 01-38 not verified in `tools/screens/main.cpp`.
 7. Is the 60 s pairing window and 3 s song list timeout identical in code constants (60 s read at `menu.cpp:296` text; pairing timer constant not re-read)?
@@ -243,7 +243,7 @@ Flows (`tools/screens/flows/01..29_*.sim`) run with `tools/screens/run-sim.sh` (
 ## Possible bugs
 
 1. Low battery (3450 mV) gives no user-visible warning, only the sudden shutdown (`src/battery.cpp:150-156`).
-2. Pairing dialog shows "Sparovat?" although no choice exists (`src/menu.cpp:516-530`), may mislead.
+2. (resolved by D3, 2026-11-24: the dialog now is a real Ano/Ne confirmation.)
 3. Letter can be set before further digits: "4A" then "0" gives "40A" (`addDigit`); harmless but unexpected.
 4. Soft shutdown that keeps running waits in a blocking loop (`src/base.cpp:307-320`) until a press.
 5. Remote stuck in command mode problem is open (`CLAUDE.md`); user-visible as "Modul: mlci"/no link.

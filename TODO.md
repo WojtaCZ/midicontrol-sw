@@ -39,6 +39,7 @@ Source: audit/OWNER-ANSWERS.md, plans/2026-11-16-owner-answers-impl.md, plans/20
 - B11 DONE 2026-11-21: PC side of the base-initiated recording (dispatch RECORD_SONG start/stop, NAK BUSY on a second request, console `record` stays admin) (6e6b42d).
 - PC side of A1..A9 DONE 2026-11-16..21: A1 ad31ae1, A2 56ab445, A3 37a33e8, A4 f7843ae, A5 595327c, A6 9b4c713+e33ad31, A7 6e6b42d, A8 20a768d, A9 36d0671.
 - D13 PC side DONE 2026-11-23 (option b, owner): GET_INFO to the remote at once on the ble 0->1 STATUS_RESP edge, no protocol change (d3dbf3a). Residual: a remote reboot shorter than the STATUS poll is found only by the next boot id; the real fix is the remote's own hello (midicontroller-fw D13).
+- D3 (pairing confirmation) docs DONE 2026-11-24 (branch docs/pair-1124): SYSTEM.md SYS-PAIR-08..10 + routing/messages/strings, manual nastaveni.md + opravy.md, facts base.md + remote.md. Pending: tools/sync-system-doc.sh after merge; bench check of the Ano/Ne flow on both devices; screenshots of the new popup not taken.
 - E1 DONE (superseded): the manual was rewritten as a simplified manual (dde5c03); `grep TODO docs/manual/docs` finds no markers. The old per-file M-* list no longer applies (files ovladac/postupy/zakladna/... are gone).
 
 ### Open

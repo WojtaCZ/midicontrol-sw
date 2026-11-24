@@ -12,6 +12,8 @@ Nepomohlo-li nic z tabulky, zapište přesný text z displeje a dejte vědět sp
 | `Bez odpovedi` | Stiskněte OK znovu. |
 | `Slaba baterie` | Zbývá asi 15 % baterie. Zobrazení po 5 s zmizí (nebo ho zavřete OK či Zpět). Nabijte ovladač přes USB-C. |
 | `Chyba mereni` | Baterii se nepodařilo změřit; nezobrazuje se procento. Ovladač vypněte a zapněte, nepomůže-li to, dejte vědět správci. |
+| `Zamitnuto` / `Zamitnuto, znovu` | Spárování bylo odmítnuto (`Ne`, vypršelo 30 s nebo druhé zařízení neodpovědělo). Nic se neuložilo; spárujte znovu, viz [Nastavení](nastaveni.md#parovani). |
+| `Sparovat? Kod nnnnnn` | Porovnejte kód na obou zařízeních a potvrďte `Ano` na obou. Je-li kód jiný nebo si nejste jisti, zvolte `Ne`. |
 | `Nahradit zakl.?` | Ovladač je spárován s jinou základnou. Potvrďte jen při výměně základny. |
 | `Stav neznamy` | Ovladač neví, zda se hraje nebo nahrává (po zapnutí nebo ztrátě spojení). Počkejte na PC nebo stiskněte OK. |
 | `Nelze: hraje pisen` | Základna odmítla nahrávání, protože hraje píseň. Počkejte na konec písně. |
@@ -23,7 +25,7 @@ Nepomohlo-li nic z tabulky, zapište přesný text z displeje a dejte vědět sp
 
 ## Nové spárování
 
-Postup je v [Nastavení](nastaveni.md#parovani). Použijte ho po výměně ovladače nebo základny.
+Postup je v [Nastavení](nastaveni.md#parovani). Použijte ho po výměně ovladače nebo základny. Nepovedlo-li se spárování (`Ne`, vypršení času), nic se neuložilo a stačí postup zopakovat.
 
 ## Aktualizace firmwaru
 
