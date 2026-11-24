@@ -30,7 +30,7 @@ Source: audit/OWNER-ANSWERS.md, plans/2026-11-16-owner-answers-impl.md, plans/20
 - B2 DONE 2026-11-22: `TimeoutStopSec=300` in the unit, `stop_grace_period: 300s` in compose, unbounded `waitForUpload` (cd71521, 53274f8). Open bench bullet: stop the service during a remote update.
 - B3 DONE 2026-11-22/23: `[PLAYBACK] OrganIdleOffMs`, web chip and notice for idle-off armed / organ_power_fault; `0` = never off, documented (7f73d49, d3dbf3a).
 - B4 DONE 2026-11-22: song codes ignore leading zeros, `[FILES] SongCodeNormalise` (50b1658).
-- B5 DONE 2026-11-22: a newer SIGNAL_ANCHOR supersedes older pending anchors, supersede group 4 (3f76531). Owner 2026-11-23: did not follow the question; explained in chat (a newer anchor cancels retries of the older one so the remote never jumps back), awaiting owner OK (no code).
+- B5 DONE 2026-11-22: a newer SIGNAL_ANCHOR supersedes older pending anchors, supersede group 4 (3f76531). Owner 2026-11-23: did not follow the question; explained in chat (a newer anchor cancels retries of the older one so the remote never jumps back), owner OK 2026-11-24: CLOSED.
 - B6 DONE 2026-11-22: SIGHUP/SIGINT/interactive quit/EOF run the SIGTERM shutdown (aa866bc).
 - B7 DONE 2026-11-22/23: `POST /api/diag/ack`, Host/Origin check on writes, `[WEB] AllowedHosts` (default `midicontrol, midicontrol.local`, own `gethostname()` auto-accepted, `*` = any) (664ff50, b504bec). Docker rejects `hostname:` with `network_mode: host`, so compose carries only a comment; the host's name is auto-accepted.
 - B8 DONE 2026-11-22/23: `[ORGAN] DefaultStops` plus a default editable in the stops editor (`<PlayFolder>/_default.conf`); an existing empty song file = all off (c8abd5d, d3dbf3a). Owner 2026-11-23: an EMPTY default (empty `_default.conf` or empty `DefaultStops` key) = all off too; not set = organ left alone; `/api/stops` `"default"` is null or an array (d58494d).
@@ -43,7 +43,6 @@ Source: audit/OWNER-ANSWERS.md, plans/2026-11-16-owner-answers-impl.md, plans/20
 
 ### Open
 - Bench (owner): B2 stop during a remote update; B13 freeze test below; B7 in the real Docker deployment (hostname accepted).
-- B5: wait for the owner's OK on the explanation (no code).
 - B7 doc drift and facts/pc.md SIGNAL_RECORDING: checked 2026-11-23, both docs already correct.
 
 ### B12 Cleanup leftovers (Q2-32)
