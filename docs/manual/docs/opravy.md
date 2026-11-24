@@ -38,4 +38,6 @@ Zůstane-li základna v zavaděči USB (ABCD:1235), v konzoli počítače spusť
 
 Základna, která nemá firmware (nová, poškozená), zůstane v zavaděči a ukáže `Chybi firmware` / `Pripojte PC`. Čeká bez časového limitu, dokud počítač nenahraje firmware.
 
+![Základna bez firmwaru](img/screens/base/48_bootloader_no_firmware.png)
+
 Zavaděč umí opravit poškozenou stránku paměti po výpadku proudu při aktualizaci. Po třetí neúspěšné opravě to přestane zkoušet a základna zůstane v režimu aktualizace (`Chybi firmware`), aby se nezacyklila. Nahrajte pak firmware znovu; úspěšná aktualizace počítadlo oprav vynuluje.
