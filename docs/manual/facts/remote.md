@@ -53,7 +53,7 @@ Sources: `src/menu.cpp:456-470, 469`; `src/player_screen.cpp` (keypress, addDigi
 ## 3. Power on / off
 
 - On: ON/OFF switch (SW1) or VBUS raises 3V3_ON; firmware holds it with PA1 (`docs/HARDWARE.md` sec. 4.4).
-- MF key (D14): held 3 s = emergency organ off. After the debounce the screen "Vypnout organ" / "Drzte 3 s" with a progress bar appears; at 3 s the remote sends EMERGENCY_OFF (0x15) to the base, which switches the organ relay off and sends All Notes Off itself, without the PC (`src/base.cpp` emergencyTick, `src/menu.cpp` emergencyHoldScreen). A tap (screen not shown) is still Left. An older base NAKs the command.
+- MF key (D14): held 3 s = emergency organ off. After the debounce the screen "Vypnout organ" / "Drzte 3 s" with a progress bar appears; at 3 s the remote sends EMERGENCY_OFF (0x15) to the base, which switches the organ relay off and sends All Notes Off itself, without the PC, and forwards EMERGENCY_OFF to the PC (2026-11-24: the PC stops playback, stops and saves a recording, clears pending state, organ state off; base shows a splash, then main menu) (`src/base.cpp` emergencyTick, `src/menu.cpp` emergencyHoldScreen). A tap (screen not shown) is still Left. An older base NAKs the command.
 - Off by hand: hold ON/OFF 3 s (`HOLD_MS = 3000`, `src/base.cpp`; 5 s until 2026-11-23, item 12). After 20 ms of holding the screen "Vypnuti" / "Drzte 3 s" with a progress bar appears (percent = held ms * 100 / 3000). Releasing early cancels. At 3 s the unit powers off immediately with no message (`:302, 338`).
 - A press counts only after the ON/OFF button has been released once since boot (`armed`, `:267`).
 - Off automatically (idle): message "Vypnuti" / "Necinnost: vypnuti", shown 1 s (`src/base.cpp:329, 332-366`).
