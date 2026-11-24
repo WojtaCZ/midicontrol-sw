@@ -235,6 +235,7 @@ private:
     void doPlay(const Command& cmd);
     void doStop(bool signal);
     void doAbort();  // emergency abort (EMERGENCY_OFF): stop everything, organ state off, no SET_CURRENT
+    void cancelPendingOrganCommands();  // drop un-ACKed SET_CURRENT retries so nothing switches the organ on again
     void finishPlayback();
     // P1-9 remote resync: every SIGNAL_* to the remote goes through sendRemoteSignal().
     void sendRemoteSignal(mc::protocol::MsgType type, const std::vector<uint8_t>& payload = {});

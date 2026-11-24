@@ -2266,6 +2266,30 @@ TEST(comm_d13_get_info_to_remote_on_the_link_up_status) {
 
 // ---- Emergency abort (owner 2026-11-24): EMERGENCY_OFF 0x15 from the base ----
 
+// Safety: SET_CURRENT{on} un-ACKed (in retry), then EMERGENCY_OFF -> the retry must be cancelled, no further
+// SET_CURRENT{01} reaches the base and the organ state stays off.
+TEST(comm_emergency_off_cancels_pending_set_current_on) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    mc::log::setRegistry(&reg);
+    Config cfg = testConfig();
+    CommHandler h(cfg, [] { return std::optional<MidiPorts>{}; }, reg);
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    base.ackSetCurrentOn = false;
+    h.organOn();
+    CHECK(waitFor([&] { return countSetV(base.log(), 1) >= 1; }, 3000));
+    base.inject(ADDR_BASE, MsgType::EMERGENCY_OFF, 201);
+    CHECK(waitFor([&] { return isAck(answerTo(base.log(), 201)); }, 3000));
+    std::this_thread::sleep_for(200ms);
+    const size_t onAfterAbort = countSetV(base.log(), 1);
+    std::this_thread::sleep_for(2000ms);   // > 3 retries x 500 ms
+    CHECK_EQ(countSetV(base.log(), 1), onAfterAbort);
+    CHECK(!fieldBool(reg, status::Node::Base, "organ_power"));
+    h.shutdown();
+    mc::log::setRegistry(nullptr);
+}
+
 // Playing: ACK, player stopped, SIGNAL_STOPPED to the remote, organ state off WITHOUT a SET_CURRENT of the PC, idle-off
 // timer disarmed; a duplicate is ACKed and not executed twice; the next PLAY_SONG starts clean (organ on again).
 TEST(comm_emergency_off_while_playing_stops_clean_and_next_song_starts) {

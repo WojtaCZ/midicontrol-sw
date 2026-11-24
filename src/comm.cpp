@@ -1233,9 +1233,20 @@ void CommHandler::stopRecording(uint8_t requester) {
 // Emergency abort (EMERGENCY_OFF from the base, owner 2026-11-24): the base already did All Notes Off and the organ
 // relay itself. Queued Plays that were not started yet are dropped here; the abort itself runs on the control thread
 // after whatever it is doing (a warm-up wait is interrupted by the queued command).
+// Emergency abort: drops every un-ACKed SET_CURRENT to the base (an "on" still in its retry window would switch the
+// organ back on after the base's emergency off), and bumps the generation so older STATUS_RESPs are not trusted.
+void CommHandler::cancelPendingOrganCommands() {
+    std::lock_guard<std::mutex> lk(_mutex);
+    ++_setCurrentGen;
+    for (auto it = _pending.begin(); it != _pending.end();) {
+        it = (it->second.msgType == MsgType::SET_CURRENT && it->second.dest == ADDR_BASE) ? _pending.erase(it) : std::next(it);
+    }
+}
+
 void CommHandler::emergencyOff(uint8_t requester) {
     mc::log::warn(Node::Software, "EMERGENCY_OFF from " + nodeName(requester) +
                                       ": aborting playback and recording, organ state off.");
+    cancelPendingOrganCommands();  // at once: the retry timer must not resend an "on" while the abort is queued
     {
         std::lock_guard<std::mutex> lk(_queueMutex);
         for (auto it = _queue.begin(); it != _queue.end();) {
@@ -1993,6 +2004,7 @@ void CommHandler::doAbort() {
     const bool wasRecording = recordingActive();
     stopRecorder();
     displayClear();
+    cancelPendingOrganCommands();  // again: the stopping Player/warm-up may have sent one since emergencyOff()
     signalRecordingEnded(false);
     sendRemoteSignal(MsgType::SIGNAL_STOPPED);  // also forgets the last anchor/section info of the aborted song
     {
