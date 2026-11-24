@@ -113,6 +113,10 @@ void Dispatcher::handle(const Packet& pkt) {
             answer(_sink.startRecording(pkt.source));
             return;
         }
+        case MsgType::EMERGENCY_OFF:
+            answer(std::nullopt);  // ACKed first; a duplicate never reaches here (dedup above)
+            _sink.emergencyOff(pkt.source);
+            return;
         case MsgType::REPLAY_ANCHOR:
             answer(_sink.addVerse());
             return;

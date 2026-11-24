@@ -1230,6 +1230,21 @@ void CommHandler::stopRecording(uint8_t requester) {
     post({Command::Kind::StopRecording, {}, {}, 0, requester});
 }
 
+// Emergency abort (EMERGENCY_OFF from the base, owner 2026-11-24): the base already did All Notes Off and the organ
+// relay itself. Queued Plays that were not started yet are dropped here; the abort itself runs on the control thread
+// after whatever it is doing (a warm-up wait is interrupted by the queued command).
+void CommHandler::emergencyOff(uint8_t requester) {
+    mc::log::warn(Node::Software, "EMERGENCY_OFF from " + nodeName(requester) +
+                                      ": aborting playback and recording, organ state off.");
+    {
+        std::lock_guard<std::mutex> lk(_queueMutex);
+        for (auto it = _queue.begin(); it != _queue.end();) {
+            it = it->kind == Command::Kind::Play ? _queue.erase(it) : it + 1;
+        }
+    }
+    post({Command::Kind::Abort, {}, {}, 0, requester});
+}
+
 std::optional<NakReason> CommHandler::busyReason() {
     if (updateInProgress()) return NakReason::BUSY;
     if (recordingActive()) return NakReason::BUSY;  // A7: no second recording, no song during a recording
@@ -1623,6 +1638,9 @@ void CommHandler::controlLoop() {
                 }
                 doStop(true);
                 break;
+            case Command::Kind::Abort:
+                doAbort();
+                break;
             case Command::Kind::StopRecording:
                 // A7: RECORD_SONG [0]. Ends only the recording; a playing song is left alone.
                 if (recordingActive()) {
@@ -1965,6 +1983,32 @@ void CommHandler::doStop(bool signal) {
         playbackEnded("stopped", "songs_stopped");
         mc::log::info(Node::Software, "Playback stopped.");
     }
+}
+
+// Emergency abort: like a normal stop (player thread joined, All Notes Off by Player::stop, recorder terminated so
+// arecordmidi writes and closes its file: nothing is lost), but the PC does not touch the organ relay (the base has
+// switched it off already): only its own state follows, and the idle-off timer stays disarmed.
+void CommHandler::doAbort() {
+    const bool wasPlaying = releasePlayer();
+    const bool wasRecording = recordingActive();
+    stopRecorder();
+    displayClear();
+    signalRecordingEnded(false);
+    sendRemoteSignal(MsgType::SIGNAL_STOPPED);  // also forgets the last anchor/section info of the aborted song
+    {
+        std::lock_guard<std::mutex> lk(_organMutex);
+        disarmIdleOff();
+        _organOn.store(false);
+        _status.set(Node::Base, "organ_power", false);
+        _organIntent = -1;  // a pending PC "on" must not be re-asserted against the base's off
+        _organReasserts = 0;
+    }
+    releasePlayClaimIfIdle();
+    if (wasPlaying) playbackEnded("aborted (emergency off)", "songs_stopped");
+    mc::log::warn(Node::Software, std::string("Emergency abort done") +
+                                      (wasPlaying ? ": playback stopped" : "") +
+                                      (wasRecording ? ": recording stopped and saved" : "") +
+                                      (!wasPlaying && !wasRecording ? " (nothing was running)" : "") + ".");
 }
 
 }  // namespace mc

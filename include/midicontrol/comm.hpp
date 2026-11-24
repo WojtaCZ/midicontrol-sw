@@ -184,7 +184,7 @@ private:
     };
 
     struct Command {
-        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset, IdleOff, RemoteResync, StopRecording } kind;
+        enum class Kind { Play, Stop, Finished, SerialLost, Shutdown, StartupReset, IdleOff, RemoteResync, StopRecording, Abort } kind;
         std::string code;
         std::string path;
         uint64_t generation = 0;
@@ -197,6 +197,7 @@ private:
     void stopSong(uint8_t requester) override;
     std::optional<mc::protocol::NakReason> startRecording(uint8_t requester) override;
     void stopRecording(uint8_t requester) override;
+    void emergencyOff(uint8_t requester) override;
     std::optional<mc::protocol::NakReason> addVerse() override;
     std::vector<uint8_t> songListPage(size_t offset) override;
 
@@ -233,6 +234,7 @@ private:
     bool waitInterruptible(int ms);
     void doPlay(const Command& cmd);
     void doStop(bool signal);
+    void doAbort();  // emergency abort (EMERGENCY_OFF): stop everything, organ state off, no SET_CURRENT
     void finishPlayback();
     // P1-9 remote resync: every SIGNAL_* to the remote goes through sendRemoteSignal().
     void sendRemoteSignal(mc::protocol::MsgType type, const std::vector<uint8_t>& payload = {});

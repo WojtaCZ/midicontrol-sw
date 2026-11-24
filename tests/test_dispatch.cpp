@@ -23,6 +23,7 @@ struct FakeSink : CommandSink {
     std::vector<std::string> plays;
     int stops = 0;
     int addVerses = 0;
+    int emergencies = 0;
     bool playing = false;
     std::optional<NakReason> playResult;
     std::vector<size_t> listOffsets;
@@ -32,6 +33,7 @@ struct FakeSink : CommandSink {
         return playResult;
     }
     void stopSong(uint8_t) override { ++stops; }
+    void emergencyOff(uint8_t) override { ++emergencies; }
     std::optional<NakReason> addVerse() override {
         ++addVerses;
         return playing ? std::nullopt : std::optional<NakReason>(NakReason::NOT_PLAYING);
@@ -281,4 +283,17 @@ TEST(dispatch_remembers_a_few_frames_per_source_not_forever) {
     CHECK_EQ(r.sink.stops, 20);
     r.rx(ADDR_REMOTE, 1, MsgType::STOP_SONG);  // long gone (the id space wraps): a new frame
     CHECK_EQ(r.sink.stops, 21);
+}
+
+TEST(dispatch_emergency_off_acked_executed_once) {
+    Rig r;
+    r.rx(ADDR_BASE, 7, MsgType::EMERGENCY_OFF);
+    CHECK_EQ(r.sink.emergencies, 1);
+    CHECK_EQ(r.sent.size(), 1u);
+    CHECK(isAck(r.sent[0], ADDR_BASE, 7));
+    r.rx(ADDR_BASE, 7, MsgType::EMERGENCY_OFF);  // retry after a lost ACK: ACKed again, not executed again
+    CHECK_EQ(r.sink.emergencies, 1);
+    CHECK_EQ(r.sent.size(), 2u);
+    CHECK(isAck(r.sent[1], ADDR_BASE, 7));
+    CHECK(Dispatcher::needsAck(MsgType::EMERGENCY_OFF));
 }

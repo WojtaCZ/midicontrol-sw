@@ -13,6 +13,7 @@ const char* msgTypeName(MsgType type) {
         case MsgType::RECORD_SONG: return "RECORD_SONG";
         case MsgType::NOW_PLAYING_INFO: return "NOW_PLAYING_INFO";
         case MsgType::REPLAY_ANCHOR: return "REPLAY_ANCHOR";
+        case MsgType::EMERGENCY_OFF: return "EMERGENCY_OFF";
         case MsgType::GET_SONG_LIST: return "GET_SONG_LIST";
         case MsgType::SONG_LIST_RESP: return "SONG_LIST_RESP";
         case MsgType::SIGNAL_PLAYING: return "SIGNAL_PLAYING";

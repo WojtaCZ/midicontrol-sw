@@ -40,6 +40,9 @@ public:
         return mc::protocol::NakReason::UNKNOWN_MSG;
     }
     virtual void stopRecording(uint8_t requester) { (void)requester; }
+    // Emergency abort (EMERGENCY_OFF 0x15 from the base, after the remote's MF hold): stop playback and recording,
+    // clear queued state, organ state OFF. Idempotent. Default: nothing to abort.
+    virtual void emergencyOff(uint8_t requester) { (void)requester; }
     // Add-verse; NOT_PLAYING when idle.
     virtual std::optional<mc::protocol::NakReason> addVerse() = 0;
     // SONG_LIST_RESP payload for the given offset.

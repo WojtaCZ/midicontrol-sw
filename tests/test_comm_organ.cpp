@@ -2263,3 +2263,76 @@ TEST(comm_d13_get_info_to_remote_on_the_link_up_status) {
     h.shutdown();
     CHECK(got);
 }
+
+// ---- Emergency abort (owner 2026-11-24): EMERGENCY_OFF 0x15 from the base ----
+
+// Playing: ACK, player stopped, SIGNAL_STOPPED to the remote, organ state off WITHOUT a SET_CURRENT of the PC, idle-off
+// timer disarmed; a duplicate is ACKed and not executed twice; the next PLAY_SONG starts clean (organ on again).
+TEST(comm_emergency_off_while_playing_stops_clean_and_next_song_starts) {
+    FakeBase base;
+    status::StatusRegistry reg([] { return int64_t(0); });
+    mc::log::setRegistry(&reg);
+    Config cfg = songConfig();
+    base.ble = true;
+    CommHandler h(cfg, [] { return fakePorts(); }, reg);
+    h.setMidiSinkForTest([](const std::vector<uint8_t>&) {});
+    CHECK(h.connect(base.path()));
+    std::this_thread::sleep_for(300ms);
+    statusNow(h);
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] { return h.isPlaying(); }, 15000));
+    const size_t setBefore = countSetV(base.log(), 1) + countSetV(base.log(), 0);
+    const size_t m = base.log().size();
+    base.inject(ADDR_BASE, MsgType::EMERGENCY_OFF, 200);
+    CHECK(waitFor([&] { return !h.isPlaying(); }, 5000));
+    CHECK(isAck(answerTo(base.log(), 200)));
+    CHECK(waitFor([&] { return cntTo(base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_REMOTE) >= 1; }, 3000));
+    CHECK(!fieldBool(reg, status::Node::Base, "organ_power"));
+    CHECK(!fieldBool(reg, status::Node::Base, "organ_idle_off_armed"));
+    CHECK(hasEvent(reg, status::Node::Software, "EMERGENCY_OFF"));
+    // duplicate (same PacketId): ACKed again, not executed again
+    const size_t stopped = cntTo(base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_REMOTE);
+    base.inject(ADDR_BASE, MsgType::EMERGENCY_OFF, 200);
+    std::this_thread::sleep_for(500ms);
+    CHECK_EQ(cntTo(base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_REMOTE), stopped);
+    // the PC itself sent no SET_CURRENT because of the abort
+    CHECK_EQ(countSetV(base.log(), 1) + countSetV(base.log(), 0), setBefore);
+    // next song starts clean
+    CHECK(!h.playSong("406A").has_value());
+    CHECK(waitFor([&] { return h.isPlaying(); }, 15000));
+    CHECK(countSetV(base.log(), 1) > 0);  // organ was off in the PC's view: switched on again
+    h.stopSong();
+    h.shutdown();
+    mc::log::setRegistry(nullptr);
+}
+
+// Recording: the recorder is terminated (arecordmidi saves its file on SIGTERM), SIGNAL_STOPPED goes to the base.
+TEST(comm_emergency_off_while_recording_stops_the_recorder) {
+    RecRig r(2);
+    const uint8_t rec = r.send(MsgType::RECORD_SONG, {0x01});
+    CHECK(isAck(r.answer(rec)));
+    CHECK(waitFor([&] { return fieldBool(r.reg, status::Node::Software, "recording"); }, 5000));
+    const size_t m = r.base.log().size();
+    const uint8_t id = r.send(MsgType::EMERGENCY_OFF);
+    CHECK(isAck(r.answer(id)));
+    CHECK(waitFor([&] { return !fieldBool(r.reg, status::Node::Software, "recording"); }, 5000));
+    CHECK_EQ(r.fr.lines().size(), size_t(1));
+    CHECK(waitFor([&] { return cntTo(r.base.log(), m, MsgType::SIGNAL_STOPPED, ADDR_BASE) >= 1; }, 5000));
+    r.h->shutdown();
+}
+
+// Idle: only ACK + log, nothing else is sent to the remote and the organ is not touched.
+TEST(comm_emergency_off_while_idle_only_acks) {
+    RecRig r(2);
+    mc::log::setRegistry(&r.reg);
+    const size_t m = r.base.log().size();
+    const size_t sets = countSetV(r.base.log(), 0) + countSetV(r.base.log(), 1);
+    const uint8_t id = r.send(MsgType::EMERGENCY_OFF);
+    CHECK(isAck(r.answer(id)));
+    CHECK(waitFor([&] { return hasEvent(r.reg, status::Node::Software, "EMERGENCY_OFF"); }, 3000));
+    std::this_thread::sleep_for(300ms);
+    CHECK_EQ(countSetV(r.base.log(), 0) + countSetV(r.base.log(), 1), sets);
+    CHECK_EQ(cntTo(r.base.log(), m, MsgType::SIGNAL_PLAYING, ADDR_REMOTE), size_t(0));
+    r.h->shutdown();
+    mc::log::setRegistry(nullptr);
+}
