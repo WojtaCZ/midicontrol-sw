@@ -114,7 +114,7 @@ Player "Prehravac" (`src/player_screen.cpp`):
 - Info line: transient message for 2.5 s (`MESSAGE_MS = 2500`) or the section label. Label "Sloka 2" is shown as "Sloka: 2", "Sloka 2 +3" as "Sloka: 2 (x3)" (`formatSection`, `:89-91`). 18 characters, longer labels scroll (`:374`).
 - Bottom icon buttons (no text): Play while entering; Stop while playing, plus Repeat once an anchor is known.
 
-Song list "Pisne" (`src/song_list_screen.cpp`): loading "Nacitani..." / "Cekam na PC"; timeout 3 s (`inc/song_list_screen.hpp:36`); pages up to 32 (`:35`); last row "Zpet"; empty "Zadne pisne"; errors Zaneprazdneno / Nepripojeno / PC nedostupne / Odmitnuto / Bez odpovedi. No retry, leave and open again.
+Song list "Pisne" (`src/song_list_screen.cpp`): loading "Nacitani..." / "Cekam na PC", shown only if the answer takes over 1 s (`LOADING_SHOW_MS`; before that the bare "Pisne" frame, or the last page while paging); timeout 3 s (`inc/song_list_screen.hpp:36`); pages up to 32 (`:35`); last row "Zpet"; empty "Zadne pisne"; errors Zaneprazdneno / Nepripojeno / PC nedostupne / Odmitnuto / Bez odpovedi. No retry, leave and open again.
 
 Overlay "Odpojeno" (since 2026-11-23 it also shows the status icons, as the main menu does): pushed only over the main menu when the base is not alive ("Cekam na zakladnu") or the PC is not alive ("Cekam na PC"); second line "Stisk: Nastaveni". Disappears by itself when both are back. Only OK works (opens Nastaveni) (`src/menu.cpp:120-143, 380, 469`).
 

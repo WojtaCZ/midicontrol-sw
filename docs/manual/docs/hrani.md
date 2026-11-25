@@ -26,7 +26,7 @@ Na základně vyberte `Prehraj`: otevře se seznam písní. Poslední položkou 
 
 ## Nouzové vypnutí varhan { #nouzove-vypnuti }
 
-Když se cokoli vymkne z ruky (visí tóny, hraje špatná píseň), podržte na ovladači tlačítko **MF** na 3 s. Ovladač ukáže `Vypnout organ` / `Drzte 3 s` s ukazatelem postupu. Po 3 s je to **nouzové přerušení**: základna sama okamžitě vypne všechny tóny a varhany (funguje i bez počítače) a pošle příkaz počítači. Počítač zastaví přehrávání písně, ukončí a **uloží** případný záznam (nic se neztratí), zahodí rozdělané stavy a je připraven na novou píseň. Základna na chvíli ukáže zprávu o přerušení a vrátí se do hlavní nabídky, ovladač také. Další píseň pak spustíte jako obvykle. Krátký stisk MF dělá dál to, co dřív (doleva), a pustíte-li MF před uplynutím 3 s, nestane se nic.
+Když se cokoli vymkne z ruky (visí tóny, hraje špatná píseň), podržte na ovladači tlačítko **MF** na 3 s. Ovladač ukáže `Vypnout organ` / `Drzte 3 s` s ukazatelem postupu. Po 3 s je to **nouzové přerušení**: základna sama okamžitě vypne všechny tóny a varhany (funguje i bez počítače) a pošle příkaz počítači. Počítač zastaví přehrávání písně, ukončí a **uloží** případný záznam (nic se neztratí), zahodí rozdělané stavy a je připraven na novou píseň. Základna na 5 s (nebo do stisku tlačítka) ukáže velkým písmem `Nouzove` / `Preruseno` a vrátí se do hlavní nabídky, ovladač také. Další píseň pak spustíte jako obvykle. Krátký stisk MF dělá dál to, co dřív (doleva), a pustíte-li MF před uplynutím 3 s, nestane se nic.
 
 ![Nouzové vypnutí varhan](img/screens/remote/39_emergency_hold.png)
 
